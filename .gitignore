@@ -1,0 +1,47 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+appsettings.Development.json
+appsettings.*.local.json
+
+# Node / JS
+node_modules/
+dist/
+dist-electron/
+release/
+out/
+.vite/
+coverage/
+*.tsbuildinfo
+.expo/
+.expo-shared/
+web-build/
+
+# Agente / instalador
+*.msi
+*.wixpdb
+*.db
+*.sqlite
+
+# Secretos
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+*.key
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Instalador del agente (se generan al compilar)
+agent/build/host/
+agent/release/
+
+# Adjuntos de tickets guardados por el API en desarrollo
+App_Data/

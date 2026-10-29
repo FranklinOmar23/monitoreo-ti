@@ -1,0 +1,26 @@
+{
+  "name": "@monitoreoti/agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agente MonitoreoTI: servicio de Windows (modo servicio) e interfaz en la sesión del usuario (modo UI)",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "service": "node out/main/service.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build:host": "dotnet publish host/MonitoreoTI.AgentHost -c Release -o build/host",
+    "installer": "npm run build && npm run build:host && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "@monitoreoti/shared": "0.1.0"
+  }
+}

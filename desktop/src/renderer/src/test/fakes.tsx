@@ -1,0 +1,300 @@
+import type { ReactNode } from 'react';
+import { render } from '@testing-library/react';
+import type {
+  AlertList,
+  AlertListItem,
+  AuthApi,
+  CurrentSession,
+  DashboardData,
+  MachineDetail,
+  MachineList,
+  MachineListItem,
+  NetworkApi,
+  PanelApi,
+  StatusCounts,
+  TicketList,
+  TicketListItem,
+} from '@monitoreoti/shared';
+import { SessionProvider } from '../auth/SessionProvider';
+import { PanelDataProvider } from '../data/PanelData';
+
+export const session: CurrentSession = {
+  usuario: { id: 1, nombre: 'Ana Martínez', correo: 'admin@caribe.test', esSuperadmin: false },
+  empresa: { id: 1, nombre: 'Grupo Comercial Caribe', rol: 'Administrador' },
+  permisos: ['equipos.ver', 'dashboard.ver'],
+  empresas: [{ id: 1, nombre: 'Grupo Comercial Caribe', rol: 'Administrador' }],
+};
+
+export const counts = (healthy = 2, warning = 1, critical = 1, disconnected = 1): StatusCounts => {
+  const total = healthy + warning + critical + disconnected;
+  return { total, healthy, warning, critical, disconnected, online: total - disconnected };
+};
+
+const now = new Date().toISOString();
+
+export function machine(overrides: Partial<MachineListItem> = {}): MachineListItem {
+  return {
+    id: 1,
+    name: 'CONTA-03',
+    detail: 'Windows 11 Pro',
+    branchId: 1,
+    branchName: 'Santo Domingo',
+    type: 'computadora',
+    ipAddress: '10.10.20.31',
+    status: 'critico',
+    metrics: { at: now, cpu: 38, ram: 71, disk: 92, temperature: null },
+    lastReportAt: now,
+    ...overrides,
+  };
+}
+
+export const machineList = (items: MachineListItem[]): MachineList => ({
+  page: { items, total: items.length, page: 1, pageSize: 50 },
+  counts: counts(),
+  operatingSystems: ['Windows 11 Pro'],
+});
+
+export function machineDetail(overrides: Partial<MachineDetail> = {}): MachineDetail {
+  return {
+    id: 1,
+    qrCode: '11111111-2222-3333-4444-555555555555',
+    name: 'CONTA-03',
+    type: 'computadora',
+    status: 'critico',
+    brand: 'Dell',
+    model: 'OptiPlex 7010',
+    serialNumber: 'DL7010-0003',
+    operatingSystem: 'Windows 11 Pro',
+    ipAddress: '10.10.20.31',
+    macAddress: '3C:52:82:A1:00:03',
+    assignedTo: 'Rosa Guzmán',
+    purchaseDate: null,
+    warrantyUntil: null,
+    branchId: 1,
+    branchName: 'Santo Domingo',
+    departmentId: null,
+    departmentName: 'Contabilidad',
+    lastReportAt: now,
+    createdAt: now,
+    agentVersion: '0.1.0',
+    hasAgent: true,
+    metrics: { at: now, cpu: 38, ram: 71, disk: 92, temperature: 64 },
+    components: [
+      {
+        id: 1,
+        type: 'disco',
+        description: 'SSD Samsung 512 GB',
+        capacity: '477 GB',
+        health: 'critico',
+        detail: '148 sectores dañados · 41 °C',
+        updatedAt: now,
+      },
+    ],
+    problems: [
+      {
+        id: 9,
+        level: 'critico',
+        message: 'Disco con sectores dañados',
+        detail:
+          'El disco SSD Samsung 512 GB reporta: 148 sectores dañados · 41 °c. Puede perder archivos o dejar de arrancar.',
+        advice: 'Respalda los datos hoy y programa el cambio del disco.',
+        source: 'SMART · 148 sectores dañados · 41 °C',
+        createdAt: now,
+      },
+    ],
+    openErrorCount: 2,
+    ramTotalMb: 16384,
+    processCount: 142,
+    volumes: [{ drive: 'C:', label: 'Sistema', totalGb: 476, freeGb: 39, updatedAt: now }],
+    ...overrides,
+  };
+}
+
+export const dashboard: DashboardData = {
+  kpis: { counts: counts(214, 14, 3, 17), registeredThisWeek: 6, criticalWithOpenTicket: 2, disconnectedOver24h: 4 },
+  fleetHealth: [{ date: now.slice(0, 10), healthy: 214, warning: 14, critical: 3, disconnected: 17 }],
+  branches: [{ id: 1, name: 'Santo Domingo', province: null, counts: counts() }],
+  recentAlerts: [],
+  topProblems: [{ id: 1, name: 'CONTA-03', status: 'critico', summary: 'Disco con sectores dañados', events: 23 }],
+};
+
+export function alertItem(overrides: Partial<AlertListItem> = {}): AlertListItem {
+  return {
+    id: 41,
+    level: 'critico',
+    status: 'nueva',
+    message: 'Disco C: al 97 % de su capacidad',
+    source: 'Unidad C: · 97 / 100 GB',
+    machineId: 1,
+    machineName: 'CONTA-03',
+    branchId: 1,
+    branchName: 'Santo Domingo',
+    handledBy: null,
+    createdAt: now,
+    resolvedAt: null,
+    automatic: true,
+    ...overrides,
+  };
+}
+
+export function alertList(items: AlertListItem[]): AlertList {
+  const open = items.filter((a) => a.status !== 'resuelta');
+  return {
+    page: { items, total: items.length, page: 1, pageSize: 50 },
+    counts: {
+      open: open.length,
+      new: open.filter((a) => a.status === 'nueva').length,
+      inProgress: open.filter((a) => a.status === 'en_proceso').length,
+      critical: open.filter((a) => a.level === 'critico').length,
+      warning: open.filter((a) => a.level === 'advertencia').length,
+      resolvedLast24h: items.length - open.length,
+    },
+  };
+}
+
+export function ticketItem(overrides: Partial<TicketListItem> = {}): TicketListItem {
+  return {
+    id: 7,
+    title: 'Cambiar disco de RRHH-02',
+    priority: 'alta',
+    status: 'abierto',
+    machineId: 1,
+    machineName: 'RRHH-02',
+    branchName: 'Santo Domingo',
+    alertId: null,
+    assignedToId: null,
+    assignedTo: null,
+    createdBy: 'Ana Pérez',
+    createdAt: now,
+    closedAt: null,
+    commentCount: 0,
+    ...overrides,
+  };
+}
+
+export function ticketList(items: TicketListItem[]): TicketList {
+  const of = (s: TicketListItem['status']) => items.filter((t) => t.status === s).length;
+  const active = items.filter((t) => t.status !== 'resuelto' && t.status !== 'cerrado');
+  return {
+    page: { items, total: items.length, page: 1, pageSize: 300 },
+    counts: {
+      open: of('abierto'),
+      inProgress: of('en_proceso'),
+      onHold: of('en_espera'),
+      resolved: of('resuelto'),
+      closed: of('cerrado'),
+      mine: 0,
+      unassigned: active.filter((t) => t.assignedToId === null).length,
+    },
+  };
+}
+
+/** API del data center falsa: listas vacías; el resto falla salvo lo que la prueba defina. */
+export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    rooms: () => Promise.resolve([]),
+    racks: () => Promise.resolve([]),
+    rack: missing,
+    models: () => Promise.resolve([]),
+    devices: () => Promise.resolve([]),
+    device: missing,
+    outlets: () => Promise.resolve([]),
+    cables: () => Promise.resolve([]),
+    path: missing,
+    saveRoom: missing,
+    deleteRoom: missing,
+    saveRack: missing,
+    deleteRack: missing,
+    saveModel: missing,
+    saveDevice: missing,
+    placeDevice: missing,
+    retireDevice: missing,
+    savePort: missing,
+    saveOutlet: missing,
+    deleteOutlet: missing,
+    createCable: missing,
+    deleteCable: missing,
+    ...overrides,
+  };
+}
+
+/** API del panel falsa: cada método falla salvo los que la prueba defina. */
+export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    red: fakeNetworkApi(),
+    dashboard: missing,
+    machines: missing,
+    machine: missing,
+    metrics: () => Promise.resolve([]),
+    software: missing,
+    // La ficha consulta procesos y red desde el Resumen: vacíos salvo que la prueba los defina.
+    interfaces: () => Promise.resolve([]),
+    events: missing,
+    processes: () => Promise.resolve([]),
+    services: () => Promise.resolve([]),
+    history: missing,
+    qr: missing,
+    branches: () => Promise.resolve([]),
+    branch: missing,
+    createMachine: missing,
+    updateMachine: missing,
+    retireMachine: missing,
+    qrLabels: missing,
+    departments: () => Promise.resolve([]),
+    companyUsers: () => Promise.resolve([]),
+    createBranch: missing,
+    updateBranch: missing,
+    installers: () => Promise.resolve([]),
+    createInstaller: missing,
+    revokeInstaller: missing,
+    deleteInstaller: missing,
+    pendingAgents: () => Promise.resolve([]),
+    approveAgent: missing,
+    rejectAgent: missing,
+    // La estructura pide el resumen de alertas para la insignia del menú.
+    alerts: () => Promise.resolve(alertList([])),
+    alert: missing,
+    attendAlert: missing,
+    resolveAlert: missing,
+    rules: () => Promise.resolve([]),
+    saveRule: missing,
+    deleteRule: missing,
+    tickets: () => Promise.resolve(ticketList([])),
+    ticket: missing,
+    technicians: () => Promise.resolve([]),
+    createTicket: missing,
+    updateTicket: missing,
+    setTicketStatus: missing,
+    assignTicket: missing,
+    commentTicket: missing,
+    attachToTicket: missing,
+    ticketAttachment: missing,
+    ...overrides,
+  };
+}
+
+const fakeAuth: AuthApi = {
+  login: () => Promise.reject(new Error('no esperado')),
+  verifyTwoFactor: () => Promise.reject(new Error('no esperado')),
+  confirmTwoFactorSetup: () => Promise.reject(new Error('no esperado')),
+  selectCompany: () => Promise.reject(new Error('no esperado')),
+  refresh: () => Promise.reject(new Error('no esperado')),
+  logout: () => Promise.resolve(),
+  session: () => Promise.resolve(session),
+  switchCompany: () => Promise.reject(new Error('no esperado')),
+  requestPasswordReset: () => Promise.resolve(),
+  resetPassword: () => Promise.resolve(),
+};
+
+/** Renderiza con sesión y datos falsos (sin servidor ni tiempo real). */
+export function renderWithPanel(ui: ReactNode, api: PanelApi) {
+  return render(
+    <SessionProvider api={fakeAuth}>
+      <PanelDataProvider api={api} realtime={false}>
+        {ui}
+      </PanelDataProvider>
+    </SessionProvider>,
+  );
+}

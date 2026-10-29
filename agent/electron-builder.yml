@@ -1,0 +1,44 @@
+# Instalador del agente: MonitoreoTI-Agente-Setup.exe (NSIS). Se genera con `npm run installer -w @monitoreoti/agent`.
+appId: do.monitoreoti.agente
+productName: MonitoreoTI Agente
+executableName: MonitoreoTI Agente
+copyright: MonitoreoTI
+
+directories:
+  output: release
+  buildResources: build
+
+# Electron ya está en node_modules del monorepo: no se descarga otra copia.
+electronDist: ../node_modules/electron/dist
+electronVersion: 45.0.0
+
+files:
+  - out/**
+  - package.json
+# Sin asar: el servicio corre electron.exe en modo Node (ELECTRON_RUN_AS_NODE) con resources\app\out\main\service.js.
+asar: false
+
+extraResources:
+  - from: build/host/MonitoreoTI.AgentHost.exe
+    to: host/MonitoreoTI.AgentHost.exe
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Nombre fijo: es el que entrega el servidor en /api/v1/instaladores/descarga.
+  artifactName: MonitoreoTI-Agente-Setup.${ext}
+  # Sin certificado de firma todavía: Windows SmartScreen mostrará "editor desconocido".
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  perMachine: true
+  allowElevation: true
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: false
+  createStartMenuShortcut: false
+  runAfterFinish: false
+  include: build/installer.nsh
+  uninstallDisplayName: MonitoreoTI Agente
+  language: '3082'

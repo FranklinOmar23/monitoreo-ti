@@ -1,0 +1,52 @@
+import { Icon, type IconName } from './Icon';
+
+export interface NavItem {
+  id: string;
+  label: string;
+  icon: IconName;
+  /** Conteo mostrado como insignia (alertas abiertas, tickets...). */
+  badge?: number;
+}
+
+interface SidebarProps {
+  items: readonly NavItem[];
+  activeId: string;
+  onNavigate: (id: string) => void;
+  /** Empresa de la sesión; el detalle (sucursales, equipos) se muestra cuando se conoce. */
+  empresa: { nombre: string; detalle?: string };
+}
+
+export function Sidebar({ items, activeId, onNavigate, empresa }: SidebarProps) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <span className="brand-mark">
+          <Icon name="logo" size={20} />
+        </span>
+        <span className="brand-name">Centinela</span>
+      </div>
+
+      <nav className="sidebar-nav" aria-label="Navegación principal">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="nav-item"
+            aria-current={item.id === activeId ? 'page' : undefined}
+            onClick={() => onNavigate(item.id)}
+          >
+            <Icon name={item.icon} />
+            <span className="nav-label">{item.label}</span>
+            {item.badge !== undefined && <span className="nav-badge mono">{item.badge}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="sidebar-company">
+        <span className="eyebrow">Empresa</span>
+        <strong>{empresa.nombre}</strong>
+        {empresa.detalle && <span className="sidebar-company-meta">{empresa.detalle}</span>}
+      </div>
+    </aside>
+  );
+}
