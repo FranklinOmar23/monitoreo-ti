@@ -82,6 +82,12 @@ internal sealed class MachineConfiguration : IEntityTypeConfiguration<Machine>
         b.Property(x => x.LastReportAt).HasColumnName("ultimo_reporte");
         b.Property(x => x.RamTotalMb).HasColumnName("ram_total_mb");
         b.Property(x => x.ProcessCount).HasColumnName("procesos_total");
+        b.Property(x => x.SnmpVersion).HasColumnName("snmp_version").HasMaxLength(3).IsUnicode(false);
+        b.Property(x => x.SnmpUser).HasColumnName("snmp_usuario").HasMaxLength(100);
+        b.Property(x => x.SnmpEncryptedCredential).HasColumnName("snmp_credencial_cifrada");
+        b.Property(x => x.CollectorAgentId).HasColumnName("recolector_id");
+        b.Property(x => x.LastSnmpPollAt).HasColumnName("ultimo_sondeo_snmp");
+        b.Property(x => x.LastSnmpError).HasColumnName("ultimo_error_snmp").HasMaxLength(300);
         b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
 
         b.HasAlternateKey(x => new { x.CompanyId, x.Id });

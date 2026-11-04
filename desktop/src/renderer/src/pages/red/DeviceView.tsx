@@ -8,7 +8,7 @@ import { Modal } from '@components/Modal';
 import { StatusBadge } from '@components/StatusBadge';
 import { dateTime, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
-import { CableDialog, DeviceForm, PathDialog, PortForm } from './NetworkForms';
+import { CableDialog, DeviceForm, PathDialog, PortAssignDialog, PortForm } from './NetworkForms';
 import {
   DEVICE_STATUS_LABEL,
   DEVICE_STATUS_TONE,
@@ -17,6 +17,7 @@ import {
   PORT_TYPE_LABEL,
   portTone,
 } from './netLabels';
+import { NetworkHistory } from './NetworkHistory';
 
 interface DeviceViewProps {
   deviceId: number;
@@ -65,6 +66,9 @@ export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceVi
           <div className="ficha-grid">
             <div className="ficha-main">
               <PortGrid device={query.data} selected={selected} onSelect={setSelected} />
+              <Card title="Historial">
+                <NetworkHistory entity="dispositivos_red" entityId={deviceId} />
+              </Card>
             </div>
             <div className="ficha-side">
               {selected !== null && query.data.ports.some((p) => p.id === selected) ? (
@@ -129,9 +133,15 @@ function DeviceHeader({
             <li>
               <Icon name="clock" size={14} />
               {device.lastPolledAt ? `Último sondeo ${timeAgo(device.lastPolledAt)}` : 'Sin sondeo SNMP todavía'}
+              {device.collectorName ? ` · lo consulta ${device.collectorName}` : ' · sin recolector asignado'}
             </li>
           )}
         </ul>
+        {device.lastError && (
+          <p className="auth-error device-error" role="alert">
+            Último sondeo fallido: {device.lastError}
+          </p>
+        )}
       </div>
       {canEdit && device.status !== 'baja' && (
         <div className="ficha-actions">
@@ -247,7 +257,7 @@ function PortPanel({
 }) {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const [dialog, setDialog] = useState<'editar' | 'cable' | 'ruta' | null>(null);
+  const [dialog, setDialog] = useState<'editar' | 'cable' | 'ruta' | 'asignar' | null>(null);
   const unplug = useMutation({
     mutationFn: (id: number) => api.red.deleteCable(id),
     onSuccess: () => void queries.invalidateQueries({ queryKey: ['red'] }),
@@ -298,7 +308,7 @@ function PortPanel({
           <dd>{port.cableTo ?? 'Sin cable documentado'}</dd>
         </div>
         <div>
-          <dt>Equipo detectado</dt>
+          <dt>{port.isManualAssignment ? 'Equipo (asignado a mano)' : 'Equipo detectado'}</dt>
           <dd>
             {port.machineId !== null ? (
               <button type="button" className="link-quiet mono" onClick={() => onOpenEquipo(port.machineId!)}>
@@ -320,6 +330,11 @@ function PortPanel({
             Editar puerto
           </button>
         )}
+        {canEdit && !passive && (
+          <button type="button" className="btn btn-outline" onClick={() => setDialog('asignar')}>
+            Asignar a mano
+          </button>
+        )}
         {canConnect && (
           <button type="button" className="btn btn-primary" onClick={() => setDialog('cable')}>
             Conectar cable
@@ -338,6 +353,7 @@ function PortPanel({
       </div>
       {dialog === 'editar' && <PortForm port={port} onClose={() => setDialog(null)} />}
       {dialog === 'cable' && <CableDialog device={device} port={port} onClose={() => setDialog(null)} />}
+      {dialog === 'asignar' && <PortAssignDialog device={device} port={port} onClose={() => setDialog(null)} />}
       {dialog === 'ruta' && (
         <PathDialog
           from={{ puerto: port.id }}

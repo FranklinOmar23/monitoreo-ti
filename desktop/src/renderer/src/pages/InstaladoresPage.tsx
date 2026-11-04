@@ -9,6 +9,7 @@ import { Tabs } from '@components/Tabs';
 import { useSession } from '../auth/SessionProvider';
 import { dateTime, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
+import { AgentUpdates } from './AgentUpdates';
 
 const STATE_LABEL: Record<InstallerToken['state'], { label: string; status?: string }> = {
   activo: { label: 'Activo', status: 'sano' },
@@ -48,9 +49,12 @@ export function InstaladoresPage() {
         items={[
           { id: 'instaladores', label: 'Tokens de instalación' },
           { id: 'pendientes', label: 'Pendientes de aprobación', count: pending.data?.length },
+          { id: 'actualizacion', label: 'Actualización del agente' },
         ]}
       />
-      {tab === 'instaladores' ? <TokenList /> : <PendingList query={pending} />}
+      {tab === 'instaladores' && <TokenList />}
+      {tab === 'pendientes' && <PendingList query={pending} />}
+      {tab === 'actualizacion' && <AgentUpdates />}
 
       {creating && (
         <TokenForm

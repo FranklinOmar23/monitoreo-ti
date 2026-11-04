@@ -11,6 +11,12 @@ public class RemoteSession : ITenantEntity
     public int MachineId { get; set; }
     public int UserId { get; set; }
     public RemoteSessionType Type { get; set; }
+
+    /// <summary>Motivo que escribió el técnico al conectar (W-28a).</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>Escritorio sin control: solo se ve la pantalla.</summary>
+    public bool ViewOnly { get; set; }
     public DateTime StartedAt { get; set; }
     public DateTime? EndedAt { get; set; }
     public string? SourceIp { get; set; }

@@ -9,6 +9,7 @@ import { Modal } from '@components/Modal';
 import { PageHeader } from '@components/PageHeader';
 import { StatusBadge } from '@components/StatusBadge';
 import { Tabs } from '@components/Tabs';
+import { useLeaving } from '@components/useLeaving';
 import { dateTime, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
 import { useDebounced } from '../data/useDebounced';
@@ -109,6 +110,7 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
 
   const counts = list.data?.counts;
   const items = list.data?.page.items ?? [];
+  const rows = useLeaving(items, (alert) => alert.id);
   const total = list.data?.page.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -201,8 +203,14 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
               </tr>
             </thead>
             <tbody>
-              {items.map((alert) => (
-                <AlertRow key={alert.id} alert={alert} onOpen={() => onOpen(alert.id)} onOpenEquipo={onOpenEquipo} />
+              {rows.map(({ item: alert, leaving }) => (
+                <AlertRow
+                  key={alert.id}
+                  alert={alert}
+                  leaving={leaving}
+                  onOpen={() => onOpen(alert.id)}
+                  onOpenEquipo={onOpenEquipo}
+                />
               ))}
             </tbody>
           </table>
@@ -237,16 +245,19 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
 
 function AlertRow({
   alert,
+  leaving,
   onOpen,
   onOpenEquipo,
 }: {
   alert: AlertListItem;
+  /** Ya resuelta o fuera del filtro: se desvanece antes de quitarse. */
+  leaving?: boolean;
   onOpen: () => void;
   onOpenEquipo: (id: number) => void;
 }) {
   const resolved = alert.status === 'resuelta';
   return (
-    <tr className={resolved ? 'is-muted' : undefined}>
+    <tr className={resolved ? 'is-muted' : undefined} data-leaving={leaving || undefined}>
       <td>
         <StatusBadge status={resolved ? 'desconectado' : alert.level} label={LEVEL_LABEL[alert.level]} />
       </td>
@@ -262,8 +273,9 @@ function AlertRow({
             {alert.machineName}
           </button>
         ) : (
-          '—'
+          <span className="mono">{alert.deviceName ?? '—'}</span>
         )}
+        {alert.machineId !== null && alert.deviceName && <span className="row-sub mono">{alert.deviceName}</span>}
       </td>
       <td>{alert.branchName ?? '—'}</td>
       <td>
@@ -442,6 +454,11 @@ function AlertDetailBody({
             </dl>
           ) : (
             <p className="muted">Alerta de red (sin equipo asociado).</p>
+          )}
+          {alert.deviceName && (
+            <p className="muted note">
+              Dispositivo de red: <span className="mono">{alert.deviceName}</span>
+            </p>
           )}
         </Card>
         <Card title="Seguimiento">

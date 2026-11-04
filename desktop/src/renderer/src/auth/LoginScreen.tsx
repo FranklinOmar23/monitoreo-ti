@@ -8,6 +8,8 @@ import {
   type TwoFactorSetup,
 } from '@monitoreoti/shared';
 import { Icon } from '@components/Icon';
+import { useDeepLink } from '../data/deepLinks';
+import { OTP_LENGTH, OtpInput, successPause, VerifyBadge, type OtpState } from '@components/OtpInput';
 
 type Step =
   | { kind: 'login' }
@@ -16,7 +18,7 @@ type Step =
   | { kind: 'company'; challenge: string; companies: CompanyOption[] }
   | { kind: 'recover' }
   | { kind: 'recover-sent'; email: string }
-  | { kind: 'reset' };
+  | { kind: 'reset'; link?: string };
 
 interface LoginScreenProps {
   api: AuthApi;
@@ -31,6 +33,14 @@ export function LoginScreen({ api, onSession, notice }: LoginScreenProps) {
   const [error, setError] = useState<string | undefined>();
   const [info, setInfo] = useState<string | undefined>(notice);
   const [busy, setBusy] = useState(false);
+
+  // Enlace monitoreoti://restablecer del correo: abre "Contraseña nueva" con el enlace ya puesto.
+  useDeepLink((link) => {
+    if (link.kind !== 'restablecer') return false;
+    setError(undefined);
+    setStep({ kind: 'reset', link: `monitoreoti://restablecer?token=${link.token}` });
+    return true;
+  });
 
   /** Ejecuta una llamada mostrando el estado ocupado y el mensaje de error del servidor. */
   const run = async (action: () => Promise<void>) => {
@@ -71,6 +81,17 @@ export function LoginScreen({ api, onSession, notice }: LoginScreenProps) {
     setStep({ kind: 'login' });
   };
 
+  /** Comprueba un código; undefined si el servidor lo rechazó (el mensaje queda en pantalla). */
+  const check = async (call: () => Promise<LoginResponse>) => {
+    let response: LoginResponse | undefined;
+    await run(async () => {
+      response = await call();
+    });
+    return response;
+  };
+
+  const finish = (response: LoginResponse) => run(() => advance(response));
+
   let content: ReactNode;
   switch (step.kind) {
     case 'login':
@@ -90,8 +111,8 @@ export function LoginScreen({ api, onSession, notice }: LoginScreenProps) {
         <CodeForm
           title="Verificación en dos pasos"
           description="Escriba el código de 6 dígitos que muestra su app autenticadora."
-          busy={busy}
-          onSubmit={(code) => run(async () => advance(await api.verifyTwoFactor(step.challenge, code)))}
+          onCheck={(code) => check(() => api.verifyTwoFactor(step.challenge, code))}
+          onVerified={finish}
           onBack={back}
         />
       );
@@ -100,19 +121,38 @@ export function LoginScreen({ api, onSession, notice }: LoginScreenProps) {
       content = (
         <CodeForm
           title="Active la verificación en dos pasos"
-          description="Su rol permite controlar equipos a distancia, así que la cuenta necesita un segundo factor. Escanee el código con Google Authenticator, Microsoft Authenticator u otra app compatible y escriba el código que aparece."
-          busy={busy}
-          onSubmit={(code) => run(async () => advance(await api.confirmTwoFactorSetup(step.challenge, code)))}
+          description="Su rol permite controlar equipos a distancia, así que la cuenta necesita un segundo factor."
+          onCheck={(code) => check(() => api.confirmTwoFactorSetup(step.challenge, code))}
+          onVerified={finish}
           onBack={back}
         >
+          <ol className="auth-steps">
+            <li>
+              <span className="auth-step-number">1</span>
+              <div>
+                <strong>Escanee el código</strong>
+                <p className="muted">Con Google Authenticator, Microsoft Authenticator u otra app compatible.</p>
+              </div>
+            </li>
+          </ol>
           <div className="auth-qr">
-            <img src={step.setup.qr} alt="Código QR para la app autenticadora" width={180} height={180} />
+            <img src={step.setup.qr} alt="Código QR para la app autenticadora" width={160} height={160} />
             <div>
               <span className="eyebrow">¿No puede escanear?</span>
               <p className="muted">Escriba esta clave en la app:</p>
               <code className="auth-secret mono">{step.setup.secreto.match(/.{1,4}/g)?.join(' ')}</code>
+              <CopyButton text={step.setup.secreto} />
             </div>
           </div>
+          <ol className="auth-steps" start={2}>
+            <li>
+              <span className="auth-step-number">2</span>
+              <div>
+                <strong>Escriba el código que aparece</strong>
+                <p className="muted">Cambia cada 30 segundos.</p>
+              </div>
+            </li>
+          </ol>
         </CodeForm>
       );
       break;
@@ -181,6 +221,8 @@ export function LoginScreen({ api, onSession, notice }: LoginScreenProps) {
     case 'reset':
       content = (
         <ResetForm
+          key={step.link}
+          initialLink={step.link}
           busy={busy}
           onSubmit={(token, password) =>
             run(async () => {
@@ -222,7 +264,10 @@ export function LoginScreen({ api, onSession, notice }: LoginScreenProps) {
               {error}
             </p>
           )}
-          {content}
+          {/* La clave cambia con el paso: el nuevo entra deslizándose. */}
+          <div key={step.kind} className="auth-step">
+            {content}
+          </div>
         </div>
       </main>
     </div>
@@ -284,51 +329,101 @@ function LoginForm({
 function CodeForm({
   title,
   description,
-  busy,
-  onSubmit,
+  onCheck,
+  onVerified,
   onBack,
   children,
 }: {
   title: string;
   description: string;
-  busy: boolean;
-  onSubmit: (code: string) => void;
+  onCheck: (code: string) => Promise<LoginResponse | undefined>;
+  onVerified: (response: LoginResponse) => Promise<void>;
   onBack: () => void;
   children?: ReactNode;
 }) {
   const [code, setCode] = useState('');
+  const [state, setState] = useState<OtpState>('idle');
+  // Cambia con cada código rechazado: las casillas se montan de nuevo (sacudida y foco en la primera).
+  const [attempt, setAttempt] = useState(0);
+  const digits = code.replace(/ /g, '');
+
+  const verify = async (value: string) => {
+    setState('checking');
+    const response = await onCheck(value);
+    if (!response) {
+      setState('error');
+      setCode('');
+      setAttempt((n) => n + 1);
+      return;
+    }
+    setState('success');
+    await new Promise((resolve) => setTimeout(resolve, successPause()));
+    await onVerified(response);
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSubmit(code);
+    if (digits.length === OTP_LENGTH && state !== 'checking' && state !== 'success') void verify(digits);
   };
 
   return (
-    <form className="auth-form" onSubmit={submit}>
+    <form className="auth-form auth-verify" onSubmit={submit}>
+      <VerifyBadge state={state} />
       <h1>{title}</h1>
       <p className="muted">{description}</p>
       {children}
-      <label className="field">
-        <span>Código</span>
-        <input
-          className="auth-code mono"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          pattern="[0-9]{6}"
-          maxLength={6}
-          required
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          autoFocus
-        />
-      </label>
-      <button type="submit" className="btn btn-primary auth-submit" disabled={busy || code.length !== 6}>
-        {busy ? 'Verificando…' : 'Verificar'}
+      <OtpInput
+        key={attempt}
+        value={code}
+        onChange={(next) => {
+          setCode(next);
+          if (state === 'error') setState('idle');
+        }}
+        onComplete={(value) => void verify(value)}
+        state={state}
+        autoFocus
+      />
+      <p className="otp-status" role="status">
+        {state === 'checking' && 'Verificando…'}
+        {state === 'success' && 'Código correcto'}
+      </p>
+      <button
+        type="submit"
+        className="btn btn-primary auth-submit"
+        disabled={digits.length !== OTP_LENGTH || state === 'checking' || state === 'success'}
+      >
+        {state === 'checking' ? 'Verificando…' : 'Verificar'}
       </button>
-      <button type="button" className="link" onClick={onBack}>
+      <button type="button" className="link" onClick={onBack} disabled={state === 'checking' || state === 'success'}>
         Volver
       </button>
     </form>
+  );
+}
+
+/** Copia la clave del 2FA y lo confirma un momento. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="btn btn-outline auth-copy"
+      data-copied={copied || undefined}
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1800);
+        });
+      }}
+    >
+      {copied ? (
+        <>
+          <Icon name="check" size={14} /> Copiada
+        </>
+      ) : (
+        'Copiar clave'
+      )}
+    </button>
   );
 }
 
@@ -375,15 +470,17 @@ export function extractResetToken(value: string): string {
 }
 
 function ResetForm({
+  initialLink,
   busy,
   onSubmit,
   onBack,
 }: {
+  initialLink?: string;
   busy: boolean;
   onSubmit: (token: string, password: string) => void;
   onBack: () => void;
 }) {
-  const [link, setLink] = useState('');
+  const [link, setLink] = useState(initialLink ?? '');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const mismatch = confirm.length > 0 && password !== confirm;

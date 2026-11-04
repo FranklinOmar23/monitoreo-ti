@@ -231,7 +231,7 @@ public sealed class AuthTests(TestDatabase database) : IAsyncLifetime
         (await _api.ScalarAsync("""
             SELECT COUNT(*) FROM dbo.auditoria a JOIN dbo.usuarios u ON u.id = a.usuario_id
             WHERE u.correo = @c AND a.accion = 'sesion.reuso_refresh'
-            """, ("@c", email))).Should().Be(2, "cada intento con un refresh revocado queda auditado");
+            """, ("@c", email))).Should().Be(1, "solo el refresh ya rotado delata la copia; el que cerró la protección solo deja de servir");
     }
 
     [DatabaseFact]

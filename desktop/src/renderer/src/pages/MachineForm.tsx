@@ -35,6 +35,20 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
     responsable: machine?.assignedTo ?? '',
     fechaCompra: machine?.purchaseDate ?? '',
     garantiaHasta: machine?.warrantyUntil ?? '',
+    snmpVersion: machine?.snmp?.version ?? '',
+    snmpUsuario: machine?.snmp?.user ?? '',
+    snmpComunidad: '',
+    auth: '',
+    priv: '',
+    recolectorId: machine?.snmp?.collectorId ? String(machine.snmp.collectorId) : '',
+  });
+  const printer = form.tipo === 'impresora';
+  const snmp = printer && form.snmpVersion !== '';
+  // Recolectores posibles: equipos con agente de la sucursal de la impresora.
+  const collectors = useQuery({
+    queryKey: ['red', 'recolectores', form.sucursalId],
+    queryFn: () => api.red.collectors(Number(form.sucursalId)),
+    enabled: snmp && form.sucursalId !== '',
   });
   const set = (key: keyof typeof form) => (event: { target: { value: string } }) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -55,6 +69,12 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
         responsable: empty(form.responsable),
         fechaCompra: empty(form.fechaCompra),
         garantiaHasta: empty(form.garantiaHasta),
+        snmpVersion: snmp ? (form.snmpVersion as 'v2c' | 'v3') : null,
+        snmpUsuario: snmp && form.snmpVersion === 'v3' ? empty(form.snmpUsuario) : null,
+        snmpComunidad: snmp && form.snmpVersion === 'v2c' && form.snmpComunidad ? form.snmpComunidad : null,
+        snmpClaveAutenticacion: snmp && form.snmpVersion === 'v3' && form.auth ? form.auth : null,
+        snmpClavePrivacidad: snmp && form.snmpVersion === 'v3' && form.priv ? form.priv : null,
+        recolectorId: snmp && form.recolectorId ? Number(form.recolectorId) : null,
       };
       return machine ? api.updateMachine(machine.id, input) : api.createMachine(input);
     },
@@ -177,6 +197,83 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
           <span>Garantía hasta</span>
           <input type="date" value={form.garantiaHasta} onChange={set('garantiaHasta')} />
         </label>
+        {printer && (
+          <fieldset className="form-span snmp-fieldset">
+            <legend>Tóner por SNMP (solo lectura)</legend>
+            <div className="form-grid">
+              <label className="field">
+                <span>Versión</span>
+                <select value={form.snmpVersion} onChange={set('snmpVersion')}>
+                  <option value="">Sin SNMP</option>
+                  <option value="v2c">v2c (comunidad)</option>
+                  <option value="v3">v3 (usuario y claves)</option>
+                </select>
+              </label>
+              <span className="muted snmp-note">
+                {machine?.snmp?.hasCredential
+                  ? 'Hay datos guardados: déjelos vacíos para conservarlos.'
+                  : 'Se guardan cifrados y no se vuelven a mostrar.'}
+              </span>
+              {form.snmpVersion === 'v2c' && (
+                <label className="field">
+                  <span>Comunidad</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    maxLength={64}
+                    value={form.snmpComunidad}
+                    onChange={set('snmpComunidad')}
+                  />
+                </label>
+              )}
+              {form.snmpVersion === 'v3' && (
+                <>
+                  <label className="field">
+                    <span>Usuario</span>
+                    <input maxLength={100} autoComplete="off" value={form.snmpUsuario} onChange={set('snmpUsuario')} />
+                  </label>
+                  <label className="field">
+                    <span>Clave de autenticación</span>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      maxLength={64}
+                      value={form.auth}
+                      onChange={set('auth')}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Clave de privacidad</span>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      maxLength={64}
+                      value={form.priv}
+                      onChange={set('priv')}
+                    />
+                  </label>
+                </>
+              )}
+              {snmp && (
+                <label className="field form-span">
+                  <span>Recolector (equipo con agente que la consulta)</span>
+                  <select value={form.recolectorId} disabled={!form.sucursalId} onChange={set('recolectorId')}>
+                    <option value="">Nadie la consulta</option>
+                    {(collectors.data ?? []).map((c) => (
+                      <option key={c.agentId} value={c.agentId}>
+                        {c.machineName}
+                        {c.online ? '' : ' · desconectado'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {snmp && !form.ip.trim() && <span className="muted snmp-note">Escriba la IP de la impresora.</span>}
+            </div>
+          </fieldset>
+        )}
       </form>
     </Modal>
   );

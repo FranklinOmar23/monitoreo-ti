@@ -3,6 +3,9 @@
 ; Interactivo: pide la dirección del servidor y el token de instalación de la sucursal.
 ; Silencioso:  MonitoreoTI-Agente-Setup.exe /S /SERVER=https://servidor /TOKEN=<token>
 ;
+; Servidor con certificado propio (por ejemplo, en la red local): copie MonitoreoTI-CA.pem junto al instalador y el
+; agente confiará en ese certificado (queda en la carpeta de datos como ca-confianza.pem).
+;
 ; Copia los archivos y deja el resto al anfitrión del servicio (resources\host\MonitoreoTI.AgentHost.exe):
 ; crea el servicio de Windows, protege la carpeta de datos y escribe config.json.
 
@@ -163,6 +166,16 @@ FunctionEnd
   Pop $0 ; código de salida
   Pop $1 ; lo que explicó el anfitrión
   DetailPrint $1
+  ; La autoridad propia (si vino junto al instalador) va a la carpeta de datos, que solo ven SYSTEM y los administradores.
+  ${If} $0 == 0
+  ${AndIf} ${FileExists} "$EXEDIR\MonitoreoTI-CA.pem"
+    ReadEnvStr $2 "PROGRAMDATA"
+    CopyFiles /SILENT "$EXEDIR\MonitoreoTI-CA.pem" "$2\MonitoreoTI\Agent\ca-confianza.pem"
+    DetailPrint "Se instaló la autoridad de certificados de la empresa."
+    nsExec::Exec '"$SYSDIR\sc.exe" stop ${AGENT_SERVICE}'
+    Sleep 2000
+    nsExec::Exec '"$SYSDIR\sc.exe" start ${AGENT_SERVICE}'
+  ${EndIf}
   ${If} $0 != 0
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "No se pudo registrar el servicio del agente (código $0).$\r$\n$\r$\n$1"

@@ -26,6 +26,8 @@ interface EquiposPageProps {
   onOpenEquipo: (id: number) => void;
   onAddMachine?: () => void;
   onPrintQr?: (ids: number[]) => void;
+  /** Solo con scripts.ejecutar. */
+  onRunScript?: (machines: { id: number; name: string }[]) => void;
   /** Abre la lista ya filtrada por una sucursal (desde la pantalla de Sucursales). */
   initialBranchId?: number | null;
 }
@@ -37,6 +39,7 @@ export function EquiposPage({
   onOpenEquipo,
   onAddMachine,
   onPrintQr,
+  onRunScript,
   initialBranchId,
 }: EquiposPageProps) {
   const api = usePanelApi();
@@ -160,9 +163,22 @@ export function EquiposPage({
               <strong>
                 {selected.size} {selected.size === 1 ? 'equipo seleccionado' : 'equipos seleccionados'}
               </strong>
-              <button type="button" className="bulk-action" disabled title="Disponible con la gestión remota (Fase 6)">
-                <Icon name="terminal" size={16} /> Ejecutar script
-              </button>
+              {onRunScript && (
+                <button
+                  type="button"
+                  className="bulk-action"
+                  onClick={() =>
+                    onRunScript(
+                      [...selected].map((id) => ({
+                        id,
+                        name: items.find((item) => item.id === id)?.name ?? `Equipo ${id}`,
+                      })),
+                    )
+                  }
+                >
+                  <Icon name="terminal" size={16} /> Ejecutar script
+                </button>
+              )}
               {onPrintQr && (
                 <button type="button" className="bulk-action" onClick={() => onPrintQr([...selected])}>
                   <Icon name="qr" size={16} /> Imprimir QR

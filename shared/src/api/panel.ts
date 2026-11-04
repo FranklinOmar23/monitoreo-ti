@@ -4,7 +4,11 @@
  */
 import type { MachineStatus } from '../status';
 import { createHttp, type FetchLike } from './http';
-import { createNetworkApi, type NetworkApi } from './network';
+import { createNetworkApi, type MachineNetworkInfo, type NetworkApi } from './network';
+import { createRemoteApi, type RemoteApi } from './remote';
+import { createReportsApi, type ReportsApi } from './reports';
+import { createSettingsApi, type SettingsApi } from './settings';
+import { createUsersApi, type UsersApi } from './users';
 
 export interface StatusCounts {
   total: number;
@@ -115,6 +119,8 @@ export interface MachineDetail {
   /** Procesos en ejecución en la última foto del agente. */
   processCount: number | null;
   volumes: VolumeItem[];
+  /** Impresoras consultadas por SNMP. */
+  snmp?: PrinterSnmpInfo | null;
 }
 
 /** Problema abierto con su explicación en lenguaje simple (motor de alertas). */
@@ -232,6 +238,70 @@ export interface MachineInput {
   /** AAAA-MM-DD. */
   fechaCompra?: string | null;
   garantiaHasta?: string | null;
+  /** Impresoras: v2c o v3 (null = sin SNMP). La comunidad o las claves solo se envían para cambiarlas. */
+  snmpVersion?: 'v2c' | 'v3' | null;
+  snmpUsuario?: string | null;
+  snmpComunidad?: string | null;
+  snmpClaveAutenticacion?: string | null;
+  snmpClavePrivacidad?: string | null;
+  recolectorId?: number | null;
+}
+
+/** SNMP de una impresora (nunca trae la comunidad ni las claves). */
+export interface PrinterSnmpInfo {
+  version: 'v2c' | 'v3';
+  user: string | null;
+  hasCredential: boolean;
+  collectorId: number | null;
+  collectorName: string | null;
+  lastPollAt: string | null;
+  lastError: string | null;
+}
+
+export type MaintenanceStatus = 'programado' | 'vencido' | 'realizado';
+
+/** W-27 Un mantenimiento del calendario. Fechas AAAA-MM-DD. */
+export interface MaintenanceItem {
+  id: number;
+  machineId: number;
+  machineName: string;
+  machineType: MachineType;
+  branchId: number;
+  branchName: string;
+  type: 'preventivo' | 'correctivo';
+  description: string | null;
+  scheduledDate: string | null;
+  completedDate: string | null;
+  technicianId: number | null;
+  technicianName: string | null;
+  status: MaintenanceStatus;
+}
+
+export interface MaintenanceList {
+  items: MaintenanceItem[];
+  /** Programados que ya pasaron sin hacerse (en cualquier fecha). */
+  overdue: number;
+}
+
+export interface MaintenanceFilter {
+  desde: string;
+  hasta: string;
+  sucursal?: number | null;
+  maquina?: number | null;
+}
+
+export interface MaintenanceInput {
+  maquinaId: number;
+  tipo: 'preventivo' | 'correctivo';
+  descripcion?: string | null;
+  fechaProgramada?: string | null;
+  fechaRealizada?: string | null;
+  tecnicoId?: number | null;
+}
+
+export interface UserPreferences {
+  /** Recibir por correo las alertas críticas. */
+  notificarCorreo: boolean;
 }
 
 export interface BranchInput {
@@ -240,6 +310,12 @@ export interface BranchInput {
   direccion?: string | null;
   responsableId?: number | null;
   activa?: boolean;
+}
+
+/** A qué apunta un código QR. */
+export interface QrTarget {
+  type: 'maquina' | 'gabinete' | 'dispositivo' | 'roseta';
+  id: number;
 }
 
 export interface QrLabel {
@@ -310,6 +386,8 @@ export interface AlertFilter {
   nivel?: string;
   sucursal?: number | null;
   maquina?: number | null;
+  /** true = solo las de red; false = solo las de equipos. */
+  red?: boolean | null;
   pagina?: number;
   tamano?: number;
 }
@@ -329,6 +407,9 @@ export interface AlertListItem {
   resolvedAt: string | null;
   /** La detectó el motor: se resuelve sola cuando el problema desaparece. */
   automatic: boolean;
+  /** Alertas de red: el switch o router donde está el problema. */
+  deviceId?: number | null;
+  deviceName?: string | null;
 }
 
 export interface AlertCounts {
@@ -368,6 +449,9 @@ export interface AlertDetail {
   /** Veces que el mismo problema se abrió en el mismo equipo en 30 días (sin contar esta). */
   recurrences: number;
   history: { at: string; action: string; userName: string | null; note: string | null }[];
+  deviceId?: number | null;
+  deviceName?: string | null;
+  portId?: number | null;
 }
 
 export interface RuleOverride {
@@ -504,6 +588,14 @@ export interface PanelApi {
   events(id: number): Promise<ErrorEventItem[]>;
   processes(id: number): Promise<ProcessItem[]>;
   services(id: number): Promise<ServiceItem[]>;
+  maintenances(filter: MaintenanceFilter): Promise<MaintenanceList>;
+  saveMaintenance(id: number | null, input: MaintenanceInput): Promise<{ id: number }>;
+  completeMaintenance(id: number, fecha?: string | null, nota?: string | null): Promise<{ id: number }>;
+  deleteMaintenance(id: number): Promise<{ id: number }>;
+  preferences(): Promise<UserPreferences>;
+  savePreferences(input: UserPreferences): Promise<UserPreferences>;
+  /** Switch, puerto y VLAN donde está el equipo (null si ningún switch lo ha visto). */
+  networkConnection(id: number): Promise<MachineNetworkInfo | null>;
   history(id: number): Promise<AuditItem[]>;
   qr(id: number): Promise<MachineQr>;
   branches(): Promise<BranchItem[]>;
@@ -512,6 +604,8 @@ export interface PanelApi {
   updateMachine(id: number, input: MachineInput): Promise<{ id: number }>;
   retireMachine(id: number): Promise<{ id: number }>;
   qrLabels(ids: number[]): Promise<QrLabel[]>;
+  /** Qué es un código QR (enlaces monitoreoti://q/{codigo}); 404 si no existe o el usuario no lo ve. */
+  resolveQr(code: string): Promise<QrTarget>;
   departments(): Promise<Option[]>;
   companyUsers(): Promise<Option[]>;
   createBranch(input: BranchInput): Promise<{ id: number }>;
@@ -543,12 +637,19 @@ export interface PanelApi {
   ticketAttachment(id: number, fileId: number): Promise<{ id: number; contentType: string; data: string }>;
   /** Data center (Fase 4). */
   red: NetworkApi;
+  /** Gestión remota (Fase 6). */
+  remoto: RemoteApi;
+  /** Usuarios, roles y Mi perfil. */
+  usuarios: UsersApi;
+  configuracion: SettingsApi;
+  /** Reportes (W-35). */
+  reportes: ReportsApi;
 }
 
 /** El token de acceso se pide en cada llamada: se renueva solo y no debe quedar fijado en el cliente. */
 export function createPanelApi(serverUrl: string, accessToken: () => string | null, fetchImpl?: FetchLike): PanelApi {
   const http = createHttp(serverUrl, fetchImpl);
-  const get = <T>(path: string, query?: Record<string, string | number | null | undefined>) =>
+  const get = <T>(path: string, query?: Record<string, string | number | boolean | null | undefined>) =>
     http<T>(`/api/v1${path}`, { accessToken: accessToken(), query });
   const send = <T>(method: string, path: string, body?: unknown) =>
     http<T>(`/api/v1${path}`, { method, body: body ?? {}, accessToken: accessToken() });
@@ -563,6 +664,16 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     events: (id) => get(`/maquinas/${id}/eventos`),
     processes: (id) => get(`/maquinas/${id}/procesos`),
     services: (id) => get(`/maquinas/${id}/servicios`),
+    maintenances: (filter) => get('/mantenimientos', { ...filter }),
+    saveMaintenance: (id, input) =>
+      id === null ? send('POST', '/mantenimientos', input) : send('PUT', `/mantenimientos/${id}`, input),
+    completeMaintenance: (id, fecha, nota) =>
+      send('POST', `/mantenimientos/${id}/realizado`, { fecha: fecha ?? null, nota: nota ?? null }),
+    deleteMaintenance: (id) => send('DELETE', `/mantenimientos/${id}`),
+    preferences: () => get('/auth/preferencias'),
+    savePreferences: (input) => send('PUT', '/auth/preferencias', input),
+    networkConnection: (id) =>
+      get<{ connection: MachineNetworkInfo | null }>(`/maquinas/${id}/conexion-red`).then((r) => r.connection),
     history: (id) => get(`/maquinas/${id}/historial`),
     qr: (id) => get(`/maquinas/${id}/qr`),
     branches: () => get('/sucursales'),
@@ -571,6 +682,7 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     updateMachine: (id, input) => send('PUT', `/maquinas/${id}`, input),
     retireMachine: (id) => send('POST', `/maquinas/${id}/baja`),
     qrLabels: (ids) => get('/maquinas/qr', { ids: ids.join(',') }),
+    resolveQr: (code) => get(`/qr/${encodeURIComponent(code)}`),
     departments: () => get('/departamentos'),
     companyUsers: () => get('/usuarios/empresa'),
     createBranch: (input) => send('POST', '/sucursales', input),
@@ -600,5 +712,9 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     attachToTicket: (id, tipo, datos) => send('POST', `/tickets/${id}/adjuntos`, { tipo, datos }),
     ticketAttachment: (id, fileId) => get(`/tickets/${id}/adjuntos/${fileId}`),
     red: createNetworkApi(get, send),
+    remoto: createRemoteApi(get, send),
+    usuarios: createUsersApi(get, send),
+    configuracion: createSettingsApi(get, send),
+    reportes: createReportsApi(get),
   };
 }

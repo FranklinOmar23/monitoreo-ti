@@ -405,12 +405,19 @@ export function DeviceForm({
     snmpUsuario: device?.snmpUser ?? '',
     auth: '',
     priv: '',
+    recolectorId: device?.collectorId ? String(device.collectorId) : '',
   });
   const model = models.data?.find((m) => String(m.id) === form.modeloId);
   const rack = racks.data?.find((r) => String(r.id) === form.gabineteId);
   // Si va en un gabinete, la sucursal es la del gabinete.
   const branchId = rack ? String(rack.branchId) : form.sucursalId;
   const active = model?.isActiveDevice ?? device?.isActiveDevice ?? true;
+  // Recolectores posibles: equipos con agente de la sucursal del dispositivo.
+  const collectors = useQuery({
+    queryKey: ['red', 'recolectores', branchId],
+    queryFn: () => api.red.collectors(Number(branchId)),
+    enabled: active && !!branchId,
+  });
 
   const save = useNetworkSave(
     () =>
@@ -425,6 +432,7 @@ export function DeviceForm({
         snmpUsuario: active ? textOrNull(form.snmpUsuario) : null,
         snmpClaveAutenticacion: active && form.auth ? form.auth : null,
         snmpClavePrivacidad: active && form.priv ? form.priv : null,
+        recolectorId: active ? numberOrNull(form.recolectorId) : null,
       }),
     (id) => {
       onSaved?.(id);
@@ -553,6 +561,35 @@ export function DeviceForm({
                   onChange={(e) => setForm({ ...form, priv: e.target.value })}
                 />
               </label>
+              <label className="field form-span">
+                <span>Recolector (equipo con agente que lo consulta)</span>
+                <select
+                  value={form.recolectorId}
+                  disabled={!branchId}
+                  onChange={(e) => setForm({ ...form, recolectorId: e.target.value })}
+                >
+                  <option value="">Nadie lo consulta</option>
+                  {(collectors.data ?? []).map((c) => (
+                    <option key={c.agentId} value={c.agentId}>
+                      {c.machineName}
+                      {c.ipAddress ? ` · ${c.ipAddress}` : ''}
+                      {c.online ? '' : ' · desconectado'}
+                      {c.deviceCount > 0 ? ` · consulta ${c.deviceCount}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!branchId ? (
+                <span className="muted snmp-note">
+                  Elija el gabinete o la sucursal para ver sus equipos con agente.
+                </span>
+              ) : (
+                collectors.data?.length === 0 && (
+                  <span className="muted snmp-note">
+                    La sucursal no tiene equipos con agente: instale uno para consultar este dispositivo.
+                  </span>
+                )
+              )}
             </div>
           </fieldset>
         </>
@@ -562,6 +599,85 @@ export function DeviceForm({
           Se crearán {model.portCount} puertos según el modelo ({model.portDescription ?? 'RJ45'}).
         </p>
       )}
+    </FormModal>
+  );
+}
+
+// ------------------------------------------------------------------ W-67 asignar puerto a mano
+
+/**
+ * Fija a mano lo que hay en un puerto: un equipo (por ejemplo, una impresora sin agente; se ubica por su MAC) o que
+ * es troncal. "Automático" lo devuelve a lo que detecte el recolector.
+ */
+export function PortAssignDialog({
+  device,
+  port,
+  onClose,
+}: {
+  device: DeviceDetail;
+  port: PortItem;
+  onClose: () => void;
+}) {
+  const api = usePanelApi();
+  const current = port.isManualAssignment ? (port.isTrunk ? 'troncal' : 'equipo') : 'auto';
+  const [mode, setMode] = useState<'auto' | 'equipo' | 'troncal' | 'acceso'>(current);
+  const [machineId, setMachineId] = useState(port.isManualAssignment && port.machineId ? String(port.machineId) : '');
+  const machines = useQuery({
+    queryKey: ['maquinas', 'sucursal', device.branchId],
+    queryFn: () => api.machines({ sucursal: device.branchId, tamano: 200 }),
+    enabled: mode === 'equipo',
+  });
+  const save = useNetworkSave(
+    () =>
+      api.red.assignPort(port.id, {
+        maquinaId: mode === 'equipo' ? numberOrNull(machineId) : null,
+        troncal: mode === 'troncal' ? true : mode === 'acceso' ? false : null,
+      }),
+    onClose,
+  );
+
+  return (
+    <FormModal
+      id="port-assign"
+      title={`Asignar ${device.name} ${port.name ?? port.number}`}
+      pending={save.isPending}
+      error={save.error}
+      onClose={onClose}
+      onSubmit={() => save.mutate(undefined)}
+    >
+      <fieldset className="form-span choice-list">
+        <legend>Qué hay en el puerto</legend>
+        {(
+          [
+            ['auto', 'Automático: lo que detecte el recolector'],
+            ['equipo', 'Un equipo en particular'],
+            ['troncal', 'Troncal (enlace a otro equipo de red)'],
+            ['acceso', 'Puerto de acceso (nunca troncal)'],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value} className="choice">
+            <input type="radio" name="modo" checked={mode === value} onChange={() => setMode(value)} />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      {mode === 'equipo' && (
+        <label className="field form-span">
+          <span>Equipo *</span>
+          <select required value={machineId} onChange={(e) => setMachineId(e.target.value)}>
+            <option value="">Elija…</option>
+            {(machines.data?.page.items ?? []).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.ipAddress ? ` · ${m.ipAddress}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <p className="muted form-span">
+        Lo asignado a mano no lo cambia el recolector; un equipo sin agente se reconoce por la MAC de su ficha.
+      </p>
     </FormModal>
   );
 }

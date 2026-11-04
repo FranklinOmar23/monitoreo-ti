@@ -35,7 +35,17 @@ public sealed record MachineInput(
     string? Mac,
     string? Responsable,
     DateOnly? FechaCompra,
-    DateOnly? GarantiaHasta);
+    DateOnly? GarantiaHasta,
+    /// <summary>
+    /// Impresoras: v2c o v3 (null = sin SNMP). La comunidad o las claves solo se envían para cambiarlas (null las conserva);
+    /// nunca se devuelven. El recolector es un agente de la misma sucursal.
+    /// </summary>
+    string? SnmpVersion = null,
+    string? SnmpUsuario = null,
+    string? SnmpComunidad = null,
+    string? SnmpClaveAutenticacion = null,
+    string? SnmpClavePrivacidad = null,
+    int? RecolectorId = null);
 
 public sealed class MachineInputValidator : AbstractValidator<MachineInput>
 {
@@ -55,6 +65,17 @@ public sealed class MachineInputValidator : AbstractValidator<MachineInput>
             .WithMessage("La IP no es válida.").MaximumLength(45);
         RuleFor(x => x.Mac).Must(mac => mac is null || Agents.MacAddress.TryNormalize(mac, out _))
             .WithMessage("La MAC debe tener el formato AA:BB:CC:DD:EE:FF.");
+        RuleFor(x => x.SnmpVersion).Must(v => v is null or "v2c" or "v3").WithMessage("La versión SNMP es v2c o v3.");
+        RuleFor(x => x.SnmpVersion).Null().When(x => x.Tipo != "impresora").WithMessage("Solo las impresoras se consultan por SNMP desde su ficha.");
+        RuleFor(x => x.SnmpComunidad).MaximumLength(64).Must(c => c is null || c.Trim().Length > 0).WithMessage("Escriba la comunidad SNMP.");
+        RuleFor(x => x.SnmpUsuario).NotEmpty().When(x => x.SnmpVersion == "v3").WithMessage("Indique el usuario SNMPv3.").MaximumLength(100);
+        RuleFor(x => x.SnmpClaveAutenticacion).MinimumLength(8).MaximumLength(64).When(x => x.SnmpClaveAutenticacion is not null)
+            .WithMessage("La clave de autenticación SNMPv3 debe tener entre 8 y 64 caracteres.");
+        RuleFor(x => x.SnmpClavePrivacidad).MinimumLength(8).MaximumLength(64).When(x => x.SnmpClavePrivacidad is not null)
+            .WithMessage("La clave de privacidad SNMPv3 debe tener entre 8 y 64 caracteres.");
+        RuleFor(x => x).Must(x => (x.SnmpClaveAutenticacion is null) == (x.SnmpClavePrivacidad is null))
+            .OverridePropertyName("SnmpClavePrivacidad").WithMessage("SNMPv3 authPriv necesita las dos claves.");
+        RuleFor(x => x.Ip).NotEmpty().When(x => x.SnmpVersion is not null).WithMessage("La impresora necesita su IP para consultarla por SNMP.");
         RuleFor(x => x.GarantiaHasta).GreaterThanOrEqualTo(x => x.FechaCompra)
             .When(x => x.FechaCompra is not null && x.GarantiaHasta is not null)
             .WithMessage("La garantía no puede vencer antes de la compra.");

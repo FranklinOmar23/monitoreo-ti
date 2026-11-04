@@ -193,6 +193,13 @@ public sealed class AgentTestApi : IAsyncDisposable
             DELETE c FROM dbo.cableado c JOIN dbo.puertos p ON p.id IN (c.puerto_a_id, c.puerto_b_id)
                 JOIN dbo.dispositivos_red d ON d.id = p.dispositivo_id WHERE d.nombre LIKE 'PRUEBA-%';
             DELETE c FROM dbo.cableado c JOIN dbo.puntos_red r ON r.id = c.punto_red_id WHERE r.codigo LIKE 'PRUEBA-%';
+            DELETE al FROM dbo.alertas al JOIN dbo.dispositivos_red d ON d.empresa_id = al.empresa_id AND d.id = al.dispositivo_id WHERE d.nombre LIKE 'PRUEBA-%';
+            DELETE l FROM dbo.enlaces_red l JOIN dbo.puertos p ON p.id IN (l.puerto_origen_id, l.puerto_destino_id)
+                JOIN dbo.dispositivos_red d ON d.id = p.dispositivo_id WHERE d.nombre LIKE 'PRUEBA-%';
+            DELETE a FROM dbo.auditoria a JOIN dbo.dispositivos_red d ON a.entidad = 'dispositivos_red' AND a.entidad_id = CAST(d.id AS VARCHAR(20))
+                WHERE d.nombre LIKE 'PRUEBA-%' AND a.usuario_id IS NULL;
+            DELETE a FROM dbo.auditoria a JOIN dbo.puertos p ON a.entidad = 'puertos' AND a.entidad_id = CAST(p.id AS VARCHAR(20))
+                JOIN dbo.dispositivos_red d ON d.id = p.dispositivo_id WHERE d.nombre LIKE 'PRUEBA-%' AND a.usuario_id IS NULL;
             DELETE FROM dbo.dispositivos_red WHERE nombre LIKE 'PRUEBA-%';
             DELETE FROM dbo.puntos_red WHERE codigo LIKE 'PRUEBA-%';
             DELETE FROM dbo.gabinetes WHERE nombre LIKE 'PRUEBA-%';
@@ -206,6 +213,15 @@ public sealed class AgentTestApi : IAsyncDisposable
             UPDATE t SET asignado_a = NULL FROM dbo.tickets t JOIN dbo.usuarios u ON u.id = t.asignado_a WHERE u.correo LIKE '%@prueba.test';
             UPDATE a SET atendida_por = NULL FROM dbo.alertas a JOIN dbo.usuarios u ON u.id = a.atendida_por WHERE u.correo LIKE '%@prueba.test';
             DELETE al FROM dbo.alertas al JOIN dbo.maquinas m ON m.empresa_id = al.empresa_id AND m.id = al.maquina_id WHERE m.mac LIKE '02:%' OR m.nombre LIKE 'PRUEBA-%';
+            DELETE x FROM dbo.mantenimientos x JOIN dbo.maquinas m ON m.empresa_id = x.empresa_id AND m.id = x.maquina_id WHERE m.mac LIKE '02:%' OR m.nombre LIKE 'PRUEBA-%';
+            UPDATE dbo.maquinas SET recolector_id = NULL WHERE recolector_id IS NOT NULL AND (mac LIKE '02:%' OR nombre LIKE 'PRUEBA-%'
+                OR recolector_id IN (SELECT a.id FROM dbo.agentes a JOIN dbo.maquinas m ON m.id = a.maquina_id WHERE m.mac LIKE '02:%'));
+            DELETE a FROM dbo.auditoria a JOIN dbo.comandos c ON a.entidad = 'comandos' AND a.entidad_id = CAST(c.id AS VARCHAR(20))
+                JOIN dbo.maquinas m ON m.empresa_id = c.empresa_id AND m.id = c.maquina_id WHERE m.mac LIKE '02:%' OR m.nombre LIKE 'PRUEBA-%';
+            DELETE c FROM dbo.comandos c JOIN dbo.maquinas m ON m.empresa_id = c.empresa_id AND m.id = c.maquina_id WHERE m.mac LIKE '02:%' OR m.nombre LIKE 'PRUEBA-%';
+            DELETE c FROM dbo.comandos c JOIN dbo.usuarios u ON u.id = c.usuario_id WHERE u.correo LIKE '%@prueba.test';
+            DELETE s FROM dbo.sesiones_remotas s JOIN dbo.usuarios u ON u.id = s.usuario_id WHERE u.correo LIKE '%@prueba.test';
+            DELETE s FROM dbo.scripts s JOIN dbo.usuarios u ON u.id = s.creado_por WHERE u.correo LIKE '%@prueba.test';
             DELETE FROM dbo.maquinas WHERE mac LIKE '02:%' OR nombre LIKE 'PRUEBA-%';
             DELETE a FROM dbo.auditoria a JOIN dbo.usuarios u ON u.id = a.usuario_id WHERE u.correo LIKE '%@prueba.test';
             DELETE us FROM dbo.usuario_sucursal us JOIN dbo.usuarios u ON u.id = us.usuario_id WHERE u.correo LIKE '%@prueba.test';
@@ -213,6 +229,7 @@ public sealed class AgentTestApi : IAsyncDisposable
             DELETE FROM dbo.sucursales WHERE nombre LIKE 'Prueba %';
             DELETE ue FROM dbo.usuario_empresa ue JOIN dbo.usuarios u ON u.id = ue.usuario_id WHERE u.correo LIKE '%@prueba.test';
             DELETE FROM dbo.usuarios WHERE correo LIKE '%@prueba.test';
+            DELETE FROM dbo.roles WHERE nombre LIKE 'Prueba %' AND empresa_id IS NOT NULL;
             """);
         foreach (var hash in _tokenHashes)
             await TestDatabase.ExecuteAsync(connection, $"DELETE FROM dbo.tokens_registro WHERE token_hash = '{hash}';");

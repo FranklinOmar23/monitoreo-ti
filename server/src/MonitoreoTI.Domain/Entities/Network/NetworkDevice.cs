@@ -38,6 +38,9 @@ public class NetworkDevice : ITenantEntity
     public string? Firmware { get; set; }
     public NetworkDeviceStatus Status { get; set; } = NetworkDeviceStatus.NotResponding;
     public DateTime? LastPolledAt { get; set; }
+
+    /// <summary>Por qué falló el último sondeo SNMP; null si respondió.</summary>
+    public string? LastError { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public Rack? Rack { get; set; }

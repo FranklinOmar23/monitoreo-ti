@@ -106,12 +106,15 @@ public sealed class AgentHealthStore(IServiceScopeFactory scopes, TimeProvider c
                     row = new WindowsService { MachineId = identity.MachineId, Name = Trim(name, 256)! };
                     db.Services.Add(row);
                 }
-                else if (row.State == "en_ejecucion" && state == "detenido" && start.StartsWith("automatico", StringComparison.Ordinal))
+                else if (row.State == "en_ejecucion" && state == "detenido" && start.StartsWith("automatico", StringComparison.Ordinal)
+                    && item.CodigoSalida is not 0)
                 {
                     row.StoppedSince = Now;
                 }
 
-                if (state == "en_ejecucion")
+                // En ejecución otra vez, o detenido sin error (actualizadores y servicios por demanda terminan con
+                // código 0): no es una caída y su alerta se resuelve sola.
+                if (state == "en_ejecucion" || item.CodigoSalida is 0)
                     row.StoppedSince = null;
 
                 row.DisplayName = Trim(item.NombreVisible, 256);

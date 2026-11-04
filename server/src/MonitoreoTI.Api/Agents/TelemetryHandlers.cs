@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MonitoreoTI.Application.Agents;
+using MonitoreoTI.Application.Network;
 using MonitoreoTI.Application.Panel;
 
 namespace MonitoreoTI.Api.Agents;
@@ -140,4 +141,37 @@ public sealed class SecurityHandler(IAgentHealthStore store, ILogger<SecurityHan
 
     protected override Task HandleAsync(AgentIdentity identity, AgentEnvelope message, SeguridadData data, CancellationToken cancellationToken) =>
         store.SaveSecurityAsync(identity, data, cancellationToken);
+}
+
+// ---------------------------------------------------------------- Fase 4: recolector SNMP
+
+/// <summary>Resultado de un sondeo SNMP (sección 11.1): solo de un agente recolector y de un dispositivo que tenga asignado.</summary>
+public sealed class CommandResultHandler(MonitoreoTI.Infrastructure.Remote.AgentCommands commands, ILogger<CommandResultHandler> logger)
+    : TelemetryHandler<MonitoreoTI.Application.Remote.CommandResultData>(logger)
+{
+    public override string Tipo => "resultado_comando";
+
+    protected override Task HandleAsync(AgentIdentity identity, AgentEnvelope message, MonitoreoTI.Application.Remote.CommandResultData data, CancellationToken cancellationToken) =>
+        commands.SaveResultAsync(identity, data, cancellationToken);
+}
+
+public sealed class SessionActivityHandler(MonitoreoTI.Infrastructure.Remote.RemoteSessionLog log, ILogger<SessionActivityHandler> logger)
+    : TelemetryHandler<MonitoreoTI.Application.Remote.SessionActivityData>(logger)
+{
+    public override string Tipo => "actividad_sesion";
+
+    protected override async Task HandleAsync(AgentIdentity identity, AgentEnvelope message, MonitoreoTI.Application.Remote.SessionActivityData data, CancellationToken cancellationToken)
+    {
+        if (!await log.RecordActivityAsync(identity, data, cancellationToken))
+            logger.LogWarning("Agente {AgentId}: actividad de una sesión que no es suya o no es de archivos; se descarta.", identity.AgentId);
+    }
+}
+
+public sealed class SnmpResultHandler(ISnmpCollectors collectors, TimeProvider clock, ILogger<SnmpResultHandler> logger)
+    : TelemetryHandler<SnmpResultadoData>(logger)
+{
+    public override string Tipo => "snmp_resultado";
+
+    protected override Task HandleAsync(AgentIdentity identity, AgentEnvelope message, SnmpResultadoData data, CancellationToken cancellationToken) =>
+        collectors.SaveResultAsync(identity, data, TelemetryRules.SampleTime(message.Ts, clock.GetUtcNow().UtcDateTime), cancellationToken);
 }

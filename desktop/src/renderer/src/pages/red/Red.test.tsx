@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DeviceDetail, PortItem, RackDetail, RoomItem } from '@monitoreoti/shared';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import type { DeviceDetail, ImportResult, ImportRow, PortItem, RackDetail, RoomItem } from '@monitoreoti/shared';
 import { fakeNetworkApi, fakePanelApi, renderWithPanel } from '../../test/fakes';
 import { RedPage } from './RedPage';
+import { View3DWindows } from './View3DWindows';
 
 afterEach(cleanup);
 
@@ -102,6 +104,9 @@ const device: DeviceDetail = {
   hasSnmpCredential: true,
   qrCode: 'q',
   createdAt: new Date().toISOString(),
+  collectorId: 4,
+  collectorName: 'CONTA-01',
+  lastError: null,
   ports: [
     port({
       id: 112,
@@ -122,7 +127,7 @@ describe('Red y data center (Fase 4.1)', () => {
   it('dibuja el gabinete y mueve un equipo arrastrándolo a otra U', async () => {
     const placeDevice = vi.fn(() => Promise.resolve({ id: 10 }));
     renderWithPanel(
-      <RedPage canEdit onOpenEquipo={vi.fn()} />,
+      <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="datacenter" />,
       fakePanelApi({
         red: fakeNetworkApi({
           rooms: () => Promise.resolve([room]),
@@ -148,6 +153,68 @@ describe('Red y data center (Fase 4.1)', () => {
     fireEvent.drop(slot, { dataTransfer });
 
     await waitFor(() => expect(placeDevice).toHaveBeenCalledWith(10, 5, 20));
+  });
+
+  it('abre la sala en 3D en su ventana y le vuelve a mandar los datos cuando cambian, sin reabrirla', async () => {
+    const show = vi.fn(() => Promise.resolve());
+    let closed: (key: string) => void = () => undefined;
+    window.monitoreo = {
+      session: { load: () => Promise.resolve(null), save: () => Promise.resolve(), clear: () => Promise.resolve() },
+      view3d: {
+        show,
+        onClosed: (listener: (key: string) => void) => ((closed = listener), () => undefined),
+        onOpenDevice: () => () => undefined,
+      },
+    } as never;
+    let rackName = 'GAB-A01';
+    let queryClient: QueryClient | undefined;
+    function GrabClient() {
+      queryClient = useQueryClient();
+      return null;
+    }
+    renderWithPanel(
+      <View3DWindows>
+        <GrabClient />
+        <RedPage canEdit={false} onOpenEquipo={vi.fn()} initialTab="datacenter" />
+      </View3DWindows>,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          rooms: () => Promise.resolve([room]),
+          racks: () => Promise.resolve([{ ...rack.rack, name: rackName }]),
+          rack: () => Promise.resolve(rack),
+        }),
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /3D en ventana/ }));
+    await waitFor(() =>
+      expect(show).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: 'sala-1',
+          title: 'Data Center Principal',
+          single: false,
+          racks: [expect.objectContaining({ name: 'GAB-A01' })],
+          details: [expect.objectContaining({ devices: expect.any(Array) })],
+        }),
+        true,
+      ),
+    );
+
+    rackName = 'GAB-A01-B';
+    await queryClient!.invalidateQueries({ queryKey: ['red'] });
+    await waitFor(() =>
+      expect(show).toHaveBeenLastCalledWith(
+        expect.objectContaining({ racks: [expect.objectContaining({ name: 'GAB-A01-B' })] }),
+        false,
+      ),
+    );
+
+    // Cerrada la ventana, ya no se le manda nada.
+    closed('sala-1');
+    const calls = show.mock.calls.length;
+    await queryClient!.invalidateQueries({ queryKey: ['red'] });
+    expect(show).toHaveBeenCalledTimes(calls);
+    delete window.monitoreo;
   });
 
   it('el switch muestra sus puertos por color y el panel del puerto con su equipo', async () => {
@@ -244,5 +311,81 @@ describe('Red y data center (Fase 4.1)', () => {
 
     expect(await screen.findByText('SW-CORE-01 Te1/1/1')).toBeTruthy();
     expect(screen.getByText(/cable PP12-ACC02-12/)).toBeTruthy();
+  });
+
+  it('la importación muestra los errores por fila y solo importa un archivo sin errores', async () => {
+    const result = (rows: ImportRow[], applied = false): ImportResult => ({
+      type: 'rosetas',
+      total: rows.length,
+      valid: rows.filter((r) => r.errors.length === 0).length,
+      applied,
+      fileErrors: [],
+      rows,
+    });
+    const previewImport = vi
+      .fn()
+      .mockResolvedValueOnce(
+        result([
+          { line: 2, summary: 'P-1 · Caja', errors: [] },
+          { line: 3, summary: 'P-1 · Caja', errors: ['Ya hay una roseta con ese código en la sucursal.'] },
+        ]),
+      )
+      .mockResolvedValueOnce(result([{ line: 2, summary: 'P-1 · Caja', errors: [] }]));
+    const runImport = vi.fn(() => Promise.resolve(result([{ line: 2, summary: 'P-1 · Caja', errors: [] }], true)));
+    renderWithPanel(
+      <RedPage canEdit onOpenEquipo={vi.fn()} />,
+      fakePanelApi({ red: fakeNetworkApi({ previewImport, runImport }) }),
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Importar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rosetas' }));
+    const input = screen.getByLabelText('Archivo CSV');
+    const csv = (text: string) => new File([text], 'rosetas.csv', { type: 'text/csv' });
+
+    fireEvent.change(input, { target: { files: [csv('codigo,sucursal\nP-1,Santiago\nP-1,Santiago\n')] } });
+    expect(await screen.findByText('Ya hay una roseta con ese código en la sucursal.')).toBeTruthy();
+    expect(previewImport).toHaveBeenCalledWith('rosetas', 'codigo,sucursal\nP-1,Santiago\nP-1,Santiago\n');
+    expect(screen.queryByRole('button', { name: /^Importar \d/ })).toBeNull();
+
+    fireEvent.change(input, { target: { files: [csv('codigo,sucursal\nP-1,Santiago\n')] } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Importar 1 fila' }));
+    expect(await screen.findByText(/Se importaron 1 fila/)).toBeTruthy();
+    expect(runImport).toHaveBeenCalledWith('rosetas', 'codigo,sucursal\nP-1,Santiago\n');
+  });
+
+  it('sin permiso de edición no aparece Importar; el historial muestra lo que cambió', async () => {
+    renderWithPanel(
+      <RedPage canEdit={false} onOpenEquipo={vi.fn()} />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          history: () =>
+            Promise.resolve({
+              items: [
+                {
+                  id: 1,
+                  at: new Date().toISOString(),
+                  action: 'dispositivo.mover',
+                  title: 'Dispositivo movido',
+                  entity: 'dispositivos_red',
+                  entityId: '10',
+                  subject: 'SW-ACC-02',
+                  user: 'Ana Martínez',
+                  changes: [{ field: 'U', before: '38', after: '20' }],
+                },
+              ],
+              total: 1,
+              page: 1,
+              pageSize: 50,
+            }),
+        }),
+      }),
+    );
+
+    expect(screen.queryByRole('tab', { name: 'Importar' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Historial' }));
+    const list = await screen.findByRole('list', { name: 'Historial del data center' });
+    expect(within(list).getByText(/SW-ACC-02/)).toBeTruthy();
+    expect(within(list).getByText(/U:/).textContent).toBe('U: 38 → 20');
+    expect(within(list).getByText(/Ana Martínez/)).toBeTruthy();
   });
 });

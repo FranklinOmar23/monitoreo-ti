@@ -421,6 +421,9 @@ SELECT a.empresa_id, CAST(DATEADD(DAY, -d.d, @ahora) AS DATE),
        CASE WHEN a.desconectado > 0 AND d.d % 2 = 1 THEN a.desconectado - 1 ELSE a.desconectado END
 FROM actual a CROSS JOIN dias d;
 
+-- Las alertas de ejemplo no se avisan por correo al arrancar.
+UPDATE dbo.alertas SET notificada = SYSUTCDATETIME() WHERE notificada IS NULL;
+
 COMMIT TRANSACTION;
 GO
 

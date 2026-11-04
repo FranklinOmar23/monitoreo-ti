@@ -45,3 +45,4 @@ agent/release/
 
 # Adjuntos de tickets guardados por el API en desarrollo
 App_Data/
+desktop/build/panel.json

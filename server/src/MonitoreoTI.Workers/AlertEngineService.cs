@@ -14,6 +14,8 @@ public sealed class AlertEngineOptions
 /// <summary>Ejecuta el motor de alertas empresa por empresa, cada una con su propio contexto (sin saltar RLS).</summary>
 public sealed class AlertEngineService(
     AlertEngine engine,
+    NetworkAlertEngine networkEngine,
+    AlertMailer mailer,
     IAgentSessions sessions,
     AlertEngineOptions options,
     TimeProvider clock,
@@ -51,7 +53,14 @@ public sealed class AlertEngineService(
         {
             try
             {
-                var result = await engine.EvaluateCompanyAsync(companyId, cancellationToken);
+                var machines = await engine.EvaluateCompanyAsync(companyId, cancellationToken);
+                var network = await networkEngine.EvaluateCompanyAsync(companyId, cancellationToken);
+                var result = new AlertEngineResult(machines.Opened + network.Opened, machines.Updated + network.Updated,
+                    machines.Resolved + network.Resolved, machines.StatusChanges + network.StatusChanges);
+                // Las críticas nuevas (de equipos y de red) se avisan por correo una sola vez.
+                var mails = await mailer.NotifyCompanyAsync(companyId, cancellationToken);
+                if (mails > 0)
+                    logger.LogInformation("Empresa {CompanyId}: {Mails} correo(s) de alertas críticas enviados.", companyId, mails);
                 if (result.Opened + result.Resolved > 0)
                 {
                     logger.LogInformation("Empresa {CompanyId}: {Opened} alerta(s) nueva(s), {Resolved} resuelta(s).",

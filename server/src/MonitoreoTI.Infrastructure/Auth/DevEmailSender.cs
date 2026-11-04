@@ -9,6 +9,8 @@ namespace MonitoreoTI.Infrastructure.Auth;
 /// </summary>
 public sealed class DevEmailSender(string folder, ILogger<DevEmailSender> logger) : IEmailSender
 {
+    public bool Delivers => false;
+
     public async Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(folder);
@@ -21,6 +23,8 @@ public sealed class DevEmailSender(string folder, ILogger<DevEmailSender> logger
 /// <summary>Sin SMTP configurado fuera de desarrollo: el correo no se envía y queda el error en el log (sin el cuerpo).</summary>
 public sealed class UnconfiguredEmailSender(ILogger<UnconfiguredEmailSender> logger) : IEmailSender
 {
+    public bool Delivers => false;
+
     public Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken)
     {
         logger.LogError("No hay servidor de correo configurado; no se envió \"{Subject}\".", subject);

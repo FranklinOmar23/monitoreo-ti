@@ -38,6 +38,32 @@ public sealed class AgentSupervisor(AgentPaths paths, ILogger<AgentSupervisor> l
             if (stoppingToken.IsCancellationRequested)
                 return;
 
+            // El agente descargó una versión nueva: se instala. El instalador detiene este servicio; si no lo hace
+            // (falló antes), se sigue supervisando la versión actual.
+            if (exitCode == UpdateApplier.ExitCode)
+            {
+                using var installer = UpdateApplier.TryStart(paths, log.Write);
+                if (installer is not null)
+                {
+                    try
+                    {
+                        await installer.WaitForExitAsync(stoppingToken).WaitAsync(TimeSpan.FromMinutes(10), stoppingToken);
+                        log.Write($"El instalador terminó con código {installer.ExitCode} sin reemplazar el servicio; se sigue con la versión actual.");
+                    }
+                    catch (TimeoutException)
+                    {
+                        log.Write("El instalador no terminó en 10 minutos; se sigue con la versión actual.");
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        // Lo esperado: el instalador detuvo el servicio para reemplazarlo.
+                        return;
+                    }
+                }
+                backoff = TimeSpan.FromSeconds(5);
+                continue;
+            }
+
             // Si funcionó un buen rato antes de caer, se reintenta rápido; si cae al arrancar, se espera cada vez más.
             backoff = DateTime.UtcNow - started > HealthyRun ? TimeSpan.FromSeconds(5) : Min(backoff * 2, MaxBackoff);
             log.Write($"El agente terminó (código {exitCode}); se reinicia en {backoff.TotalSeconds:0} s.");
@@ -58,6 +84,11 @@ public sealed class AgentSupervisor(AgentPaths paths, ILogger<AgentSupervisor> l
         start.ArgumentList.Add(paths.ServiceScript);
         start.Environment["ELECTRON_RUN_AS_NODE"] = "1";
         start.Environment["MONITOREOTI_DATA_DIR"] = paths.DataDirectory;
+        // El recolector SNMP del agente le pide cada consulta a este mismo ejecutable ("snmp").
+        start.Environment["MONITOREOTI_HOST_EXE"] = paths.HostExe;
+        // Certificado del servidor firmado por una autoridad propia (red local): Node no usa el almacén de Windows.
+        if (File.Exists(paths.TrustedCaFile))
+            start.Environment["NODE_EXTRA_CA_CERTS"] = paths.TrustedCaFile;
 
         using var process = new Process { StartInfo = start };
         process.OutputDataReceived += (_, e) => { if (e.Data is not null) log.Write(e.Data); };

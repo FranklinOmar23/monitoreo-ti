@@ -1,0 +1,629 @@
+/*
+ * Animaciones del panel (decisión 68) y el código de verificación en seis casillas (W-02).
+ * Se carga después de styles.css. Todo el movimiento va dentro de prefers-reduced-motion: no-preference: con
+ * "reducir animaciones" activado en Windows el panel queda quieto y solo cambian los colores.
+ */
+
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ---------- Código de verificación ---------- */
+
+.auth-verify > h1,
+.auth-verify > .muted {
+  text-align: center;
+}
+
+.verify-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: center;
+}
+
+.verify-prompt .auth-error {
+  margin: 0;
+  text-align: left;
+}
+
+.verify-badge {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 64px;
+  height: 64px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  color: var(--color-primary);
+  transition:
+    background-color 0.3s,
+    color 0.3s;
+}
+
+.verify-ring {
+  position: absolute;
+  inset: -6px;
+  border: 2px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  border-radius: 50%;
+}
+
+.verify-badge[data-state='checking'] .verify-ring {
+  border-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  border-top-color: var(--color-primary);
+}
+
+.verify-badge[data-state='error'] {
+  background: var(--st-critico-bg);
+  color: var(--st-critico);
+}
+
+.verify-badge[data-state='error'] .verify-ring {
+  border-color: color-mix(in srgb, var(--st-critico) 40%, transparent);
+}
+
+.verify-badge[data-state='success'] {
+  background: var(--st-sano-bg);
+  color: var(--st-sano);
+}
+
+.verify-badge[data-state='success'] .verify-ring {
+  border-color: color-mix(in srgb, var(--st-sano) 45%, transparent);
+}
+
+.otp {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 10px repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 380px;
+  margin: 4px auto 0;
+}
+
+/* Un respiro entre el tercer y el cuarto dígito, como lo muestran las apps autenticadoras. */
+.otp-box:nth-child(4) {
+  grid-column: 5;
+}
+
+.otp-box {
+  width: 100%;
+  min-width: 0;
+  height: 56px;
+  padding: 0;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  outline: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 24px;
+  font-weight: 600;
+  text-align: center;
+  caret-color: var(--color-primary);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.otp-box:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.otp-box[data-filled] {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+}
+
+.otp[data-state='error'] .otp-box {
+  border-color: var(--st-critico);
+  background: var(--st-critico-bg);
+}
+
+.otp[data-state='success'] .otp-box {
+  border-color: var(--st-sano);
+  background: var(--st-sano-bg);
+  color: var(--st-sano);
+}
+
+.otp-status {
+  min-height: 18px;
+  margin: -4px 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.auth-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.auth-steps p {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.auth-step-number {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.auth-copy[data-copied] {
+  border-color: var(--st-sano);
+  color: var(--st-sano);
+}
+
+/* ---------- Indicador del menú lateral y subrayado de pestañas ---------- */
+
+.nav-item {
+  position: relative;
+}
+
+.nav-item[aria-current='page']::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -6px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--color-primary);
+  content: '';
+}
+
+.tab {
+  position: relative;
+}
+
+.tab[aria-selected='true'] {
+  border-bottom-color: transparent;
+}
+
+.tab::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  content: '';
+  transform: scaleX(0);
+}
+
+.tab[aria-selected='true']::after {
+  transform: scaleX(1);
+}
+
+/* ---------- Movimiento ---------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Al cambiar de página el contenido nuevo entra subiendo; en el acceso, cada paso entra desde el lado. */
+  .content > * {
+    animation: rise-in 0.28s var(--ease-out) both;
+  }
+
+  .auth-step {
+    animation: slide-in 0.3s var(--ease-out) both;
+  }
+
+  /* Tarjetas e indicadores aparecen uno tras otro. */
+  .card,
+  .kpi,
+  .table-card {
+    animation: rise-in 0.36s var(--ease-out) both;
+  }
+
+  .kpi-grid > :nth-child(2),
+  .dash-row-main > :nth-child(2),
+  .dash-row-bottom > :nth-child(2) {
+    animation-delay: 50ms;
+  }
+
+  .kpi-grid > :nth-child(3),
+  .dash-row-main > :nth-child(3),
+  .dash-row-bottom > :nth-child(3) {
+    animation-delay: 100ms;
+  }
+
+  .kpi-grid > :nth-child(4) {
+    animation-delay: 150ms;
+  }
+
+  .kpi-grid > :nth-child(n + 5) {
+    animation-delay: 200ms;
+  }
+
+  /* Filas de tablas y listas: en cascada. */
+  .data-table tbody tr,
+  .problem-list li,
+  .notif-panel > * {
+    animation: fade-in 0.3s var(--ease-out) both;
+  }
+
+  /* Alertas: las nuevas entran deslizándose. */
+  .alert-list li {
+    animation: slide-in 0.3s var(--ease-out) both;
+  }
+
+  .data-table tbody tr:nth-child(2),
+  .alert-list li:nth-child(2) {
+    animation-delay: 25ms;
+  }
+
+  .data-table tbody tr:nth-child(3),
+  .alert-list li:nth-child(3) {
+    animation-delay: 50ms;
+  }
+
+  .data-table tbody tr:nth-child(4),
+  .alert-list li:nth-child(4) {
+    animation-delay: 75ms;
+  }
+
+  .data-table tbody tr:nth-child(5),
+  .alert-list li:nth-child(5) {
+    animation-delay: 100ms;
+  }
+
+  .data-table tbody tr:nth-child(6),
+  .alert-list li:nth-child(6) {
+    animation-delay: 125ms;
+  }
+
+  .data-table tbody tr:nth-child(7),
+  .alert-list li:nth-child(7) {
+    animation-delay: 150ms;
+  }
+
+  .data-table tbody tr:nth-child(n + 8),
+  .alert-list li:nth-child(n + 8) {
+    animation-delay: 175ms;
+  }
+
+  /* Lo que se va (una alerta resuelta) se desvanece antes de quitarse; ver useLeaving. */
+  [data-leaving] {
+    pointer-events: none;
+    animation: fade-out 0.32s var(--ease-out) both !important;
+  }
+
+  /* Ventanas emergentes y menús. */
+  .modal[open] {
+    animation: pop-in 0.22s var(--ease-out);
+  }
+
+  .modal[open]::backdrop {
+    animation: fade-in 0.22s ease-out;
+  }
+
+  .more-menu,
+  .profile-menu,
+  .notif-panel {
+    transform-origin: top right;
+    animation: menu-in 0.18s var(--ease-out);
+  }
+
+  .tool-popover {
+    transform-origin: top left;
+    animation: menu-in 0.18s var(--ease-out);
+  }
+
+  /* Botones, tarjetas y menú lateral responden al mouse. */
+  .btn {
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      box-shadow 0.15s,
+      transform 0.15s var(--ease-out);
+  }
+
+  .btn:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:not(:disabled):hover {
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--color-primary) 30%, transparent);
+  }
+
+  .btn:not(:disabled):active {
+    box-shadow: none;
+    transform: translateY(0) scale(0.97);
+  }
+
+  .card,
+  .kpi {
+    transition:
+      box-shadow 0.2s,
+      border-color 0.2s;
+  }
+
+  .card:hover,
+  .kpi:hover {
+    box-shadow: 0 8px 24px rgb(13 27 32 / 9%);
+  }
+
+  .nav-item {
+    transition:
+      background-color 0.15s,
+      color 0.15s;
+  }
+
+  .nav-item .icon {
+    transition: transform 0.2s var(--ease-spring);
+  }
+
+  .nav-item:hover .icon {
+    transform: translateX(2px) scale(1.06);
+  }
+
+  .nav-item[aria-current='page']::before {
+    animation: indicator-in 0.3s var(--ease-spring);
+  }
+
+  .tab {
+    transition: color 0.15s;
+  }
+
+  .tab::after {
+    transition: transform 0.25s var(--ease-out);
+  }
+
+  /* Estado crítico: un pulso en el punto. */
+  [data-status='critico'] .status-dot,
+  .dot[data-status='critico'] {
+    animation: critical-pulse 1.8s ease-out infinite;
+  }
+
+  /* Barras y medidores se llenan al aparecer. */
+  .mini-bar-fill,
+  .usage-bar span,
+  .rack-usage span {
+    transform-origin: left center;
+    animation: bar-grow 0.7s var(--ease-out) both;
+  }
+
+  /* Carga: un brillo recorre el marcador. */
+  .skeleton {
+    background: linear-gradient(
+        100deg,
+        transparent 30%,
+        color-mix(in srgb, var(--color-surface) 70%, transparent) 50%,
+        transparent 70%
+      )
+      var(--color-surface-muted);
+    background-size: 200% 100%;
+    animation: shimmer 1.3s linear infinite;
+  }
+
+  /* Mensajes: el error se sacude, el aviso aparece. */
+  .auth-error,
+  .state-error,
+  .field-error {
+    animation: shake 0.42s ease-in-out;
+  }
+
+  .auth-info {
+    animation: fade-in 0.3s ease-out;
+  }
+
+  /* Seis casillas del código: rebote al escribir, ola al comprobar, sacudida al fallar, verde al aceptar. */
+  .otp-box[data-filled] {
+    animation: digit-pop 0.22s var(--ease-spring);
+  }
+
+  .otp[data-state='checking'] .otp-box {
+    animation: digit-wave 0.9s ease-in-out infinite;
+    animation-delay: calc(var(--i) * 80ms);
+  }
+
+  .otp[data-state='error'] {
+    animation: shake 0.42s ease-in-out;
+  }
+
+  .otp[data-state='success'] .otp-box {
+    animation: digit-pop 0.3s var(--ease-spring) both;
+    animation-delay: calc(var(--i) * 40ms);
+  }
+
+  .verify-badge {
+    animation: pop-in 0.4s var(--ease-spring);
+  }
+
+  .verify-ring {
+    animation: ring-breathe 2.4s ease-in-out infinite;
+  }
+
+  .verify-badge[data-state='checking'] .verify-ring {
+    animation: spin 0.8s linear infinite;
+  }
+
+  .verify-badge[data-state='success'] .verify-ring {
+    animation: ring-burst 0.6s var(--ease-out) both;
+  }
+
+  .verify-badge[data-state='error'] {
+    animation: shake 0.42s ease-in-out;
+  }
+
+  .verify-check path {
+    stroke-dasharray: 24;
+    animation: draw 0.4s 0.05s var(--ease-out) both;
+  }
+
+  .auth-qr {
+    animation: pop-in 0.35s 0.1s var(--ease-out) both;
+  }
+
+  .auth-steps li {
+    animation: slide-in 0.3s var(--ease-out) both;
+  }
+
+  .auth-qr + .auth-steps li {
+    animation-delay: 0.18s;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+@keyframes indicator-in {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 150% 0;
+  }
+
+  to {
+    background-position: -50% 0;
+  }
+}
+
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+@keyframes critical-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-critico) 55%, transparent);
+  }
+
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@keyframes digit-pop {
+  40% {
+    transform: scale(1.1);
+  }
+}
+
+@keyframes digit-wave {
+  0%,
+  100% {
+    border-color: var(--color-border);
+  }
+
+  50% {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
+  }
+}
+
+@keyframes ring-breathe {
+  50% {
+    opacity: 0.4;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes ring-burst {
+  from {
+    opacity: 1;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}

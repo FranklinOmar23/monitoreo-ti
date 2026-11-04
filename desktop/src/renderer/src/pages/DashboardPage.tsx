@@ -5,6 +5,7 @@ import { Icon } from '@components/Icon';
 import { KpiCard } from '@components/KpiCard';
 import { PageHeader } from '@components/PageHeader';
 import { StackedBars } from '@components/StackedBars';
+import { useLeaving } from '@components/useLeaving';
 import type { DashboardData, StatusCounts } from '@monitoreoti/shared';
 import { dayLabel, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
@@ -40,6 +41,7 @@ const percent = (part: number, total: number) => (total > 0 ? `${((part / total)
 
 function DashboardContent({ data, onOpenEquipo, onNavigate }: { data: DashboardData } & DashboardPageProps) {
   const { counts } = data.kpis;
+  const recentAlerts = useLeaving(data.recentAlerts, (alert) => alert.id);
   const max = Math.max(1, ...data.fleetHealth.map((d) => d.healthy + d.warning + d.critical + d.disconnected));
 
   return (
@@ -155,8 +157,8 @@ function DashboardContent({ data, onOpenEquipo, onNavigate }: { data: DashboardD
             <EmptyState title="Sin alertas abiertas">Todo en orden por ahora.</EmptyState>
           ) : (
             <ul className="alert-list">
-              {data.recentAlerts.map((alert) => (
-                <li key={alert.id}>
+              {recentAlerts.map(({ item: alert, leaving }) => (
+                <li key={alert.id} data-leaving={leaving || undefined}>
                   <span className="alert-icon" data-status={alert.level}>
                     <Icon name={alert.level === 'critico' ? 'bolt' : 'bell'} />
                   </span>

@@ -14,16 +14,24 @@ interface SidebarProps {
   onNavigate: (id: string) => void;
   /** Empresa de la sesión; el detalle (sucursales, equipos) se muestra cuando se conoce. */
   empresa: { nombre: string; detalle?: string };
+  /** Logo de la empresa (data URL, W-40); sin él, la marca de Centinela. */
+  logo?: string | null;
 }
 
-export function Sidebar({ items, activeId, onNavigate, empresa }: SidebarProps) {
+export function Sidebar({ items, activeId, onNavigate, empresa, logo }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <span className="brand-mark">
-          <Icon name="logo" size={20} />
-        </span>
-        <span className="brand-name">Centinela</span>
+        {logo ? (
+          <img className="brand-logo" src={logo} alt={empresa.nombre} />
+        ) : (
+          <>
+            <span className="brand-mark">
+              <Icon name="logo" size={20} />
+            </span>
+            <span className="brand-name">Centinela</span>
+          </>
+        )}
       </div>
 
       <nav className="sidebar-nav" aria-label="Navegación principal">

@@ -1,7 +1,10 @@
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Primitives;
+using MonitoreoTI.Api.Remote;
 using MonitoreoTI.Application.Agents;
+using MonitoreoTI.Application.Network;
+using MonitoreoTI.Infrastructure.Remote;
 
 namespace MonitoreoTI.Api.Agents;
 
@@ -35,6 +38,10 @@ public sealed class AgentGateway(
     AgentPresenceTracker presence,
     AgentConnectionRegistry registry,
     IEnumerable<IAgentMessageHandler> handlers,
+    ISnmpCollectors collectors,
+    AgentCommands commands,
+    CommandDispatcher dispatcher,
+    AgentUpdater updater,
     AgentGatewayOptions options,
     ILogger<AgentGateway> logger)
 {
@@ -96,15 +103,24 @@ public sealed class AgentGateway(
 
         await sessions.OnConnectedAsync(identity, hola, aborted);
         await connection.SendAsync("ack", new { id = hello.Id }, aborted);
+        // Si es recolector, la lista de dispositivos que debe consultar por SNMP con sus claves selladas para él.
+        var collector = await collectors.ConfigAsync(identity, aborted);
         await connection.SendAsync(
             "bienvenida",
             new
             {
                 heartbeat_s = options.HeartbeatSeconds,
                 metricas_s = options.MetricsSeconds,
-                es_recolector = identity.IsCollector,
+                es_recolector = collector is not null,
+                recolector = CollectorMessage(collector),
+                // Los agentes registrados antes de que la empresa tuviera llave la reciben aquí (la guardan una sola vez).
+                llave_empresa = await commands.PublicKeyAsync(identity.CompanyId, aborted),
             },
             aborted);
+        // Lo que se pidió mientras estaba desconectado.
+        await dispatcher.SendPendingAsync(connection, null, aborted);
+        // Si está atrasado y su empresa actualiza sola, se le ofrece la versión publicada.
+        await updater.OfferOnConnectAsync(connection, hola.Version, aborted);
 
         while (socket.State == WebSocketState.Open)
         {
@@ -209,6 +225,23 @@ public sealed class AgentGateway(
             return false;
         }
     }
+
+    /// <summary>Lo que recibe el agente en "bienvenida" y en "config_actualizada".</summary>
+    public static object? CollectorMessage(CollectorConfig? config) => config is null ? null : new
+    {
+        intervalo_s = config.IntervaloSegundos,
+        dispositivos = config.Dispositivos.Select(d => new
+        {
+            id = d.Id,
+            nombre = d.Nombre,
+            ip = d.Ip,
+            tipo = d.Tipo,
+            usuario = d.Usuario,
+            credencial = d.Credencial,
+            version = d.Version,
+            origen = d.Origen,
+        }),
+    };
 
     private static string? ReadBearer(StringValues header)
     {

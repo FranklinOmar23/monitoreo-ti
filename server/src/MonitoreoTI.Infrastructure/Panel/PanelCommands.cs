@@ -1,8 +1,12 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Agents;
+using MonitoreoTI.Application.Network;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Domain.Entities.Inventory;
 using MonitoreoTI.Domain.Enums;
+using MonitoreoTI.Infrastructure.Auth;
 using MonitoreoTI.Infrastructure.Persistence;
 
 namespace MonitoreoTI.Infrastructure.Panel;
@@ -12,7 +16,8 @@ namespace MonitoreoTI.Infrastructure.Panel;
 /// (sucursal, departamento, responsable) se valida dentro de la empresa y del alcance de sucursales del usuario.
 /// Cada cambio queda en auditoría con los valores de antes y después.
 /// </summary>
-public sealed class PanelCommands(MonitoreoDbContext db, ICurrentUser user, IAuditTrail audit, TimeProvider clock)
+public sealed class PanelCommands(
+    MonitoreoDbContext db, ICurrentUser user, IAuditTrail audit, TimeProvider clock, SecretProtector protector, ICollectorConfigPublisher collectors)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
@@ -33,18 +38,20 @@ public sealed class PanelCommands(MonitoreoDbContext db, ICurrentUser user, IAud
 
     public async Task<CommandResult> CreateMachineAsync(MachineInput input, CancellationToken ct)
     {
-        var invalid = await ValidateMachineReferencesAsync(input, ct);
+        var invalid = await ValidateMachineReferencesAsync(input, ct) ?? await ValidatePrinterSnmpAsync(null, input, ct);
         if (invalid is not null)
             return invalid;
 
         var machine = new Machine();
         Apply(machine, input);
+        ApplySnmp(machine, input);
         // Un equipo cargado a mano no tiene agente: su estado no lo decide la presencia.
         machine.Status = MachineStatus.Healthy;
         db.Machines.Add(machine);
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync("maquina.crear", "maquinas", machine.Id.ToString(), null, Snapshot(machine), ct);
+        await CollectorsChangedAsync([machine.CollectorAgentId], ct);
         return CommandResult.Ok(machine.Id);
     }
 
@@ -54,15 +61,18 @@ public sealed class PanelCommands(MonitoreoDbContext db, ICurrentUser user, IAud
         if (machine is null || machine.Status == MachineStatus.Retired)
             return CommandResult.NotFound();
 
-        var invalid = await ValidateMachineReferencesAsync(input, ct);
+        var invalid = await ValidateMachineReferencesAsync(input, ct) ?? await ValidatePrinterSnmpAsync(machine, input, ct);
         if (invalid is not null)
             return invalid;
 
         var before = Snapshot(machine);
+        var previousCollector = machine.CollectorAgentId;
         Apply(machine, input);
+        ApplySnmp(machine, input);
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync("maquina.editar", "maquinas", id.ToString(), before, Snapshot(machine), ct);
+        await CollectorsChangedAsync([previousCollector, machine.CollectorAgentId], ct);
         return CommandResult.Ok(id);
     }
 
@@ -74,11 +84,14 @@ public sealed class PanelCommands(MonitoreoDbContext db, ICurrentUser user, IAud
             return CommandResult.NotFound();
 
         var before = Snapshot(machine);
+        var previousCollector = machine.CollectorAgentId;
         machine.Status = MachineStatus.Retired;
+        machine.CollectorAgentId = null;
         await db.Agents.Where(a => a.MachineId == id).ExecuteUpdateAsync(s => s.SetProperty(a => a.IsRevoked, true), ct);
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync("maquina.baja", "maquinas", id.ToString(), before, Snapshot(machine), ct);
+        await CollectorsChangedAsync([previousCollector], ct);
         return CommandResult.Ok(id);
     }
 
@@ -89,6 +102,60 @@ public sealed class PanelCommands(MonitoreoDbContext db, ICurrentUser user, IAud
         if (input.DepartamentoId is int departmentId && !await db.Departments.AnyAsync(d => d.Id == departmentId, ct))
             return CommandResult.Invalid("El departamento no existe.");
         return null;
+    }
+
+    /// <summary>
+    /// SNMP de una impresora: v2c necesita su comunidad y v3 sus dos claves (enviadas ahora o ya guardadas con la misma
+    /// versión); el recolector es un agente aprobado de la misma sucursal.
+    /// </summary>
+    private async Task<CommandResult?> ValidatePrinterSnmpAsync(Machine? machine, MachineInput input, CancellationToken ct)
+    {
+        if (input.SnmpVersion is not { } version)
+            return null;
+        var kept = machine is { SnmpEncryptedCredential: not null } && machine.SnmpVersion == version;
+        if (version == "v2c" && input.SnmpComunidad is null && !kept)
+            return CommandResult.Invalid("Escriba la comunidad SNMP de la impresora.");
+        if (version == "v3" && input.SnmpClaveAutenticacion is null && !kept)
+            return CommandResult.Invalid("Escriba las dos claves SNMPv3 de la impresora.");
+        if (input.RecolectorId is int agentId && !await db.Agents.AnyAsync(a => a.Id == agentId && !a.IsRevoked && a.IsApproved
+                && db.Machines.Any(m => m.Id == a.MachineId && m.BranchId == input.SucursalId && m.Status != MachineStatus.Retired), ct))
+            return CommandResult.Invalid("El recolector debe ser un equipo con agente de la misma sucursal.");
+        return null;
+    }
+
+    /// <summary>Guarda la comunidad o las claves cifradas (no se envían = se conservan). Sin versión, se quita el SNMP.</summary>
+    private void ApplySnmp(Machine machine, MachineInput input)
+    {
+        if (input.SnmpVersion is not { } version)
+        {
+            machine.SnmpVersion = null;
+            machine.SnmpUser = null;
+            machine.SnmpEncryptedCredential = null;
+            machine.CollectorAgentId = null;
+            machine.LastSnmpError = null;
+            return;
+        }
+        string? secret = version == "v2c"
+            ? input.SnmpComunidad is { } community ? JsonSerializer.Serialize(new { community = community.Trim() }) : null
+            : input.SnmpClaveAutenticacion is { } auth ? JsonSerializer.Serialize(new { auth, priv = input.SnmpClavePrivacidad }) : null;
+        if (secret is not null)
+            machine.SnmpEncryptedCredential = Encoding.UTF8.GetBytes(protector.Protect(secret));
+        machine.SnmpVersion = version;
+        machine.SnmpUser = version == "v3" ? Clean(input.SnmpUsuario) : null;
+        machine.CollectorAgentId = input.RecolectorId;
+    }
+
+    /// <summary>Marca como recolector a todo agente con algo que consultar y le avisa su lista nueva.</summary>
+    private async Task CollectorsChangedAsync(IEnumerable<int?> agentIds, CancellationToken ct)
+    {
+        var ids = agentIds.OfType<int>().Distinct().ToList();
+        if (ids.Count == 0)
+            return;
+        foreach (var agent in await db.Agents.Where(a => ids.Contains(a.Id)).ToListAsync(ct))
+            agent.IsCollector = await db.NetworkDevices.AnyAsync(d => d.CollectorAgentId == agent.Id && d.Status != NetworkDeviceStatus.Retired, ct)
+                || await db.Machines.AnyAsync(m => m.CollectorAgentId == agent.Id && m.Status != MachineStatus.Retired, ct);
+        await db.SaveChangesAsync(ct);
+        await collectors.ConfigChangedAsync(user.CompanyId, ids, ct);
     }
 
     private static void Apply(Machine machine, MachineInput input)
@@ -131,6 +198,9 @@ public sealed class PanelCommands(MonitoreoDbContext db, ICurrentUser user, IAud
         responsable = m.AssignedTo,
         fechaCompra = m.PurchaseDate,
         garantiaHasta = m.WarrantyUntil,
+        // De SNMP solo la versión y el recolector: nunca la comunidad ni las claves.
+        snmp = m.SnmpVersion,
+        recolectorId = m.CollectorAgentId,
     };
 
     // ------------------------------------------------------------------ sucursales

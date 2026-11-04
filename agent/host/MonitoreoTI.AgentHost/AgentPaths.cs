@@ -28,6 +28,12 @@ public sealed record AgentPaths(string AppDirectory, string ElectronExe, string 
     public const string ElectronFileName = "MonitoreoTI Agente.exe";
 
     public string ConfigFile => Path.Combine(DataDirectory, "config.json");
+
+    /// <summary>
+    /// Autoridad propia de la empresa (por ejemplo, el servidor en la red local con su certificado): si existe, el agente
+    /// confía en los certificados que firma, además de los públicos. La deja el instalador.
+    /// </summary>
+    public string TrustedCaFile => Path.Combine(DataDirectory, "ca-confianza.pem");
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
 
     public static AgentPaths Resolve(string? appDirectory)

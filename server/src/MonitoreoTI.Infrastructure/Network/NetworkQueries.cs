@@ -88,7 +88,13 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
             .OrderByDescending(d => d.RackPositionU)
             .Select(d => new
             {
-                d.Id, d.Name, d.Type, Model = d.Model!.ModelName, d.RackPositionU, d.HeightUnits, d.Status,
+                d.Id,
+                d.Name,
+                d.Type,
+                Model = d.Model!.ModelName,
+                d.RackPositionU,
+                d.HeightUnits,
+                d.Status,
                 Ports = d.Ports.Count,
                 Connected = d.Ports.Count(p => p.Status == PortStatus.Connected),
                 Problems = d.Ports.Count(p => p.Status == PortStatus.Errors || p.Status == PortStatus.Down),
@@ -166,6 +172,7 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
                 Rack = d.Rack!.Name,
                 RoomId = (int?)d.Rack.RoomId,
                 Room = d.Rack.Room!.Name,
+                Collector = db.Machines.Where(m => m.Agent != null && m.Agent.Id == d.CollectorAgentId).Select(m => m.Name).FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct);
         if (row is null)
@@ -206,7 +213,8 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
             d.Id, d.Name, Text(d.Type), d.ModelId, row.Brand, row.Model, row.IsActiveDevice, d.BranchId, row.Branch,
             d.RackId, d.RackId is null ? null : row.Rack, d.RackId is null ? null : row.RoomId, d.RackId is null ? null : row.Room,
             d.RackPositionU, d.HeightUnits, d.ManagementIp, d.Firmware, Text(d.Status), d.LastPolledAt,
-            d.SnmpUser, d.SnmpEncryptedCredential is not null, d.QrCode, d.CreatedAt, items);
+            d.SnmpUser, d.SnmpEncryptedCredential is not null, d.QrCode, d.CreatedAt, items,
+            d.CollectorAgentId, row.Collector, d.LastError);
     }
 
     /// <summary>"SW-ACC-02 Gi1/0/12" para cada puerto visible.</summary>
@@ -255,6 +263,93 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
             r.Cable.Id, r.Cable.PortAId, labels.GetValueOrDefault(r.Cable.PortAId, "?"), r.Cable.PortBId,
             r.Cable.PortBId is int b ? labels.GetValueOrDefault(b, "?") : null, r.Cable.OutletId, r.Outlet,
             r.Cable.CableType is { } type ? Text(type) : null, r.Cable.Color, r.Cable.Label, r.Cable.Notes, r.Cable.CreatedAt)).ToList();
+    }
+
+    // ------------------------------------------------------------------ historial (W-69)
+
+    /// <summary>
+    /// Cambios del data center tomados de la auditoría, los más recientes primero. Quien tiene sucursales asignadas
+    /// solo ve lo de los objetos que hoy son de sus sucursales (más el catálogo, que es de toda la empresa).
+    /// El historial de un dispositivo incluye el de sus puertos.
+    /// </summary>
+    public async Task<PagedResult<HistoryItem>> HistoryAsync(HistoryFilter filter, CancellationToken ct)
+    {
+        var since = DateTime.UtcNow.AddDays(-Math.Clamp(filter.Days, 1, 365));
+        var entities = HistoryText.Entities;
+        var logs = db.AuditLogs.AsNoTracking().Where(l => entities.Contains(l.Entity) && l.Timestamp >= since);
+
+        if (filter.Entity is { } entity && entities.Contains(entity))
+        {
+            var entityId = filter.EntityId;
+            if (entity == "dispositivos_red" && int.TryParse(entityId, out var deviceId))
+            {
+                var portIds = db.Ports.Where(p => p.DeviceId == deviceId).Select(p => p.Id.ToString());
+                logs = logs.Where(l => (l.Entity == entity && l.EntityId == entityId) || (l.Entity == "puertos" && portIds.Contains(l.EntityId!)));
+            }
+            else
+                logs = logs.Where(l => l.Entity == entity && (entityId == null || l.EntityId == entityId));
+        }
+
+        if (await AllowedBranchesAsync(ct) is not null)
+        {
+            var rooms = (await VisibleRoomsAsync(ct)).Select(r => r.Id.ToString());
+            var racks = (await VisibleRacksAsync(ct)).Select(r => r.Id.ToString());
+            var deviceIds = (await VisibleDevicesAsync(ct, includeRetired: true)).Select(d => d.Id);
+            var devices = deviceIds.Select(id => id.ToString());
+            var ports = db.Ports.Where(p => deviceIds.Contains(p.DeviceId)).Select(p => p.Id.ToString());
+            var outlets = (await VisibleOutletsAsync(ct)).Select(o => o.Id.ToString());
+            var cables = db.Cables.Where(c => db.Ports.Any(p => p.Id == c.PortAId && deviceIds.Contains(p.DeviceId))).Select(c => c.Id.ToString());
+            logs = logs.Where(l => l.Entity == "modelos_dispositivo"
+                || (l.Entity == "salas" && rooms.Contains(l.EntityId!))
+                || (l.Entity == "gabinetes" && racks.Contains(l.EntityId!))
+                || (l.Entity == "dispositivos_red" && devices.Contains(l.EntityId!))
+                || (l.Entity == "puertos" && ports.Contains(l.EntityId!))
+                || (l.Entity == "puntos_red" && outlets.Contains(l.EntityId!))
+                || (l.Entity == "cableado" && cables.Contains(l.EntityId!)));
+        }
+
+        var page = Math.Max(1, filter.Page);
+        var pageSize = Math.Clamp(filter.PageSize, 1, 200);
+        var total = await logs.CountAsync(ct);
+        var rows = await logs.OrderByDescending(l => l.Timestamp).ThenByDescending(l => l.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(l => new { Log = l, User = db.Users.Where(u => u.Id == l.UserId).Select(u => u.Name).FirstOrDefault() })
+            .ToListAsync(ct);
+
+        // Nombres actuales de lo referido; lo eliminado se muestra con el nombre guardado en la auditoría.
+        var branches = await db.Branches.AsNoTracking().ToDictionaryAsync(b => b.Id.ToString(), b => b.Name, ct);
+        var roomNames = await db.Rooms.AsNoTracking().ToDictionaryAsync(r => r.Id.ToString(), r => r.Name, ct);
+        var rackNames = await db.Racks.AsNoTracking().ToDictionaryAsync(r => r.Id.ToString(), r => r.Name, ct);
+        var deviceNames = await db.NetworkDevices.AsNoTracking().ToDictionaryAsync(d => d.Id.ToString(), d => d.Name, ct);
+        var outletCodes = await db.NetworkOutlets.AsNoTracking().ToDictionaryAsync(o => o.Id.ToString(), o => o.Code, ct);
+        var portLabels = (await PortLabelsAsync(ct)).ToDictionary(p => p.Key.ToString(), p => p.Value);
+        var collectors = await db.Agents.AsNoTracking()
+            .Select(a => new { a.Id, Name = db.Machines.Where(m => m.Id == a.MachineId).Select(m => m.Name).First() })
+            .ToDictionaryAsync(a => a.Id.ToString(), a => a.Name, ct);
+
+        string? Resolve(string field, string id) => field switch
+        {
+            "sucursalId" => branches.GetValueOrDefault(id),
+            "salaId" => roomNames.GetValueOrDefault(id),
+            "gabineteId" => rackNames.GetValueOrDefault(id),
+            "recolectorId" => collectors.GetValueOrDefault(id),
+            _ => null,
+        };
+        string? Current(string entity, string? id) => id is null ? null : entity switch
+        {
+            "salas" => roomNames.GetValueOrDefault(id),
+            "gabinetes" => rackNames.GetValueOrDefault(id),
+            "dispositivos_red" => deviceNames.GetValueOrDefault(id),
+            "puntos_red" => outletCodes.GetValueOrDefault(id),
+            "puertos" => portLabels.GetValueOrDefault(id),
+            _ => null,
+        };
+
+        var items = rows.Select(r => new HistoryItem(
+            r.Log.Id, r.Log.Timestamp, r.Log.Action, HistoryText.Title(r.Log.Action), r.Log.Entity, r.Log.EntityId,
+            Current(r.Log.Entity, r.Log.EntityId) ?? HistoryText.Subject(r.Log.Details), r.User,
+            HistoryText.Changes(r.Log.Details, Resolve))).ToList();
+        return new PagedResult<HistoryItem>(items, total, page, pageSize);
     }
 
     /// <summary>Ruta completa desde una roseta o un puerto (W-65). null si el origen no existe o no es visible.</summary>

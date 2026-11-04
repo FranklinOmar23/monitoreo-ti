@@ -11,8 +11,8 @@ using static MonitoreoTI.Infrastructure.Panel.PanelQueries;
 namespace MonitoreoTI.Infrastructure.Panel;
 
 /// <summary>
-/// Lecturas de alertas (W-20, W-21) y reglas (W-22). Un usuario con sucursales asignadas ve solo las alertas de los
-/// equipos de esas sucursales; las alertas sin equipo (red, Fase 4) solo las ve quien tiene acceso a todas.
+/// Lecturas de alertas (W-20, W-21, W-54) y reglas (W-22). Un usuario con sucursales asignadas ve solo las alertas de
+/// los equipos y de los dispositivos de red de esas sucursales.
 /// </summary>
 public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeProvider clock)
 {
@@ -25,7 +25,8 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         if (branches is null)
             return alerts;
         var machineIds = db.Machines.Where(m => branches.Contains(m.BranchId)).Select(m => m.Id);
-        return alerts.Where(a => a.MachineId != null && machineIds.Contains(a.MachineId.Value));
+        var deviceIds = db.NetworkDevices.Where(d => branches.Contains(d.BranchId)).Select(d => d.Id);
+        return alerts.Where(a => a.DeviceId != null ? deviceIds.Contains(a.DeviceId.Value) : a.MachineId != null && machineIds.Contains(a.MachineId.Value));
     }
 
     public async Task<AlertList> AlertsAsync(AlertFilter filter, CancellationToken ct)
@@ -33,13 +34,18 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         var scoped = await VisibleAlertsAsync(ct);
 
         if (filter.BranchId is int branchId)
-            scoped = scoped.Where(a => db.Machines.Any(m => m.Id == a.MachineId && m.BranchId == branchId));
+            scoped = scoped.Where(a => a.DeviceId != null
+                ? db.NetworkDevices.Any(d => d.Id == a.DeviceId && d.BranchId == branchId)
+                : db.Machines.Any(m => m.Id == a.MachineId && m.BranchId == branchId));
         if (filter.MachineId is int machineId)
             scoped = scoped.Where(a => a.MachineId == machineId);
+        if (filter.Network is bool network)
+            scoped = network ? scoped.Where(a => a.DeviceId != null) : scoped.Where(a => a.DeviceId == null);
         if (!string.IsNullOrWhiteSpace(filter.Query))
         {
             var q = filter.Query.Trim();
-            scoped = scoped.Where(a => a.Message.Contains(q) || db.Machines.Any(m => m.Id == a.MachineId && m.Name.Contains(q)));
+            scoped = scoped.Where(a => a.Message.Contains(q) || db.Machines.Any(m => m.Id == a.MachineId && m.Name.Contains(q))
+                || db.NetworkDevices.Any(d => d.Id == a.DeviceId && d.Name.Contains(q)));
         }
 
         var dayAgo = Now.AddDays(-1);
@@ -87,6 +93,9 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
                 a.Source,
                 a.MachineId,
                 Machine = db.Machines.Where(m => m.Id == a.MachineId).Select(m => new { m.Name, m.BranchId, Branch = m.Branch!.Name }).FirstOrDefault(),
+                a.DeviceId,
+                Device = db.NetworkDevices.Where(d => d.Id == a.DeviceId)
+                    .Select(d => new { d.Name, d.BranchId, Branch = db.Branches.Where(b => b.Id == d.BranchId).Select(b => b.Name).First() }).FirstOrDefault(),
                 HandledBy = db.Users.Where(u => u.Id == a.HandledById).Select(u => u.Name).FirstOrDefault(),
                 a.CreatedAt,
                 a.ResolvedAt,
@@ -95,8 +104,8 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             .ToListAsync(ct);
 
         var items = rows.Select(a => new AlertListItem(
-            a.Id, Text(a.Level), Text(a.Status), a.Message, a.Source, a.MachineId, a.Machine?.Name, a.Machine?.BranchId,
-            a.Machine?.Branch, a.HandledBy, a.CreatedAt, a.ResolvedAt, a.Code is not null)).ToList();
+            a.Id, Text(a.Level), Text(a.Status), a.Message, a.Source, a.MachineId, a.Machine?.Name, a.Machine?.BranchId ?? a.Device?.BranchId,
+            a.Machine?.Branch ?? a.Device?.Branch, a.HandledBy, a.CreatedAt, a.ResolvedAt, a.Code is not null, a.DeviceId, a.Device?.Name)).ToList();
         return new AlertList(new PagedResult<AlertListItem>(items, total, page, pageSize), counts);
     }
 
@@ -110,6 +119,8 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
                 Machine = db.Machines.Where(m => m.Id == a.MachineId)
                     .Select(m => new { m.Name, m.Status, m.BranchId, Branch = m.Branch!.Name }).FirstOrDefault(),
                 Rule = db.AlertRules.Where(r => r.Id == a.RuleId).Select(r => r.Name).FirstOrDefault(),
+                Device = db.NetworkDevices.Where(d => d.Id == a.DeviceId)
+                    .Select(d => new { d.Name, d.BranchId, Branch = db.Branches.Where(b => b.Id == d.BranchId).Select(b => b.Name).First() }).FirstOrDefault(),
                 HandledBy = db.Users.Where(u => u.Id == a.HandledById).Select(u => u.Name).FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct);
@@ -118,9 +129,9 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
 
         var a = alert.Alert;
         var since = Now.AddDays(-30);
-        var recurrences = a.Code is null || a.MachineId is null
+        var recurrences = a.Code is null || (a.MachineId is null && a.DeviceId is null)
             ? 0
-            : await db.Alerts.CountAsync(x => x.MachineId == a.MachineId && x.Code == a.Code && x.Id != a.Id && x.CreatedAt >= since, ct);
+            : await db.Alerts.CountAsync(x => x.MachineId == a.MachineId && x.DeviceId == a.DeviceId && x.Code == a.Code && x.Id != a.Id && x.CreatedAt >= since, ct);
 
         var entityId = id.ToString();
         var audit = await db.AuditLogs.AsNoTracking()
@@ -140,8 +151,8 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         return new AlertDetail(
             a.Id, Text(a.Level), Text(a.Status), a.Message, a.Detail, a.Advice, a.Source, a.Code, a.Code is not null,
             a.MachineId, alert.Machine?.Name, alert.Machine is null ? null : Text(alert.Machine.Status),
-            alert.Machine?.BranchId, alert.Machine?.Branch, a.RuleId, alert.Rule, alert.HandledBy, a.CreatedAt, a.ResolvedAt,
-            recurrences, history.OrderBy(h => h.At).ToList());
+            alert.Machine?.BranchId ?? alert.Device?.BranchId, alert.Machine?.Branch ?? alert.Device?.Branch, a.RuleId, alert.Rule, alert.HandledBy,
+            a.CreatedAt, a.ResolvedAt, recurrences, history.OrderBy(h => h.At).ToList(), a.DeviceId, alert.Device?.Name, a.PortId);
     }
 
     private static string ActionLabel(string action) => action switch

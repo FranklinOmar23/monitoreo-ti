@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text.Json;
 using MonitoreoTI.Application.Agents;
+using MonitoreoTI.Application.Network;
 
 namespace MonitoreoTI.Api.Agents;
 
@@ -61,6 +62,12 @@ public sealed class AgentConnectionRegistry
 
     public AgentConnection? Get(int agentId) => _connections.GetValueOrDefault(agentId);
 
+    public IReadOnlyCollection<AgentConnection> All() => _connections.Values.ToList();
+
+    /// <summary>La conexión del agente de ese equipo, si está conectado.</summary>
+    public AgentConnection? FindByMachine(int companyId, int machineId) =>
+        _connections.Values.FirstOrDefault(c => c.Identity.CompanyId == companyId && c.Identity.MachineId == machineId);
+
     /// <summary>Registra la conexión y devuelve la que reemplaza (a cerrar), si la había.</summary>
     public AgentConnection? Replace(AgentConnection connection)
     {
@@ -79,4 +86,30 @@ public sealed class AgentConnectionRegistry
     /// <summary>Quita la conexión; true solo si seguía siendo la vigente (no fue reemplazada).</summary>
     public bool Remove(AgentConnection connection) =>
         _connections.TryRemove(new KeyValuePair<int, AgentConnection>(connection.Identity.AgentId, connection));
+}
+
+/// <summary>
+/// Manda la lista de dispositivos SNMP vigente a los recolectores conectados (config_actualizada); los que no están
+/// conectados la reciben en la bienvenida al volver.
+/// </summary>
+public sealed class CollectorConfigPublisher(AgentConnectionRegistry registry, ISnmpCollectors collectors, ILogger<CollectorConfigPublisher> logger)
+    : ICollectorConfigPublisher
+{
+    public async Task ConfigChangedAsync(int companyId, IEnumerable<int> agentIds, CancellationToken cancellationToken)
+    {
+        foreach (var agentId in agentIds.Distinct())
+        {
+            if (registry.Get(agentId) is not { } connection || connection.Identity.CompanyId != companyId)
+                continue;
+            try
+            {
+                var config = await collectors.ConfigAsync(connection.Identity, cancellationToken);
+                await connection.SendAsync("config_actualizada", new { recolector = AgentGateway.CollectorMessage(config) }, cancellationToken);
+            }
+            catch (Exception ex) when (ex is System.Net.WebSockets.WebSocketException or ObjectDisposedException)
+            {
+                logger.LogInformation("Agente {AgentId}: no se pudo avisar el cambio de dispositivos; lo recibirá al reconectarse.", agentId);
+            }
+        }
+    }
 }

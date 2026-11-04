@@ -136,6 +136,7 @@ internal sealed class AlertConfiguration : IEntityTypeConfiguration<Alert>
         b.Property(x => x.Source).HasColumnName("origen").HasMaxLength(200);
         b.Property(x => x.CreatedAt).HasColumnName("creada").DefaultUtcNow();
         b.Property(x => x.ResolvedAt).HasColumnName("resuelta");
+        b.Property(x => x.NotifiedAt).HasColumnName("notificada");
 
         b.HasAlternateKey(x => new { x.CompanyId, x.Id });
         b.HasOne<Machine>().WithMany()

@@ -52,3 +52,12 @@ export function isAllowedNavigation(targetUrl: string, appUrl: string): boolean 
     return false;
   }
 }
+
+/**
+ * Agrega "Equipo/<nombre del PC>" al User-Agent: en "Mi perfil" cada sesión abierta muestra desde qué equipo se
+ * inició. Solo letras, números, punto, guion y guion bajo (lo demás se codifica), como mucho 40 caracteres.
+ */
+export function deviceUserAgent(base: string, hostname: string): string {
+  const name = encodeURIComponent(hostname.trim().slice(0, 40)).replace(/[^A-Za-z0-9%._-]/g, '');
+  return name ? `${base} Equipo/${name}` : base;
+}

@@ -14,6 +14,9 @@ public static class AuthClaims
     public const string Permission = "perm";
     public const string SuperAdmin = "sa";
 
+    /// <summary>Refresh token con el que se emitió el acceso: "Mi perfil" marca la sesión actual.</summary>
+    public const string SessionId = "sid";
+
     // Solo en desafíos.
     public const string Purpose = "paso";
     public const string PendingSecret = "pend";
@@ -28,7 +31,8 @@ public static class ChallengePurpose
 }
 
 public sealed record AccessTokenContent(
-    int UserId, string Name, string Email, int? CompanyId, string? Role, bool IsSuperAdmin, IReadOnlyCollection<string> Permissions);
+    int UserId, string Name, string Email, int? CompanyId, string? Role, bool IsSuperAdmin, IReadOnlyCollection<string> Permissions,
+    long? SessionId = null);
 
 /// <summary>
 /// Emite y valida los JWT. Los desafíos usan otra audiencia: un desafío nunca sirve como token de acceso
@@ -69,6 +73,8 @@ public sealed class AuthTokenService(AuthOptions options, TimeProvider clock)
             claims.Add(new Claim(AuthClaims.Role, content.Role));
         if (content.IsSuperAdmin)
             claims.Add(new Claim(AuthClaims.SuperAdmin, "1"));
+        if (content.SessionId is long sessionId)
+            claims.Add(new Claim(AuthClaims.SessionId, sessionId.ToString()));
         claims.AddRange(content.Permissions.Select(p => new Claim(AuthClaims.Permission, p)));
 
         var expires = clock.GetUtcNow().UtcDateTime + options.AccessTokenLifetime;

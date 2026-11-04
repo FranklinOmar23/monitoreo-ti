@@ -17,7 +17,8 @@ namespace MonitoreoTI.Infrastructure.Network;
 /// valida dentro de la empresa y del alcance de sucursales del usuario; cada cambio queda en auditoría.
 /// Las claves SNMP se cifran con la llave de la aplicación (AES-GCM) y nunca se devuelven ni se auditan.
 /// </summary>
-public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries queries, IAuditTrail audit, SecretProtector protector)
+public sealed class NetworkCommands(
+    MonitoreoDbContext db, NetworkQueries queries, IAuditTrail audit, SecretProtector protector, ICurrentUser user, ICollectorConfigPublisher collectors)
 {
     private async Task<bool> CanUseBranchAsync(int branchId, CancellationToken ct)
     {
@@ -161,7 +162,13 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
 
     private static object ModelSnapshot(DeviceModel m) => new
     {
-        marca = m.Brand, modelo = m.ModelName, tipo = Text(m.Type), alturaU = m.HeightUnits, puertos = m.PortCount, tipoPuertos = m.PortDescription, activo = m.IsActiveDevice,
+        marca = m.Brand,
+        modelo = m.ModelName,
+        tipo = Text(m.Type),
+        alturaU = m.HeightUnits,
+        puertos = m.PortCount,
+        tipoPuertos = m.PortDescription,
+        activo = m.IsActiveDevice,
     };
 
     // ------------------------------------------------------------------ dispositivos
@@ -179,6 +186,8 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
             return CommandResult.Conflict("Ya hay un dispositivo con ese nombre.");
         if (!model.IsActiveDevice && input.SnmpClaveAutenticacion is not null)
             return CommandResult.Invalid("Un equipo pasivo (patch panel) no tiene SNMP.");
+        if (await ValidateCollectorAsync(input.RecolectorId, input.SucursalId, model.IsActiveDevice, ct) is { } badCollector)
+            return badCollector;
 
         var device = new NetworkDevice
         {
@@ -192,6 +201,7 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
             ManagementIp = Clean(input.IpGestion),
             Firmware = Clean(input.Firmware),
             Status = model.IsActiveDevice ? NetworkDeviceStatus.NotResponding : NetworkDeviceStatus.Passive,
+            CollectorAgentId = input.RecolectorId,
         };
         ApplySnmp(device, input);
         foreach (var port in PortPlan.FromModel(model.PortCount, model.PortDescription, model.Type == DeviceType.PatchPanel))
@@ -200,6 +210,7 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
         db.NetworkDevices.Add(device);
         await db.SaveChangesAsync(ct);
         await audit.RecordAsync("dispositivo.crear", "dispositivos_red", device.Id.ToString(), null, DeviceSnapshot(device), ct);
+        await CollectorsChangedAsync([device.CollectorAgentId], ct);
         return CommandResult.Ok(device.Id);
     }
 
@@ -217,18 +228,23 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
             return CommandResult.Conflict("Ya hay un dispositivo con ese nombre.");
         if (device.Status == NetworkDeviceStatus.Passive && input.SnmpClaveAutenticacion is not null)
             return CommandResult.Invalid("Un equipo pasivo (patch panel) no tiene SNMP.");
+        if (await ValidateCollectorAsync(input.RecolectorId, input.SucursalId, device.Status != NetworkDeviceStatus.Passive, ct) is { } badCollector)
+            return badCollector;
 
         var before = DeviceSnapshot(device);
+        var previousCollector = device.CollectorAgentId;
         device.Name = name;
         device.BranchId = input.SucursalId;
         device.RackId = input.GabineteId;
         device.RackPositionU = input.GabineteId is null ? null : (byte?)input.PosicionU;
         device.ManagementIp = Clean(input.IpGestion);
         device.Firmware = Clean(input.Firmware);
+        device.CollectorAgentId = input.RecolectorId;
         ApplySnmp(device, input);
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync("dispositivo.editar", "dispositivos_red", id.ToString(), before, DeviceSnapshot(device), ct);
+        await CollectorsChangedAsync([previousCollector, device.CollectorAgentId], ct);
         return CommandResult.Ok(id);
     }
 
@@ -243,11 +259,12 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
         if (await ValidatePlacementAsync(device.BranchId, input.GabineteId, input.PosicionU, device.HeightUnits, device.Id, ct) is { } invalid)
             return invalid;
 
-        var before = new { gabineteId = device.RackId, posicionU = device.RackPositionU };
+        var before = new { nombre = device.Name, gabineteId = device.RackId, posicionU = device.RackPositionU };
         device.RackId = input.GabineteId;
         device.RackPositionU = input.GabineteId is null ? null : (byte?)input.PosicionU;
         await db.SaveChangesAsync(ct);
-        await audit.RecordAsync("dispositivo.mover", "dispositivos_red", id.ToString(), before, new { gabineteId = device.RackId, posicionU = device.RackPositionU }, ct);
+        await audit.RecordAsync("dispositivo.mover", "dispositivos_red", id.ToString(), before,
+            new { nombre = device.Name, gabineteId = device.RackId, posicionU = device.RackPositionU }, ct);
         return CommandResult.Ok(id);
     }
 
@@ -258,12 +275,14 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
         if (device is null)
             return CommandResult.NotFound();
         var before = DeviceSnapshot(device);
+        var previousCollector = device.CollectorAgentId;
         device.Status = NetworkDeviceStatus.Retired;
         device.RackId = null;
         device.RackPositionU = null;
         device.CollectorAgentId = null;
         await db.SaveChangesAsync(ct);
         await audit.RecordAsync("dispositivo.baja", "dispositivos_red", id.ToString(), before, DeviceSnapshot(device), ct);
+        await CollectorsChangedAsync([previousCollector], ct);
         return CommandResult.Ok(id);
     }
 
@@ -286,6 +305,34 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
         return RackLayout.Check(rack.HeightUnits, placed, positionU ?? 0, heightUnits, deviceId) is { } reason ? CommandResult.Invalid(reason) : null;
     }
 
+    /// <summary>El recolector es un agente aprobado y vigente de la misma sucursal; un equipo pasivo no tiene.</summary>
+    private async Task<CommandResult?> ValidateCollectorAsync(int? agentId, int branchId, bool isActiveDevice, CancellationToken ct)
+    {
+        if (agentId is not int id)
+            return null;
+        if (!isActiveDevice)
+            return CommandResult.Invalid("Un equipo pasivo (patch panel) no se consulta por SNMP.");
+        var ok = await db.Agents.AnyAsync(a => a.Id == id && !a.IsRevoked && a.IsApproved
+            && db.Machines.Any(m => m.Id == a.MachineId && m.BranchId == branchId && m.Status != MachineStatus.Retired), ct);
+        return ok ? null : CommandResult.Invalid("El recolector debe ser un equipo con agente de la misma sucursal.");
+    }
+
+    /// <summary>
+    /// Marca como recolector a todo agente con dispositivos asignados (y desmarca al que se quedó sin ninguno) y le
+    /// manda su lista nueva si está conectado.
+    /// </summary>
+    private async Task CollectorsChangedAsync(IEnumerable<int?> agentIds, CancellationToken ct)
+    {
+        var ids = agentIds.OfType<int>().Distinct().ToList();
+        if (ids.Count == 0)
+            return;
+        foreach (var agent in await db.Agents.Where(a => ids.Contains(a.Id)).ToListAsync(ct))
+            agent.IsCollector = await db.NetworkDevices.AnyAsync(d => d.CollectorAgentId == agent.Id && d.Status != NetworkDeviceStatus.Retired, ct)
+                || await db.Machines.AnyAsync(m => m.CollectorAgentId == agent.Id && m.Status != MachineStatus.Retired, ct);
+        await db.SaveChangesAsync(ct);
+        await collectors.ConfigChangedAsync(user.CompanyId, ids, ct);
+    }
+
     private void ApplySnmp(NetworkDevice device, DeviceInput input)
     {
         device.SnmpUser = Clean(input.SnmpUsuario);
@@ -304,8 +351,16 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
     /// <summary>Lo que se audita del dispositivo: nunca las claves SNMP, solo si hay credencial.</summary>
     private static object DeviceSnapshot(NetworkDevice d) => new
     {
-        nombre = d.Name, sucursalId = d.BranchId, gabineteId = d.RackId, posicionU = d.RackPositionU, ip = d.ManagementIp,
-        firmware = d.Firmware, estado = Text(d.Status), snmpUsuario = d.SnmpUser, snmpCredencial = d.SnmpEncryptedCredential is not null,
+        nombre = d.Name,
+        sucursalId = d.BranchId,
+        gabineteId = d.RackId,
+        posicionU = d.RackPositionU,
+        ip = d.ManagementIp,
+        firmware = d.Firmware,
+        estado = Text(d.Status),
+        snmpUsuario = d.SnmpUser,
+        snmpCredencial = d.SnmpEncryptedCredential is not null,
+        recolectorId = d.CollectorAgentId,
     };
 
     // ------------------------------------------------------------------ puertos
@@ -323,6 +378,56 @@ public sealed class NetworkCommands(MonitoreoDbContext db, NetworkQueries querie
         port.IsVmHost = input.EsHostVm;
         await db.SaveChangesAsync(ct);
         await audit.RecordAsync("puerto.editar", "puertos", id.ToString(), before, new { nombre = port.Name, tipo = input.Tipo, vlan = port.Vlan, hostVm = port.IsVmHost }, ct);
+        return CommandResult.Ok(id);
+    }
+
+    /// <summary>
+    /// W-67: fijar a mano si el puerto es troncal y qué equipo tiene conectado (un equipo sin agente, como una
+    /// impresora, se ubica por la MAC registrada en su ficha). Con los dos null, el puerto vuelve a lo que detecte SNMP.
+    /// </summary>
+    public async Task<CommandResult> AssignPortAsync(int id, PortAssignmentInput input, CancellationToken ct)
+    {
+        var devices = (await queries.VisibleDevicesAsync(ct)).Select(d => d.Id);
+        var port = await db.Ports.Include(p => p.Device).FirstOrDefaultAsync(p => p.Id == id && devices.Contains(p.DeviceId), ct);
+        if (port is null)
+            return CommandResult.NotFound();
+        if (port.Device!.Status == NetworkDeviceStatus.Passive)
+            return CommandResult.Invalid("Un patch panel no tiene equipos conectados: asígnelo en el puerto del switch.");
+        if (input.MaquinaId is not null && input.Troncal == true)
+            return CommandResult.Invalid("Un puerto troncal no tiene un equipo asignado.");
+
+        string? machineName = null;
+        string? mac = null;
+        if (input.MaquinaId is int machineId)
+        {
+            var machine = await db.Machines.Where(m => m.Id == machineId && m.Status != MachineStatus.Retired && m.BranchId == port.Device.BranchId)
+                .Select(m => new { m.Name, m.MacAddress, Card = db.NetworkInterfaces.Where(i => i.MachineId == m.Id).OrderBy(i => i.Type).Select(i => i.MacAddress).FirstOrDefault() })
+                .FirstOrDefaultAsync(ct);
+            if (machine is null)
+                return CommandResult.Invalid("El equipo no existe o es de otra sucursal.");
+            mac = machine.Card ?? (Application.Agents.MacAddress.TryNormalize(machine.MacAddress, out var normalized) ? normalized : null);
+            if (mac is null)
+                return CommandResult.Invalid($"{machine.Name} no tiene MAC registrada: agréguela en su ficha.");
+            machineName = machine.Name;
+        }
+
+        var assigned = await db.MacTable.Where(m => m.PortId == id && m.MachineId != null).ToListAsync(ct);
+        var before = new { troncal = port.IsTrunk, manual = port.IsManualAssignment, maquina = assigned.Select(m => m.MachineId).FirstOrDefault() };
+        port.IsManualAssignment = input.MaquinaId is not null || input.Troncal is not null;
+        if (input.Troncal is bool trunk)
+            port.IsTrunk = trunk;
+        else if (input.MaquinaId is not null)
+            port.IsTrunk = false;
+
+        db.MacTable.RemoveRange(assigned);
+        if (input.MaquinaId is int machineToAssign)
+        {
+            var now = DateTime.UtcNow;
+            db.MacTable.Add(new MacTableEntry { PortId = id, MachineId = machineToAssign, MacAddress = mac!, Vlan = port.Vlan, FirstSeenAt = now, LastSeenAt = now });
+        }
+        await db.SaveChangesAsync(ct);
+        await audit.RecordAsync("puerto.asignar", "puertos", id.ToString(), before,
+            new { troncal = port.IsTrunk, manual = port.IsManualAssignment, maquina = machineName }, ct);
         return CommandResult.Ok(id);
     }
 

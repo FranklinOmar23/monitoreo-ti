@@ -16,6 +16,11 @@ internal sealed class CompanyConfiguration : IEntityTypeConfiguration<Company>
         b.Property(x => x.Phone).HasColumnName("telefono").Varchar(20);
         b.Property(x => x.PlanId).HasColumnName("plan_id");
         b.Property(x => x.Status).HasColumnName("estado");
+        b.Property(x => x.AutoUpdateAgents).HasColumnName("actualizacion_automatica");
+        b.Property(x => x.AskRemoteConsent).HasColumnName("pedir_permiso_remoto");
+        b.Property(x => x.Logo).HasColumnName("logo");
+        b.Property(x => x.LogoType).HasColumnName("logo_tipo").Varchar(20);
+        b.Property(x => x.BrandColor).HasColumnName("color_primario").HasColumnType("char(7)").IsUnicode(false);
         b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
 
         b.HasOne(x => x.Plan).WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.NoAction);

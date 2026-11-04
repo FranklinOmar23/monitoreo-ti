@@ -19,7 +19,13 @@ public class User
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedUntil { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Recibe por correo las alertas críticas de lo que gestiona.</summary>
+    public bool NotifyByEmail { get; set; } = true;
     public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>Último código 2FA válido: el acceso remoto y los scripts exigen que sea reciente (decisión 52).</summary>
+    public DateTime? LastTwoFactorAt { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public ICollection<UserCompany> Companies { get; set; } = new List<UserCompany>();

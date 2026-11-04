@@ -27,9 +27,11 @@ public sealed class AlertCommands(
         if (alert is null)
             return null;
 
-        var branchId = alert.MachineId is null
-            ? null
-            : await db.Machines.Where(m => m.Id == alert.MachineId).Select(m => (int?)m.BranchId).FirstOrDefaultAsync(ct);
+        var branchId = alert.DeviceId is int deviceId
+            ? await db.NetworkDevices.Where(d => d.Id == deviceId).Select(d => (int?)d.BranchId).FirstOrDefaultAsync(ct)
+            : alert.MachineId is null
+                ? null
+                : await db.Machines.Where(m => m.Id == alert.MachineId).Select(m => (int?)m.BranchId).FirstOrDefaultAsync(ct);
         var allowed = await user.AllowedBranchIdsAsync(ct);
         if (allowed is not null && (branchId is null || !allowed.Contains(branchId.Value)))
             return null;

@@ -106,7 +106,13 @@ describe('GatewayClient', () => {
     const socket = connect(client, 10);
 
     expect(client.isReady).toBe(true);
-    expect(ready).toHaveBeenCalledWith({ heartbeatSeconds: 10, metricsSeconds: 60, isCollector: false });
+    expect(ready).toHaveBeenCalledWith({
+      heartbeatSeconds: 10,
+      metricsSeconds: 60,
+      isCollector: false,
+      collector: null,
+      companyPublicKey: null,
+    });
 
     vi.advanceTimersByTime(10_000);
     vi.advanceTimersByTime(10_000);

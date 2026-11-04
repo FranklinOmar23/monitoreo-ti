@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ApiError, type AuthApi, type LoginResponse, type SessionTokens } from '@monitoreoti/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { receiveDeepLinkForTest } from '../data/deepLinks';
 import { extractResetToken, LoginScreen } from './LoginScreen';
 
 afterEach(cleanup);
@@ -88,10 +89,8 @@ describe('LoginScreen', () => {
     );
 
     typeCredentials();
-    const code = await screen.findByLabelText('Código');
-    fireEvent.change(code, { target: { value: '12a34 56' } });
-    expect((code as HTMLInputElement).value).toBe('123456');
-    fireEvent.click(screen.getByRole('button', { name: 'Verificar' }));
+    // El autocompletado del sistema mete el código en la primera casilla: se reparte y se envía solo.
+    fireEvent.change(await screen.findByLabelText('Dígito 1 de 6'), { target: { value: '12a34 56' } });
 
     fireEvent.click(await screen.findByRole('button', { name: /Clínica San Rafael/ }));
 
@@ -117,6 +116,33 @@ describe('LoginScreen', () => {
     expect(screen.getByText('ABCD EFGH IJKL MNOP')).toBeTruthy();
   });
 
+  it('un código incorrecto sacude y borra las casillas para escribirlo de nuevo', async () => {
+    const verifyTwoFactor = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(401, 'codigo_invalido', 'El código no es válido.'))
+      .mockResolvedValueOnce(step('completado', { sesion: tokens }));
+    const onSession = vi.fn(() => Promise.resolve());
+    render(
+      <LoginScreen
+        api={fakeApi({ login: () => Promise.resolve(step('verificar-2fa')), verifyTwoFactor })}
+        onSession={onSession}
+      />,
+    );
+
+    typeCredentials();
+    fireEvent.change(await screen.findByLabelText('Dígito 1 de 6'), { target: { value: '111111' } });
+
+    expect((await screen.findByRole('alert')).textContent).toBe('El código no es válido.');
+    const first = screen.getByLabelText('Dígito 1 de 6') as HTMLInputElement;
+    expect(first.value).toBe('');
+    expect(first.getAttribute('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(first);
+
+    fireEvent.change(first, { target: { value: '222222' } });
+    await waitFor(() => expect(onSession).toHaveBeenCalledWith(tokens));
+    expect(verifyTwoFactor).toHaveBeenLastCalledWith('desafio-1', '222222');
+  });
+
   it('si el desafío venció vuelve al formulario de inicio', async () => {
     render(
       <LoginScreen
@@ -129,8 +155,7 @@ describe('LoginScreen', () => {
     );
 
     typeCredentials();
-    fireEvent.change(await screen.findByLabelText('Código'), { target: { value: '123456' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Verificar' }));
+    fireEvent.change(await screen.findByLabelText('Dígito 1 de 6'), { target: { value: '123456' } });
 
     expect(await screen.findByRole('button', { name: 'Entrar' })).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe('La verificación venció.');
@@ -161,5 +186,15 @@ describe('LoginScreen', () => {
   it('extrae el token del enlace o acepta el token solo', () => {
     expect(extractResetToken(' monitoreoti://restablecer?token=XyZ_1-2 ')).toBe('XyZ_1-2');
     expect(extractResetToken('XyZ_1-2')).toBe('XyZ_1-2');
+  });
+});
+
+describe('enlace del correo (monitoreoti://restablecer)', () => {
+  it('abre "Contraseña nueva" con el enlace ya puesto', async () => {
+    render(<LoginScreen api={fakeApi({})} onSession={vi.fn()} />);
+    act(() => receiveDeepLinkForTest({ kind: 'restablecer', token: 'abc_DEF-1234567890xyz' }));
+    const link = (await screen.findByLabelText('Enlace del correo')) as HTMLInputElement;
+    expect(link.value).toBe('monitoreoti://restablecer?token=abc_DEF-1234567890xyz');
+    expect(extractResetToken(link.value)).toBe('abc_DEF-1234567890xyz');
   });
 });

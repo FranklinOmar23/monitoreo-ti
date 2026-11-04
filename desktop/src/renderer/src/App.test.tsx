@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Shell } from './App';
+import { receiveDeepLinkForTest } from './data/deepLinks';
 import { DashboardPage } from './pages/DashboardPage';
 import { EquiposPage } from './pages/EquiposPage';
 import { FichaPage } from './pages/FichaPage';
@@ -135,5 +136,19 @@ describe('Panel con datos del API', () => {
 
     expect(screen.getByText('Ana Martínez')).toBeTruthy();
     expect(screen.getAllByText('Grupo Comercial Caribe').length).toBeGreaterThan(0);
+  });
+
+  it('un enlace monitoreoti:// abre la ficha del equipo, también si llega por su código QR', async () => {
+    const machineCall = vi.fn(() => Promise.resolve(machineDetail({ id: 3 })));
+    const resolveQr = vi.fn(() => Promise.resolve({ type: 'maquina' as const, id: 3 }));
+    renderWithPanel(
+      <Shell session={session} menu={[]} />,
+      fakePanelApi({ dashboard: () => Promise.resolve(dashboard), machine: machineCall, resolveQr }),
+    );
+    act(() => receiveDeepLinkForTest({ kind: 'maquina', id: 3 }));
+    await waitFor(() => expect(machineCall).toHaveBeenCalledWith(3));
+
+    act(() => receiveDeepLinkForTest({ kind: 'qr', code: '0f8fad5b-d9cb-469f-a165-70867728950e' }));
+    await waitFor(() => expect(resolveQr).toHaveBeenCalledWith('0f8fad5b-d9cb-469f-a165-70867728950e'));
   });
 });

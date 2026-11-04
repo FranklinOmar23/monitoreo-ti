@@ -71,12 +71,25 @@ describe('servicios', () => {
           StartMode: 'Auto',
           DelayedAutoStart: false,
         },
-        { Name: 'gupdate', DisplayName: 'Google Update', State: 'Stopped', StartMode: 'Auto', DelayedAutoStart: true },
+        {
+          Name: 'gupdate',
+          DisplayName: 'Google Update',
+          State: 'Stopped',
+          StartMode: 'Auto',
+          DelayedAutoStart: true,
+          ExitCode: 0,
+        },
       ]),
     );
     expect(servicios).toEqual([
       { nombre: 'Spooler', nombre_visible: 'Cola de impresión', estado: 'en_ejecucion', inicio: 'automatico' },
-      { nombre: 'gupdate', nombre_visible: 'Google Update', estado: 'detenido', inicio: 'automatico_retrasado' },
+      {
+        nombre: 'gupdate',
+        nombre_visible: 'Google Update',
+        estado: 'detenido',
+        inicio: 'automatico_retrasado',
+        codigo_salida: 0,
+      },
     ]);
   });
 });

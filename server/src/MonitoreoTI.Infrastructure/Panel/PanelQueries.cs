@@ -39,6 +39,26 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
     public async Task<bool> CanSeeMachineAsync(int machineId, CancellationToken ct) =>
         await (await VisibleMachinesAsync(ct, includeRetired: true)).AnyAsync(m => m.Id == machineId, ct);
 
+    /// <summary>
+    /// Lo que identifica un código QR, si el usuario puede verlo: un equipo de sus sucursales, o (con red.ver) un
+    /// gabinete, dispositivo de red o roseta de su empresa. Null en cualquier otro caso.
+    /// </summary>
+    public async Task<QrTarget?> ResolveQrAsync(Guid code, CancellationToken ct)
+    {
+        if (user.HasPermission("equipos.ver")
+            && await (await VisibleMachinesAsync(ct, includeRetired: true)).Where(m => m.QrCode == code).Select(m => (int?)m.Id).FirstOrDefaultAsync(ct) is int machineId)
+            return new QrTarget("maquina", machineId);
+        if (!user.HasPermission("red.ver"))
+            return null;
+        if (await db.NetworkDevices.AsNoTracking().Where(d => d.QrCode == code).Select(d => (int?)d.Id).FirstOrDefaultAsync(ct) is int deviceId)
+            return new QrTarget("dispositivo", deviceId);
+        if (await db.Racks.AsNoTracking().Where(r => r.QrCode == code).Select(r => (int?)r.Id).FirstOrDefaultAsync(ct) is int rackId)
+            return new QrTarget("gabinete", rackId);
+        if (await db.NetworkOutlets.AsNoTracking().Where(o => o.QrCode == code).Select(o => (int?)o.Id).FirstOrDefaultAsync(ct) is int outletId)
+            return new QrTarget("roseta", outletId);
+        return null;
+    }
+
     private static async Task<StatusCounts> CountAsync(IQueryable<Machine> machines, CancellationToken ct)
     {
         var groups = await machines.GroupBy(m => m.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
@@ -220,6 +240,7 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
                 Department = m.Department != null ? m.Department.Name : null,
                 AgentVersion = m.Agent != null ? m.Agent.Version : null,
                 HasAgent = m.Agent != null,
+                Collector = db.Machines.Where(c => c.Agent != null && c.Agent.Id == m.CollectorAgentId).Select(c => c.Name).FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct);
         if (machine is null)
@@ -258,7 +279,10 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             errors,
             m.RamTotalMb,
             m.ProcessCount,
-            volumes);
+            volumes,
+            m.SnmpVersion is null ? null
+                : new PrinterSnmpInfo(m.SnmpVersion, m.SnmpUser, m.SnmpEncryptedCredential is not null, m.CollectorAgentId, machine.Collector,
+                    m.LastSnmpPollAt, m.LastSnmpError));
     }
 
     public async Task<IReadOnlyList<MetricPoint>?> MetricsAsync(int machineId, MetricRange range, CancellationToken ct)

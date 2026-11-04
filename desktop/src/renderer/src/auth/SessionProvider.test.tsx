@@ -38,6 +38,19 @@ function installBridge(stored: string | null) {
     getAppInfo: () => Promise.resolve({ name: 'x', version: '0', serverUrl: 'http://localhost:5126' }),
     saveFile: () => Promise.resolve({ saved: false }),
     copyText: () => Promise.resolve(),
+    notify: () => Promise.resolve(),
+    onNotificationClick: () => () => undefined,
+    openTerminal: () => Promise.resolve(),
+    terminalTicket: () => Promise.resolve(null),
+    readText: () => Promise.resolve(''),
+    requestSession: () => Promise.resolve(false),
+    onSessionRequest: () => () => undefined,
+    // El explorador de archivos no se usa en estas pruebas.
+    files: {} as never,
+    view3d: {} as never,
+    deepLinks: { take: () => Promise.resolve(null), onOpen: () => () => undefined },
+    tray: { setCriticalCount: () => Promise.resolve(), onNavigate: () => () => undefined },
+    updates: { status: () => Promise.resolve(null), onReady: () => () => undefined, install: () => Promise.resolve() },
     session: {
       load: () => Promise.resolve(store.value),
       save: (token) => {

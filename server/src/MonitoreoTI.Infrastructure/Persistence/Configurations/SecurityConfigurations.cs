@@ -58,7 +58,9 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         b.Property(x => x.FailedLoginAttempts).HasColumnName("intentos_fallidos");
         b.Property(x => x.LockedUntil).HasColumnName("bloqueado_hasta");
         b.Property(x => x.IsActive).HasColumnName("activo");
+        b.Property(x => x.NotifyByEmail).HasColumnName("notificar_correo");
         b.Property(x => x.LastLoginAt).HasColumnName("ultimo_acceso");
+        b.Property(x => x.LastTwoFactorAt).HasColumnName("ultimo_2fa");
         b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
 
         b.HasMany(x => x.Companies).WithOne().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
@@ -95,6 +97,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
         b.Property(x => x.RevokedAt).HasColumnName("revocado");
         b.Property(x => x.ReplacedById).HasColumnName("reemplazado_por");
         b.Property(x => x.IpAddress).HasColumnName("ip_origen").Varchar(45);
+        b.Property(x => x.Device).HasColumnName("dispositivo").HasMaxLength(100);
 
         b.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne<Company>().WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.NoAction);

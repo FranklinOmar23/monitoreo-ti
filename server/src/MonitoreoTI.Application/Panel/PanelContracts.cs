@@ -17,6 +17,9 @@ public interface ICurrentUser
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 
+/// <summary>A qué apunta un código QR (monitoreoti://q/{codigo}): Type es maquina, gabinete, dispositivo o roseta.</summary>
+public sealed record QrTarget(string Type, int Id);
+
 // ------------------------------------------------------------------ dashboard (W-04)
 
 public sealed record StatusCounts(int Total, int Healthy, int Warning, int Critical, int Disconnected)
@@ -103,7 +106,12 @@ public sealed record MachineDetail(
     int OpenErrorCount,
     int? RamTotalMb,
     int? ProcessCount,
-    IReadOnlyList<VolumeItem> Volumes);
+    IReadOnlyList<VolumeItem> Volumes,
+    /// <summary>Impresoras consultadas por SNMP (nunca incluye la comunidad ni las claves).</summary>
+    PrinterSnmpInfo? Snmp = null);
+
+public sealed record PrinterSnmpInfo(
+    string Version, string? User, bool HasCredential, int? CollectorId, string? CollectorName, DateTime? LastPollAt, string? LastError);
 
 public sealed record ComponentItem(int Id, string Type, string? Description, string? Capacity, string Health, string? Detail, DateTime UpdatedAt);
 
@@ -160,4 +168,10 @@ public interface IRealtimeNotifier
 
     /// <summary>Un ticket se creó o cambió (estado, asignación, comentario, adjunto).</summary>
     Task TicketChangedAsync(int companyId, int branchId, int ticketId, int? machineId, CancellationToken cancellationToken);
+
+    /// <summary>Un puerto (o, con portId null, el dispositivo de red) cambió de estado.</summary>
+    Task PortStatusChangedAsync(int companyId, int branchId, int deviceId, int? portId, string status, CancellationToken cancellationToken);
+
+    /// <summary>Un comando o script cambió de estado (enviado, ejecutando, terminado...).</summary>
+    Task CommandChangedAsync(int companyId, int branchId, long commandId, Guid? batchId, int machineId, string status, CancellationToken cancellationToken);
 }

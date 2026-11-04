@@ -48,7 +48,7 @@ public sealed record VolumeSnapshot(string Drive, decimal TotalGb, decimal FreeG
 public sealed record MetricSample(DateTime At, decimal? Cpu, decimal? Ram, decimal? Temperature);
 public sealed record EventSnapshot(DateTime At, string? Source, int? Code);
 public sealed record StoppedService(string Name, string? DisplayName);
-public sealed record ComponentSnapshot(string Type, string? Description, string Health, string? Detail);
+public sealed record ComponentSnapshot(string Type, string? Description, string Health, string? Detail, string? Capacity = null);
 
 /// <summary>Lo que se sabe de un equipo al evaluarlo.</summary>
 public sealed record MachineSnapshot(
@@ -90,6 +90,7 @@ public static class HealthRules
         CriticalErrors(machine, rules, findings);
         DiskHealth(machine, findings);
         Antivirus(machine, rules, findings);
+        Toner(machine, rules, findings);
         return findings;
     }
 
@@ -260,7 +261,7 @@ public static class HealthRules
                 $"servicio:{service.Name}",
                 FindingLevel.Critical,
                 $"Servicio detenido: {name}",
-                "Es un servicio que arranca con Windows y estaba en ejecución. Mientras esté detenido, lo que hace deja de funcionar.",
+                "Es un servicio que arranca con Windows: estaba en ejecución y se detuvo con un error. Mientras esté detenido, lo que hace deja de funcionar.",
                 "Inícialo de nuevo desde Servicios (services.msc) y revisa en Errores por qué se detuvo.",
                 $"Servicio {service.Name}",
                 "servicio_detenido"));
@@ -284,6 +285,29 @@ public static class HealthRules
                          : "Respalda los datos y vigila el disco: si los sectores dañados aumentan, reemplázalo.",
                 $"SMART · {disk.Detail ?? "estado de salud del disco"}",
                 null));
+        }
+    }
+
+    /// <summary>Tóner (sección 14): menos de 20 % advertencia, menos de 5 % crítico. Los depósitos de residuos no cuentan.</summary>
+    private static void Toner(MachineSnapshot machine, RuleSet rules, List<Finding> findings)
+    {
+        if (rules.For("toner") is not { } rule)
+            return;
+        foreach (var supply in machine.Components.Where(c => c.Type == "toner"))
+        {
+            if (supply.Capacity is not { } text || !decimal.TryParse(text.TrimEnd('%', ' '), NumberStyles.Number, CultureInfo.InvariantCulture, out var percent))
+                continue;
+            if (Level(percent, rule, lessIsWorse: true) is not { } level)
+                continue;
+            var name = supply.Description ?? "consumible";
+            findings.Add(new Finding(
+                $"toner:{name}",
+                level,
+                $"{name} al {percent:0} %",
+                level == FindingLevel.Critical ? "El consumible está por agotarse: la impresora puede dejar de imprimir." : "El consumible se está acabando.",
+                level == FindingLevel.Critical ? "Cámbialo hoy." : "Pide el repuesto para tenerlo a mano.",
+                $"SNMP · prtMarkerSuppliesLevel · {percent:0} %",
+                "toner"));
         }
     }
 

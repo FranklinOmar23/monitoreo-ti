@@ -95,6 +95,14 @@ public sealed class SignalRNotifier(IHubContext<RealtimeHub> hub) : IRealtimeNot
     public Task TicketChangedAsync(int companyId, int branchId, int ticketId, int? machineId, CancellationToken cancellationToken) =>
         hub.Clients.Group(RealtimeHub.BranchGroup(companyId, branchId))
             .SendAsync("ticketActualizado", new { ticketId, maquinaId = machineId, sucursalId = branchId }, cancellationToken);
+
+    public Task PortStatusChangedAsync(int companyId, int branchId, int deviceId, int? portId, string status, CancellationToken cancellationToken) =>
+        hub.Clients.Group(RealtimeHub.BranchGroup(companyId, branchId))
+            .SendAsync("puertoEstadoCambio", new { dispositivoId = deviceId, puertoId = portId, estado = status, sucursalId = branchId }, cancellationToken);
+
+    public Task CommandChangedAsync(int companyId, int branchId, long commandId, Guid? batchId, int machineId, string status, CancellationToken cancellationToken) =>
+        hub.Clients.Group(RealtimeHub.BranchGroup(companyId, branchId))
+            .SendAsync("comandoActualizado", new { comandoId = commandId, loteId = batchId, maquinaId = machineId, estado = status }, cancellationToken);
 }
 
 /// <summary>Nombres de las políticas por permiso que usa el panel.</summary>
@@ -111,4 +119,12 @@ public static class PermissionPolicies
     public static readonly string TicketsManage = AuthExtensions.Permission(PermissionKeys.TicketsManage);
     public static readonly string NetworkView = AuthExtensions.Permission(PermissionKeys.NetworkView);
     public static readonly string NetworkEdit = AuthExtensions.Permission(PermissionKeys.NetworkEdit);
+    public static readonly string UsersAdmin = AuthExtensions.Permission(PermissionKeys.UsersAdmin);
+    public static readonly string SettingsEdit = AuthExtensions.Permission(PermissionKeys.SettingsEdit);
+    public static readonly string ReportsView = AuthExtensions.Permission(PermissionKeys.ReportsView);
+    public static readonly string RemoteAny = AuthExtensions.Permission(
+        $"{PermissionKeys.RemoteConnect}|{PermissionKeys.RemoteTerminal}|{PermissionKeys.RemoteFiles}");
+    public static readonly string ScriptsView = AuthExtensions.Permission($"{PermissionKeys.ScriptsRun}|{PermissionKeys.ScriptsEdit}");
+    public static readonly string ScriptsRun = AuthExtensions.Permission(PermissionKeys.ScriptsRun);
+    public static readonly string ScriptsEdit = AuthExtensions.Permission(PermissionKeys.ScriptsEdit);
 }

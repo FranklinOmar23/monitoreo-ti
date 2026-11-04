@@ -20,10 +20,10 @@ public static class RuleCatalog
         new("errores_criticos", "Errores críticos del sistema", "Errores críticos de Windows en las últimas 24 horas.", "en 24 h", false, true, false, true),
         new("servicio_detenido", "Servicio automático detenido", "Un servicio que arranca con Windows estaba en ejecución y se detuvo.", "", false, false, false, true),
         new("antivirus", "Antivirus desactivado", "Ningún antivirus del equipo está activo.", "", false, false, false, true),
-        new("toner", "Tóner", "Nivel de tóner de las impresoras.", "%", true, true, false, false),
-        new("puerto_errores", "Errores en puerto", "Errores por hora en un puerto de switch.", "por hora", false, true, false, false),
-        new("puerto_caido", "Puerto con equipo conocido caído", "El puerto de un equipo conocido se desconectó.", "", false, false, false, false),
-        new("switch_sin_respuesta", "Switch sin responder SNMP", "Minutos sin respuesta SNMP del switch.", "min", false, true, false, false),
+        new("toner", "Tóner", "Nivel de tóner de las impresoras.", "%", true, true, false, true),
+        new("puerto_errores", "Errores en puerto", "Errores por hora en un puerto de switch.", "por hora", false, true, false, true),
+        new("puerto_caido", "Puerto con equipo conocido caído", "El puerto de un equipo conocido se desconectó.", "", false, false, false, true),
+        new("switch_sin_respuesta", "Switch sin responder SNMP", "Minutos sin respuesta SNMP del switch.", "min", false, true, false, true),
     ];
 
     public static RuleMetric? Find(string? key) => All.FirstOrDefault(m => m.Key == key);

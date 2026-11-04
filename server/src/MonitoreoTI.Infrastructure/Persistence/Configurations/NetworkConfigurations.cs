@@ -86,6 +86,7 @@ internal sealed class NetworkDeviceConfiguration : IEntityTypeConfiguration<Netw
         b.Property(x => x.Firmware).HasColumnName("firmware").HasMaxLength(100);
         b.Property(x => x.Status).HasColumnName("estado");
         b.Property(x => x.LastPolledAt).HasColumnName("ultimo_sondeo");
+        b.Property(x => x.LastError).HasColumnName("ultimo_error").HasMaxLength(300);
         b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
 
         b.HasAlternateKey(x => new { x.CompanyId, x.Id });

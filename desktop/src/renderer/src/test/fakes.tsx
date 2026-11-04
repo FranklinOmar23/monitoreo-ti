@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { render } from '@testing-library/react';
 import type {
+  ReportsApi,
   AlertList,
   AlertListItem,
   AuthApi,
@@ -10,10 +11,13 @@ import type {
   MachineList,
   MachineListItem,
   NetworkApi,
+  RemoteApi,
   PanelApi,
   StatusCounts,
   TicketList,
   TicketListItem,
+  SettingsApi,
+  UsersApi,
 } from '@monitoreoti/shared';
 import { SessionProvider } from '../auth/SessionProvider';
 import { PanelDataProvider } from '../data/PanelData';
@@ -215,6 +219,121 @@ export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi 
     deleteOutlet: missing,
     createCable: missing,
     deleteCable: missing,
+    history: () => Promise.resolve({ items: [], total: 0, page: 1, pageSize: 50 }),
+    previewImport: missing,
+    runImport: missing,
+    summary: () =>
+      Promise.resolve({
+        devices: 0,
+        online: 0,
+        warning: 0,
+        critical: 0,
+        notResponding: 0,
+        withoutCollector: 0,
+        ports: 0,
+        portsConnected: 0,
+        portsWithProblems: 0,
+        trunks: 0,
+        unknownDevices: 0,
+        differences: 0,
+        openAlerts: 0,
+        collectors: 0,
+        collectorsOnline: 0,
+        attention: [],
+      }),
+    collectors: () => Promise.resolve([]),
+    unknown: () => Promise.resolve([]),
+    differences: () => Promise.resolve([]),
+    topology: () => Promise.resolve({ nodes: [], links: [] }),
+    search: () => Promise.resolve([]),
+    assignPort: missing,
+    ...overrides,
+  };
+}
+
+/** API remota falsa: biblioteca y ejecuciones vacías; lo demás falla salvo lo que la prueba defina. */
+export function fakeRemoteApi(overrides: Partial<RemoteApi> = {}): RemoteApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    scripts: () => Promise.resolve([]),
+    saveScript: missing,
+    deleteScript: missing,
+    run: missing,
+    runs: () => Promise.resolve([]),
+    runDetail: missing,
+    confirmTwoFactor: missing,
+    openSession: missing,
+    closeSession: missing,
+    sessions: () => Promise.resolve({ items: [], total: 0, page: 1, pageSize: 50 }),
+    tasks: () => Promise.resolve([]),
+    saveTask: missing,
+    deleteTask: missing,
+    updates: missing,
+    setAutoUpdate: missing,
+    deployUpdate: missing,
+    remoteSettings: () => Promise.resolve({ pedirPermiso: false }),
+    saveRemoteSettings: missing,
+    ...overrides,
+  };
+}
+
+/** API de usuarios falsa: listas vacías; las escrituras fallan salvo lo que la prueba defina. */
+export function fakeUsersApi(overrides: Partial<UsersApi> = {}): UsersApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    list: () => Promise.resolve([]),
+    create: missing,
+    update: missing,
+    setActive: missing,
+    passwordLink: missing,
+    resetTwoFactor: missing,
+    roles: () => Promise.resolve([]),
+    permissions: () => Promise.resolve([]),
+    saveRole: missing,
+    deleteRole: missing,
+    profile: missing,
+    rename: missing,
+    changePassword: missing,
+    sessions: () => Promise.resolve([]),
+    closeSession: missing,
+    closeOtherSessions: missing,
+    ...overrides,
+  };
+}
+
+/** API de configuración falsa: sin logo ni color; las escrituras fallan salvo lo que la prueba defina. */
+export function fakeSettingsApi(overrides: Partial<SettingsApi> = {}): SettingsApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    appearance: () => Promise.resolve({ color: null, logo: null }),
+    company: missing,
+    saveCompany: missing,
+    setColor: missing,
+    setLogo: missing,
+    removeLogo: missing,
+    departments: () => Promise.resolve([]),
+    saveDepartment: missing,
+    deleteDepartment: missing,
+    security: missing,
+    saveSecurity: missing,
+    email: missing,
+    testEmail: missing,
+    ...overrides,
+  };
+}
+
+export function fakeReportsApi(overrides: Partial<ReportsApi> = {}): ReportsApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    info: () => Promise.resolve({ advanced: true }),
+    inventory: missing,
+    availability: missing,
+    alerts: missing,
+    diskSecurity: missing,
+    performance: missing,
+    software: missing,
+    tickets: missing,
+    remote: missing,
     ...overrides,
   };
 }
@@ -224,7 +343,12 @@ export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
   const missing = () => Promise.reject(new Error('no esperado'));
   return {
     red: fakeNetworkApi(),
+    remoto: fakeRemoteApi(),
+    usuarios: fakeUsersApi(),
+    configuracion: fakeSettingsApi(),
+    reportes: fakeReportsApi(),
     dashboard: missing,
+    resolveQr: missing,
     machines: missing,
     machine: missing,
     metrics: () => Promise.resolve([]),
@@ -234,6 +358,13 @@ export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
     events: missing,
     processes: () => Promise.resolve([]),
     services: () => Promise.resolve([]),
+    networkConnection: () => Promise.resolve(null),
+    maintenances: () => Promise.resolve({ items: [], overdue: 0 }),
+    saveMaintenance: missing,
+    completeMaintenance: missing,
+    deleteMaintenance: missing,
+    preferences: () => Promise.resolve({ notificarCorreo: true }),
+    savePreferences: missing,
     history: missing,
     qr: missing,
     branches: () => Promise.resolve([]),

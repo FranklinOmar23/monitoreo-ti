@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { loadServiceConfig, readConfigFile, removeEnrollToken } from './config';
+import { AGENT_VERSION, loadServiceConfig, readConfigFile, removeEnrollToken } from './config';
 
 const noFile = () => ({});
 
@@ -58,5 +58,12 @@ describe('config.json del instalador', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('versión del agente', () => {
+  it('coincide con la del paquete (la del instalador): si no, pediría actualizarse sin fin', () => {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')) as { version: string };
+    expect(AGENT_VERSION).toBe(pkg.version);
   });
 });

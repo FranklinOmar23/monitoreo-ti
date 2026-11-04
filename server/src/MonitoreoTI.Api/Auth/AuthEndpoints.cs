@@ -1,8 +1,11 @@
 using System.Security.Claims;
 using FluentValidation;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.JsonWebTokens;
 using MonitoreoTI.Application.Auth;
+using MonitoreoTI.Application.Remote;
 using MonitoreoTI.Infrastructure.Auth;
+using MonitoreoTI.Infrastructure.Persistence;
 
 namespace MonitoreoTI.Api.Auth;
 
@@ -27,7 +30,44 @@ public static class AuthEndpoints
 
         auth.MapGet("/sesion", GetSessionAsync).RequireAuthorization();
         auth.MapPost("/cambiar-empresa", SwitchCompanyAsync).RequireAuthorization();
+
+        // Preferencias del propio usuario: por ahora, si recibe por correo las alertas críticas.
+        auth.MapGet("/preferencias", async (ClaimsPrincipal user, MonitoreoDbContext db, CancellationToken ct) =>
+        {
+            var id = UserId(user);
+            var notify = await db.Users.Where(u => u.Id == id).Select(u => (bool?)u.NotifyByEmail).FirstOrDefaultAsync(ct);
+            return notify is null ? Results.NotFound() : Results.Ok(new UserPreferences(notify.Value));
+        }).RequireAuthorization();
+        auth.MapPut("/preferencias", async (UserPreferences input, ClaimsPrincipal user, MonitoreoDbContext db, CancellationToken ct) =>
+        {
+            var id = UserId(user);
+            var changed = await db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s.SetProperty(u => u.NotifyByEmail, input.NotificarCorreo), ct);
+            return changed == 0 ? Results.NotFound() : Results.Ok(input);
+        }).RequireAuthorization();
+
+        // Volver a pedir el código con la sesión abierta (acceso remoto, decisión 52). Un código malo no es 401:
+        // el panel cierra la sesión ante un 401 y aquí la sesión sigue siendo válida.
+        auth.MapPost("/confirmar-2fa", async (ConfirmTwoFactorRequest request, ClaimsPrincipal user, IAuthService service, HttpContext http, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Codigo) || request.Codigo.Length > 10)
+                return Results.Problem(title: "Escriba el código de 6 dígitos.", statusCode: 400, extensions: new Dictionary<string, object?> { ["codigo"] = "codigo_invalido" });
+            var outcome = await service.ConfirmRecentTwoFactorAsync(UserId(user), request.Codigo.Trim(), Ip(http), ct);
+            if (outcome.Succeeded)
+                return Results.Ok(new { confirmado = outcome.Value, vigenteHasta = outcome.Value + RemoteRules.TwoFactorWindow });
+            return outcome.Error switch
+            {
+                AuthError.InvalidCode => Results.Problem(title: "El código no es válido. Revise la hora del teléfono e intente con el siguiente.",
+                    statusCode: 400, extensions: new Dictionary<string, object?> { ["codigo"] = "codigo_invalido" }),
+                AuthError.InvalidChallenge => Results.Problem(title: "Su usuario no tiene la verificación en dos pasos activada.",
+                    statusCode: 400, extensions: new Dictionary<string, object?> { ["codigo"] = "sin_2fa" }),
+                _ => Error(outcome.Error!.Value),
+            };
+        }).RequireAuthorization().RequireRateLimiting(RateLimitPolicy);
     }
+
+    public sealed record UserPreferences(bool NotificarCorreo);
+
+    public sealed record ConfirmTwoFactorRequest(string? Codigo);
 
     private static async Task<IResult> LoginAsync(
         LoginRequest request, IValidator<LoginRequest> validator, IAuthService auth, HttpContext http, CancellationToken ct)

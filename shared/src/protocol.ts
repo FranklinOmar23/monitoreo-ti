@@ -178,7 +178,14 @@ export type InicioServicio = 'automatico' | 'automatico_retrasado' | 'manual' | 
 
 /** Mensaje "servicios": servicios con inicio automático (cada 5 min). */
 export interface ServiciosDatos {
-  servicios: { nombre: string; nombre_visible?: string; estado: EstadoServicio; inicio: InicioServicio }[];
+  servicios: {
+    nombre: string;
+    nombre_visible?: string;
+    estado: EstadoServicio;
+    inicio: InicioServicio;
+    /** Código con el que terminó (solo si está detenido): 0 = se detuvo bien, otro = falló. */
+    codigo_salida?: number;
+  }[];
 }
 
 /** Mensaje "eventos": errores y críticos nuevos de los registros Sistema y Aplicación (cada minuto). */

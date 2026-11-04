@@ -78,6 +78,7 @@ public class MonitoreoDbContext(DbContextOptions<MonitoreoDbContext> options, IT
     public DbSet<TicketAttachment> TicketAttachments => Set<TicketAttachment>();
     public DbSet<Maintenance> Maintenances => Set<Maintenance>();
     public DbSet<Script> Scripts => Set<Script>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<RemoteSession> RemoteSessions => Set<RemoteSession>();
 

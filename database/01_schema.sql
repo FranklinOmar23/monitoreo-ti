@@ -80,7 +80,14 @@ CREATE TABLE dbo.empresas (
     plan_id         INT NOT NULL REFERENCES dbo.planes(id),
     estado          VARCHAR(15) NOT NULL DEFAULT 'activa'
                     CHECK (estado IN ('activa','suspendida','cancelada')),
-    creado          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME()
+    actualizacion_automatica BIT NOT NULL DEFAULT 1, -- los agentes se actualizan solos a la versión publicada
+    pedir_permiso_remoto BIT NOT NULL DEFAULT 0,     -- el usuario del equipo acepta antes de que se vea su pantalla
+    -- Apariencia del panel (W-40): logo (PNG, JPEG o WebP; nunca SVG) y color de la empresa.
+    logo            VARBINARY(MAX) NULL CHECK (DATALENGTH(logo) <= 262144),
+    logo_tipo       VARCHAR(20) NULL CHECK (logo_tipo IN ('image/png','image/jpeg','image/webp')),
+    color_primario  CHAR(7) NULL CHECK (color_primario LIKE '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+    creado          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CHECK ((logo IS NULL AND logo_tipo IS NULL) OR (logo IS NOT NULL AND logo_tipo IS NOT NULL))
 );
 GO
 
@@ -143,11 +150,13 @@ CREATE TABLE dbo.usuarios (
     correo              NVARCHAR(200) NOT NULL UNIQUE,
     password_hash       NVARCHAR(255) NOT NULL,          -- nunca la contraseña en texto plano
     totp_secreto        NVARCHAR(255) NULL,              -- secreto 2FA (cifrado por la aplicación)
+    notificar_correo    BIT NOT NULL DEFAULT 1,          -- recibir por correo las alertas críticas
     es_superadmin       BIT NOT NULL DEFAULT 0,          -- proveedor del sistema, sin empresa
     intentos_fallidos   INT NOT NULL DEFAULT 0,
     bloqueado_hasta     DATETIME2(0) NULL,
     activo              BIT NOT NULL DEFAULT 1,
     ultimo_acceso       DATETIME2(0) NULL,
+    ultimo_2fa          DATETIME2(0) NULL,               -- último código 2FA válido (el acceso remoto exige < 8 h)
     creado              DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME()
 );
 GO
@@ -173,7 +182,8 @@ CREATE TABLE dbo.refresh_tokens (
     expira          DATETIME2(0) NOT NULL,
     revocado        DATETIME2(0) NULL,
     reemplazado_por BIGINT NULL REFERENCES dbo.refresh_tokens(id),
-    ip_origen       VARCHAR(45) NULL
+    ip_origen       VARCHAR(45) NULL,
+    dispositivo     NVARCHAR(100) NULL                -- equipo o programa desde el que se inició (Mi perfil, W-41)
 );
 GO
 
@@ -267,6 +277,13 @@ CREATE TABLE dbo.maquinas (
     ultimo_reporte      DATETIME2(0) NULL,
     ram_total_mb        INT NULL,                     -- del inventario de hardware (para mostrar "usado / total")
     procesos_total      INT NULL,                     -- procesos en ejecución en la última muestra
+    -- Impresoras sin agente: el recolector SNMP de su sucursal lee sus consumibles (tóner).
+    snmp_version        VARCHAR(3) NULL CHECK (snmp_version IN ('v2c','v3')),
+    snmp_usuario        NVARCHAR(100) NULL,           -- usuario SNMPv3
+    snmp_credencial_cifrada VARBINARY(MAX) NULL,      -- comunidad v2c o claves v3, cifradas por la aplicación
+    recolector_id       INT NULL,                     -- agente que la consulta (FK más abajo, tras crear agentes)
+    ultimo_sondeo_snmp  DATETIME2(0) NULL,
+    ultimo_error_snmp   NVARCHAR(300) NULL,
     creado              DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CONSTRAINT UQ_maquinas_empresa_id UNIQUE (empresa_id, id),
     CONSTRAINT FK_maquinas_sucursal FOREIGN KEY (empresa_id, sucursal_id)
@@ -353,6 +370,11 @@ CREATE TABLE dbo.agentes (
     CONSTRAINT FK_agentes_maquina FOREIGN KEY (empresa_id, maquina_id)
         REFERENCES dbo.maquinas(empresa_id, id) ON DELETE CASCADE
 );
+GO
+
+-- El recolector de una impresora es un agente de la empresa (maquinas se crea antes que agentes).
+ALTER TABLE dbo.maquinas ADD CONSTRAINT FK_maquinas_recolector FOREIGN KEY (empresa_id, recolector_id)
+    REFERENCES dbo.agentes(empresa_id, id);
 GO
 
 CREATE TABLE dbo.tokens_registro (
@@ -447,7 +469,8 @@ CREATE TABLE dbo.dispositivos_red (
     firmware                NVARCHAR(100) NULL,
     estado                  VARCHAR(20) NOT NULL DEFAULT 'sin_respuesta'
                             CHECK (estado IN ('en_linea','advertencia','critico','sin_respuesta','pasivo','baja')),
-    ultimo_sondeo           DATETIME2(0) NULL,
+    ultimo_sondeo           DATETIME2(0) NULL,        -- último sondeo SNMP que respondió
+    ultimo_error            NVARCHAR(300) NULL,       -- por qué falló el último sondeo (sin datos sensibles)
     creado                  DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CHECK (gabinete_id IS NULL OR posicion_u IS NOT NULL),
     CONSTRAINT UQ_dispositivos_red_empresa_nombre UNIQUE (empresa_id, nombre),
@@ -707,6 +730,7 @@ CREATE TABLE dbo.alertas (
     origen          NVARCHAR(200) NULL,               -- de dónde sale (ej. 'SMART 5 · Reallocated Sector Count')
     creada          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     resuelta        DATETIME2(0) NULL,
+    notificada      DATETIME2(0) NULL,                -- cuándo se avisó por correo (una vez por alerta crítica)
     CHECK (maquina_id IS NOT NULL OR dispositivo_id IS NOT NULL OR puerto_id IS NOT NULL),
     CONSTRAINT UQ_alertas_empresa_id UNIQUE (empresa_id, id),
     CONSTRAINT FK_alertas_maquina FOREIGN KEY (empresa_id, maquina_id)
@@ -792,9 +816,11 @@ CREATE TABLE dbo.scripts (
     creado_por      INT NOT NULL REFERENCES dbo.usuarios(id),
     nombre          NVARCHAR(150) NOT NULL,
     lenguaje        VARCHAR(15) NOT NULL CHECK (lenguaje IN ('powershell','cmd','bash','python')),
+    descripcion     NVARCHAR(500) NULL,
     contenido       NVARCHAR(MAX) NOT NULL,
     firma           NVARCHAR(1000) NULL,              -- firma del servidor; el agente rechaza lo no firmado
     creado          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    actualizado     DATETIME2(0) NULL,
     CONSTRAINT UQ_scripts_empresa_nombre UNIQUE (empresa_id, nombre)
 );
 GO
@@ -806,7 +832,13 @@ CREATE TABLE dbo.comandos (
     usuario_id      INT NOT NULL REFERENCES dbo.usuarios(id),
     script_id       INT NULL REFERENCES dbo.scripts(id) ON DELETE SET NULL,
     tipo            VARCHAR(15) NOT NULL CHECK (tipo IN ('comando','script','accion')),
+    lote_id         UNIQUEIDENTIFIER NULL,            -- una ejecución en varios equipos comparte lote
+    lenguaje        VARCHAR(15) NULL CHECK (lenguaje IN ('powershell','cmd','bash','python')),
     contenido       NVARCHAR(MAX) NULL,
+    timeout_s       INT NOT NULL DEFAULT 300,
+    vence           DATETIME2(0) NULL,                -- sin entregar a esta hora pasa a 'expirado'
+    enviado         DATETIME2(0) NULL,
+    codigo_salida   INT NULL,
     estado          VARCHAR(15) NOT NULL DEFAULT 'pendiente'
                     CHECK (estado IN ('pendiente','enviado','ejecutando','completado','error','expirado')),
     resultado       NVARCHAR(MAX) NULL,
@@ -817,12 +849,42 @@ CREATE TABLE dbo.comandos (
 );
 GO
 
+-- Scripts que se ejecutan solos (6.5). Horas en hora de República Dominicana (UTC-4, sin horario de verano).
+CREATE TABLE dbo.tareas_programadas (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id      INT NOT NULL REFERENCES dbo.empresas(id),
+    nombre          NVARCHAR(150) NOT NULL,
+    script_id       INT NOT NULL REFERENCES dbo.scripts(id),
+    creado_por      INT NOT NULL REFERENCES dbo.usuarios(id),
+    objetivo        VARCHAR(10) NOT NULL CHECK (objetivo IN ('equipos','sucursal','todos')),
+    sucursal_id     INT NULL,
+    maquinas        NVARCHAR(2000) NULL,             -- ids separados por coma (objetivo = equipos)
+    frecuencia      VARCHAR(10) NOT NULL CHECK (frecuencia IN ('una_vez','diaria','semanal','mensual')),
+    hora            TIME(0) NOT NULL,
+    fecha           DATE NULL,                       -- una_vez
+    dias_semana     TINYINT NULL,                    -- semanal: lunes = 1, martes = 2, ... domingo = 64
+    dia_mes         TINYINT NULL CHECK (dia_mes BETWEEN 1 AND 31),  -- mensual (si el mes es más corto, el último día)
+    timeout_s       INT NOT NULL DEFAULT 300,
+    activa          BIT NOT NULL DEFAULT 1,
+    proxima         DATETIME2(0) NULL,               -- UTC
+    ultima          DATETIME2(0) NULL,
+    ultimo_lote     UNIQUEIDENTIFIER NULL,
+    creado          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    actualizado     DATETIME2(0) NULL,
+    CONSTRAINT UQ_tareas_programadas_nombre UNIQUE (empresa_id, nombre),
+    CONSTRAINT FK_tareas_programadas_sucursal FOREIGN KEY (empresa_id, sucursal_id)
+        REFERENCES dbo.sucursales(empresa_id, id)
+);
+GO
+
 CREATE TABLE dbo.sesiones_remotas (
     id              BIGINT IDENTITY(1,1) PRIMARY KEY,
     empresa_id      INT NOT NULL REFERENCES dbo.empresas(id),
     maquina_id      INT NOT NULL,
     usuario_id      INT NOT NULL REFERENCES dbo.usuarios(id),
     tipo            VARCHAR(15) NOT NULL CHECK (tipo IN ('escritorio','terminal','archivos')),
+    motivo          NVARCHAR(300) NULL,              -- lo escribe el técnico al conectar (W-28a)
+    solo_ver        BIT NOT NULL DEFAULT 0,          -- escritorio sin control de teclado ni mouse
     inicio          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     fin             DATETIME2(0) NULL,
     ip_origen       VARCHAR(45) NULL,
@@ -901,6 +963,8 @@ CREATE INDEX IX_tickets_estado           ON dbo.tickets (empresa_id, estado, pri
 CREATE INDEX IX_tickets_asignado         ON dbo.tickets (empresa_id, asignado_a, estado);
 CREATE INDEX IX_mantenimientos_maquina   ON dbo.mantenimientos (empresa_id, maquina_id, fecha_programada);
 CREATE INDEX IX_comandos_maquina_estado  ON dbo.comandos (empresa_id, maquina_id, estado);
+CREATE INDEX IX_comandos_lote            ON dbo.comandos (empresa_id, lote_id);
+CREATE INDEX IX_tareas_programadas_proxima ON dbo.tareas_programadas (empresa_id, activa, proxima);
 CREATE INDEX IX_sesiones_maquina         ON dbo.sesiones_remotas (empresa_id, maquina_id, inicio DESC);
 CREATE INDEX IX_auditoria_fecha          ON dbo.auditoria (empresa_id, fecha DESC);
 CREATE INDEX IX_auditoria_entidad        ON dbo.auditoria (empresa_id, entidad, entidad_id);

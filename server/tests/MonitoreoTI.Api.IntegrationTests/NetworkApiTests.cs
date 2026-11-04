@@ -133,15 +133,23 @@ public sealed class NetworkApiTests(TestDatabase database) : IAsyncLifetime
         // Editar sin mandar las claves las conserva.
         (await admin.PutAsJsonAsync($"/api/v1/red/dispositivos/{sw}", new
         {
-            nombre = "PRUEBA-SNMP", modeloId = await ModelIdAsync("Catalyst 9200-48P"), sucursalId = branch, gabineteId = rack, posicionU = 1,
-            ipGestion = "10.20.0.5", snmpUsuario = "monitor",
+            nombre = "PRUEBA-SNMP",
+            modeloId = await ModelIdAsync("Catalyst 9200-48P"),
+            sucursalId = branch,
+            gabineteId = rack,
+            posicionU = 1,
+            ipGestion = "10.20.0.5",
+            snmpUsuario = "monitor",
         })).EnsureSuccessStatusCode();
         (await JsonAsync(await admin.GetAsync($"/api/v1/red/dispositivos/{sw}"))).GetProperty("hasSnmpCredential").GetBoolean().Should().BeTrue();
 
         var halfKey = await admin.PostAsJsonAsync("/api/v1/red/dispositivos", new
         {
-            nombre = "PRUEBA-SNMP-2", modeloId = await ModelIdAsync("Catalyst 9200-48P"), sucursalId = branch,
-            snmpUsuario = "monitor", snmpClaveAutenticacion = "solo-una-clave",
+            nombre = "PRUEBA-SNMP-2",
+            modeloId = await ModelIdAsync("Catalyst 9200-48P"),
+            sucursalId = branch,
+            snmpUsuario = "monitor",
+            snmpClaveAutenticacion = "solo-una-clave",
         });
         halfKey.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -202,5 +210,101 @@ public sealed class NetworkApiTests(TestDatabase database) : IAsyncLifetime
         (await admin.PutAsJsonAsync($"/api/v1/red/modelos/{baseModel}", new { marca = "Panduit", modelo = "CP48BLY", tipo = "patch_panel", alturaU = 2, cantidadPuertos = 48, esActivo = false }))
             .StatusCode.Should().Be(HttpStatusCode.BadRequest, "el catálogo base es de solo lectura");
         await CreateAsync(admin, "modelos", new { marca = "Prueba", modelo = "SW-24", tipo = "switch", alturaU = 1, cantidadPuertos = 26, tipoPuertos = "24 RJ45 + 2 SFP", esActivo = true });
+    }
+
+    private static async Task<JsonElement> ImportAsync(HttpClient client, string type, string csv, bool apply) =>
+        await JsonAsync(await client.PostAsJsonAsync(apply ? "/api/v1/red/importar" : "/api/v1/red/importar/vista-previa", new { tipo = type, contenido = csv }));
+
+    private static string[] RowErrors(JsonElement result, int index) =>
+        result.GetProperty("rows")[index].GetProperty("errors").EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+    private async Task<int> CountAsync(string sql) => (int)(await _api.ScalarAsync(sql))!;
+
+    [DatabaseFact]
+    public async Task The_import_previews_without_saving_and_saves_all_or_nothing()
+    {
+        var admin = await ClientAsync();
+        var (_, _, rack) = await RackAsync(admin);
+        var rackInfo = (await JsonAsync(await admin.GetAsync($"/api/v1/red/gabinetes/{rack}"))).GetProperty("rack");
+        var rackName = rackInfo.GetProperty("name").GetString();
+        var roomName = rackInfo.GetProperty("roomName").GetString();
+        const string countOutlets = "SELECT COUNT(*) FROM dbo.puntos_red WHERE codigo LIKE 'PRUEBA-%'";
+        var outlets = await CountAsync(countOutlets);
+
+        // Rosetas con el separador de Excel en español; la segunda fila repite el código de la primera.
+        const string rosetas = "Código;Ubicación;Sucursal\nPRUEBA-R1;Contabilidad;Santiago\nPRUEBA-R1;Caja;Santiago\n";
+        var preview = await ImportAsync(admin, "rosetas", rosetas, apply: false);
+        preview.GetProperty("valid").GetInt32().Should().Be(1);
+        preview.GetProperty("applied").GetBoolean().Should().BeFalse();
+        RowErrors(preview, 1).Should().ContainSingle().Which.Should().Contain("Ya hay una roseta");
+        (await CountAsync(countOutlets)).Should().Be(outlets, "la vista previa no guarda");
+
+        (await ImportAsync(admin, "rosetas", rosetas, apply: true)).GetProperty("applied").GetBoolean().Should().BeFalse();
+        (await CountAsync(countOutlets)).Should().Be(outlets, "con una fila mala no se guarda ninguna");
+
+        (await ImportAsync(admin, "rosetas", "codigo,ubicacion,sucursal\nPRUEBA-R1,Contabilidad,Santiago\n", apply: true))
+            .GetProperty("applied").GetBoolean().Should().BeTrue();
+
+        // Dispositivos: dos en la misma U chocan entre sí aunque ninguno exista todavía.
+        var devices =
+            "nombre,marca,modelo,sucursal,sala,gabinete,posicion_u,ip_gestion\n"
+            + $"PRUEBA-IMP-SW,Cisco,Catalyst 9200-48P,Santiago,{roomName},{rackName},30,10.30.0.2\n"
+            + $"PRUEBA-IMP-PP,Panduit,CP48BLY,Santiago,,{rackName},30,\n";
+        preview = await ImportAsync(admin, "dispositivos", devices + "PRUEBA-IMP-X,Cisco,No existe,Santiago,,,,\n", apply: false);
+        preview.GetProperty("valid").GetInt32().Should().Be(1);
+        RowErrors(preview, 1).Single().Should().Contain("PRUEBA-IMP-SW");
+        RowErrors(preview, 2).Single().Should().Contain("no está en el catálogo");
+
+        (await ImportAsync(admin, "dispositivos", devices.Replace($"{rackName},30,\n", $"{rackName},25,\n"), apply: true))
+            .GetProperty("applied").GetBoolean().Should().BeTrue();
+
+        // Cables: el puerto se busca por su nombre ("P5") o por su número ("5").
+        const string cables = "dispositivo_a,puerto_a,dispositivo_b,puerto_b,roseta,tipo_cable,etiqueta\n"
+            + "PRUEBA-IMP-PP,5,,,PRUEBA-R1,CAT6,R1\n"
+            + "PRUEBA-IMP-PP,P5,PRUEBA-IMP-SW,5,,cat6,PP5-SW5\n";
+        preview = await ImportAsync(admin, "cables", cables + "PRUEBA-IMP-SW,Gi9/9/9,,,PRUEBA-R1,,\n", apply: false);
+        RowErrors(preview, 2).Single().Should().Contain("no tiene el puerto Gi9/9/9");
+        (await ImportAsync(admin, "cables", cables, apply: true)).GetProperty("applied").GetBoolean().Should().BeTrue();
+
+        var outletId = await CountAsync("SELECT id FROM dbo.puntos_red WHERE codigo = 'PRUEBA-R1'");
+        var path = await JsonAsync(await admin.GetAsync($"/api/v1/red/ruta?roseta={outletId}"));
+        path.EnumerateArray().Select(h => h.GetProperty("name").GetString()).Should().Contain("PRUEBA-IMP-SW 5");
+
+        var missingColumns = await ImportAsync(admin, "cables", "dispositivo,puerto\nX,1\n", apply: false);
+        missingColumns.GetProperty("fileErrors")[0].GetString().Should().Contain("dispositivo_a");
+    }
+
+    [DatabaseFact]
+    public async Task The_import_only_reaches_the_users_branches()
+    {
+        var red = await ClientAsync("Red", "Santo Domingo");
+        var result = await ImportAsync(red, "rosetas", "codigo,sucursal\nPRUEBA-R9,Santiago\n", apply: false);
+        RowErrors(result, 0).Single().Should().Contain("no tiene acceso");
+    }
+
+    [DatabaseFact]
+    public async Task The_history_lists_changes_with_names()
+    {
+        var admin = await ClientAsync();
+        var (branch, _, rack) = await RackAsync(admin);
+        var sw = await CreateAsync(admin, "dispositivos", Device("PRUEBA-HIST", await ModelIdAsync("Catalyst 9200-48P"), branch, rack, 5));
+        (await admin.PutAsJsonAsync($"/api/v1/red/dispositivos/{sw}/ubicacion", new { gabineteId = rack, posicionU = 12 })).EnsureSuccessStatusCode();
+        var port = (int)(await _api.ScalarAsync("SELECT id FROM dbo.puertos WHERE dispositivo_id = @d AND numero = 3", ("@d", sw)))!;
+        (await admin.PutAsJsonAsync($"/api/v1/red/puertos/{port}", new { nombre = "Gi1/0/3", tipo = "rj45", vlan = 30, esHostVm = false })).EnsureSuccessStatusCode();
+
+        var history = await JsonAsync(await admin.GetAsync($"/api/v1/red/historial?entidad=dispositivos_red&id={sw}"));
+        var items = history.GetProperty("items").EnumerateArray().ToList();
+        items.Select(i => i.GetProperty("title").GetString()).Should().Equal("Puerto editado", "Dispositivo movido", "Dispositivo registrado");
+        items[0].GetProperty("subject").GetString().Should().Be("PRUEBA-HIST Gi1/0/3");
+        var moved = items[1].GetProperty("changes").EnumerateArray().Single();
+        moved.GetProperty("field").GetString().Should().Be("U");
+        moved.GetProperty("before").GetString().Should().Be("5");
+        moved.GetProperty("after").GetString().Should().Be("12");
+        items[2].GetProperty("subject").GetString().Should().Be("PRUEBA-HIST");
+
+        // Quien solo ve Santo Domingo no ve lo de Santiago.
+        var other = await ClientAsync("Red", "Santo Domingo");
+        var hidden = await JsonAsync(await other.GetAsync($"/api/v1/red/historial?entidad=dispositivos_red&id={sw}"));
+        hidden.GetProperty("total").GetInt32().Should().Be(0);
     }
 }

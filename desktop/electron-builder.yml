@@ -1,0 +1,54 @@
+# Instalador del panel: MonitoreoTI-Panel-Setup-{versión}.exe (NSIS, por usuario, sin pedir administrador).
+# Se genera con `MONITOREOTI_SERVER_URL=https://… npm run installer -w @monitoreoti/desktop` (decisión 70).
+appId: do.monitoreoti.panel
+productName: Centinela
+executableName: Centinela
+copyright: MonitoreoTI
+
+directories:
+  output: release
+  buildResources: build
+
+# Electron ya está en node_modules del monorepo: no se descarga otra copia.
+electronDist: ../node_modules/electron/dist
+electronVersion: 45.0.0
+
+files:
+  - out/**
+  - package.json
+
+# El servidor al que se conecta este panel (lo escribe scripts/panel-config.mjs desde MONITOREOTI_SERVER_URL).
+extraResources:
+  - from: build/panel.json
+    to: panel.json
+
+# Enlaces monitoreoti://maquina/{id}, monitoreoti://q/{codigo} y monitoreoti://restablecer (sección 12.2).
+protocols:
+  - name: MonitoreoTI
+    schemes: [monitoreoti]
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  # El nombre lleva la versión: electron-updater lo lee de latest.yml.
+  artifactName: MonitoreoTI-Panel-Setup-${version}.${ext}
+  # Sin certificado de firma todavía: Windows SmartScreen mostrará "editor desconocido".
+  signExecutable: false
+
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Centinela
+  uninstallDisplayName: Centinela
+  runAfterFinish: true
+  language: '3082'
+
+# latest.yml y el .blockmap para la actualización automática. La URL real la pone el panel al arrancar (su servidor);
+# los archivos de release/ se copian a la carpeta PanelActualizaciones:Carpeta del servidor.
+publish:
+  provider: generic
+  url: http://localhost:5126/api/v1/panel/actualizacion

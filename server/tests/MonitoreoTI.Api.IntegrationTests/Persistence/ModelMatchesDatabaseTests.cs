@@ -56,7 +56,7 @@ public class ModelMatchesDatabaseTests(TestDatabase database)
         while (await reader.ReadAsync())
             tables.Add(reader.GetString(0));
 
-        tables.Should().HaveCount(49);
+        tables.Should().HaveCount(50);
         tables.Where(t => !mapped.Contains(t)).Should().BeEmpty("cada tabla del script debe tener su entidad");
     }
 

@@ -44,6 +44,8 @@ public static class Installation
             "/grant:r", $"{SystemSid}:(OI)(CI)F", "/grant:r", $"{AdministratorsSid}:(OI)(CI)F");
 
         WriteConfig(paths, options);
+        // Ctrl+Alt+Supr desde el escritorio remoto (SendSAS) exige esta política de Windows.
+        SecureAttention.EnsurePolicy();
 
         var binPath = $"\"{paths.HostExe}\" run";
         if (Run("sc.exe", output, "create", ServiceName, "binPath=", binPath, "start=", "auto", "DisplayName=", DisplayName) != 0)

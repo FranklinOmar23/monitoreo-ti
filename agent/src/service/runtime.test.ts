@@ -118,6 +118,7 @@ describe('AgentRuntime', () => {
   let sent: Envelope[];
   let online: boolean;
   let onReady: (welcome: ServerWelcome) => void;
+  let onMessage: (message: Envelope) => void;
   let stopped: boolean;
 
   const gateway: Gateway = {
@@ -141,14 +142,19 @@ describe('AgentRuntime', () => {
 
   const flush = () => vi.advanceTimersByTimeAsync(0);
 
-  const createRuntime = (override: Partial<Collectors> = {}) =>
+  const createRuntime = (
+    override: Partial<Collectors> = {},
+    snmp?: ConstructorParameters<typeof AgentRuntime>[0]['snmp'],
+  ) =>
     new AgentRuntime({
       outbox,
       collectors: { ...collectors, ...override },
       log: vi.fn(),
       startupDelaysMs: { hardware: 1_000, software: 2_000, interfaces: 3_000 },
+      snmp,
       createGateway: (callbacks) => {
         onReady = callbacks.onReady;
+        onMessage = callbacks.onMessage;
         return gateway;
       },
     });
@@ -178,7 +184,7 @@ describe('AgentRuntime', () => {
     expect(outbox.count()).toBeGreaterThan(0);
 
     online = true;
-    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false });
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false, collector: null });
     await flush();
     expect(outbox.count()).toBe(0);
     expect(sent.map((m) => m.tipo)).toContain('metricas');
@@ -190,7 +196,7 @@ describe('AgentRuntime', () => {
   it('envía los inventarios al arrancar, escalonados', async () => {
     online = true;
     createRuntime().start();
-    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false });
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false, collector: null });
 
     await vi.advanceTimersByTimeAsync(3_000);
 
@@ -200,7 +206,7 @@ describe('AgentRuntime', () => {
   it('un recolector que falla no detiene a los demás', async () => {
     online = true;
     createRuntime({ hardware: () => Promise.reject(new Error('WMI caído')) }).start();
-    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false });
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false, collector: null });
 
     await vi.advanceTimersByTimeAsync(3_000);
 
@@ -210,11 +216,40 @@ describe('AgentRuntime', () => {
   it('usa el intervalo de métricas que indica el servidor', async () => {
     online = true;
     createRuntime().start();
-    onReady({ heartbeatSeconds: 30, metricsSeconds: 10, isCollector: false });
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 10, isCollector: false, collector: null });
 
     await vi.advanceTimersByTimeAsync(30_000);
 
     expect(sent.filter((m) => m.tipo === 'metricas')).toHaveLength(3);
+  });
+
+  it('se vuelve recolector con la lista del servidor y la cambia con config_actualizada', async () => {
+    online = true;
+    const query = vi.fn(() => Promise.resolve({ ok: true }));
+    const runtime = createRuntime({}, { credential: '1.abc', query, firstDelayMs: 500 });
+    runtime.start();
+    const device = { id: 4, nombre: 'SW', ip: '10.0.0.2', tipo: 'switch', usuario: 'm', credencial: 'x' };
+
+    onReady({
+      heartbeatSeconds: 30,
+      metricsSeconds: 60,
+      isCollector: true,
+      collector: { intervalSeconds: 300, devices: [device] },
+    });
+    expect(runtime.snmpDevices).toBe(1);
+    await vi.advanceTimersByTimeAsync(500);
+    // La credencial de prueba no abre: el sondeo se informa como fallido, sin consultar.
+    expect(sent.find((m) => m.tipo === 'snmp_resultado')?.datos).toMatchObject({ dispositivoId: 4, ok: false });
+
+    onMessage({
+      v: 1,
+      tipo: 'config_actualizada',
+      id: 'c1',
+      ts: new Date().toISOString(),
+      datos: { recolector: null },
+    });
+    expect(runtime.snmpDevices).toBe(0);
+    runtime.stop();
   });
 
   it('al detenerse cancela todo y cierra la conexión', async () => {

@@ -33,7 +33,7 @@ export interface RequestOptions {
   method?: string;
   body?: unknown;
   accessToken?: string | null;
-  query?: Record<string, string | number | null | undefined>;
+  query?: Record<string, string | number | boolean | null | undefined>;
 }
 
 export type HttpRequest = <T>(path: string, options?: RequestOptions) => Promise<T>;

@@ -10,6 +10,10 @@ import {
 import type { ServerWelcome } from './gateway-client';
 import type { Outbox } from './outbox';
 import { Sender } from './sender';
+import type { CommandExecutor } from './executor';
+import type { RemoteSessions } from './remote-sessions';
+import type { AgentUpdater } from './updater';
+import { parseCollectorConfig, SnmpPoller, type SnmpQuery } from './snmp';
 
 export type Log = (level: 'info' | 'error', message: string, extra?: Record<string, unknown>) => void;
 
@@ -54,7 +58,20 @@ export interface RuntimeOptions {
   collectors: Collectors;
   health?: HealthCollectors;
   /** Crea la conexión con el servidor; las pruebas inyectan una falsa. */
-  createGateway: (callbacks: { onReady: (welcome: ServerWelcome) => void }) => Gateway;
+  createGateway: (callbacks: {
+    onReady: (welcome: ServerWelcome) => void;
+    onMessage: (message: Envelope) => void;
+  }) => Gateway;
+  /** Recolector SNMP (Fase 4): se activa si el servidor le asigna dispositivos. */
+  snmp?: { credential: string; query: SnmpQuery; firstDelayMs?: number };
+  /** Ejecutor de comandos firmados (Fase 6); recibe la función para encolar sus resultados. */
+  executor?: (submit: (envelope: Envelope) => void) => CommandExecutor;
+  /** Sesiones remotas por el relay (Fase 6.2). */
+  sessions?: RemoteSessions;
+  /** Actualización automática (Fase 6.6). */
+  updater?: AgentUpdater;
+  /** La bienvenida trae la llave de la empresa: se guarda si el agente aún no la tenía. */
+  onCompanyKey?: (publicKey: string) => void;
   log: Log;
   /** Escalonan el arranque de los inventarios (PowerShell pesa) para no competir con el inicio del equipo. */
   startupDelaysMs?: { hardware: number; software: number; interfaces: number };
@@ -79,10 +96,34 @@ export class AgentRuntime {
   private metricsSeconds = DEFAULT_METRICS_SECONDS;
   private networkSignature = '';
   private stopped = false;
+  private readonly snmp: SnmpPoller | undefined;
+  private readonly executor: CommandExecutor | undefined;
 
   constructor(private readonly options: RuntimeOptions) {
-    this.gateway = options.createGateway({ onReady: (welcome) => this.onReady(welcome) });
+    this.gateway = options.createGateway({
+      onReady: (welcome) => this.onReady(welcome),
+      onMessage: (message) => this.onMessage(message),
+    });
     this.sender = new Sender(options.outbox, this.gateway, (message, extra) => options.log('info', message, extra));
+    if (options.snmp)
+      this.snmp = new SnmpPoller({
+        credential: options.snmp.credential,
+        query: options.snmp.query,
+        firstDelayMs: options.snmp.firstDelayMs,
+        submit: (envelope) => this.submit(envelope),
+        log: options.log,
+      });
+    this.executor = options.executor?.((envelope) => this.submit(envelope));
+  }
+
+  /** Encola un mensaje para el servidor (lo usan las sesiones remotas para la auditoría). */
+  submitMessage(envelope: Envelope): void {
+    this.submit(envelope);
+  }
+
+  /** Dispositivos SNMP que consulta ahora (0 si no es recolector). */
+  get snmpDevices(): number {
+    return this.snmp?.deviceCount ?? 0;
   }
 
   start(): void {
@@ -116,6 +157,8 @@ export class AgentRuntime {
       clearInterval(timer);
     }
     this.timers.clear();
+    this.snmp?.stop();
+    this.options.sessions?.closeAll();
     this.gateway.stop();
   }
 
@@ -124,7 +167,26 @@ export class AgentRuntime {
       this.metricsSeconds = welcome.metricsSeconds;
       this.scheduleMetrics();
     }
+    this.snmp?.configure(welcome.collector);
+    if (welcome.companyPublicKey) this.options.onCompanyKey?.(welcome.companyPublicKey);
     void this.sender.drain();
+  }
+
+  /** Mensajes del servidor fuera del saludo: la lista nueva de dispositivos SNMP y los comandos firmados. */
+  private onMessage(message: Envelope): void {
+    if (message.tipo === 'config_actualizada') {
+      const datos = (message.datos ?? {}) as Record<string, unknown>;
+      this.snmp?.configure(parseCollectorConfig(datos['recolector']));
+    } else if (message.tipo === 'actualizar_agente') {
+      if (this.options.updater) void this.guarded(() => this.options.updater!.handle(message.datos), 'actualización');
+    } else if (message.tipo === 'abrir_sesion_remota') {
+      this.options.sessions?.open(message.datos);
+    } else if (message.tipo === 'cerrar_sesion_remota') {
+      const id = (message.datos as { sesion_id?: unknown } | null)?.sesion_id;
+      if (typeof id === 'number') this.options.sessions?.close(id);
+    } else if (message.tipo === 'ejecutar_comando' && this.executor) {
+      void this.guarded(() => this.executor!.handle(message.datos), 'comando');
+    }
   }
 
   private scheduleMetrics(): void {

@@ -1,8 +1,13 @@
 using System.Threading.RateLimiting;
 using FluentValidation;
+using MonitoreoTI.Api.Remote;
 using MonitoreoTI.Application.Agents;
+using MonitoreoTI.Application.Network;
+using MonitoreoTI.Application.Remote;
 using MonitoreoTI.Infrastructure.Agents;
 using MonitoreoTI.Infrastructure.Health;
+using MonitoreoTI.Infrastructure.Network;
+using MonitoreoTI.Infrastructure.Remote;
 using MonitoreoTI.Workers;
 
 namespace MonitoreoTI.Api.Agents;
@@ -33,6 +38,31 @@ public static class AgentGatewayExtensions
         services.AddSingleton<IAgentMessageHandler, DiskHealthHandler>();
         services.AddSingleton<IAgentMessageHandler, SecurityHandler>();
 
+        // Recolector SNMP y correlación (Fase 4).
+        services.AddSingleton<OuiDirectory>();
+        services.AddSingleton<ISnmpCollectors, SnmpCollectors>();
+        services.AddSingleton<IAgentMessageHandler, SnmpResultHandler>();
+        services.AddSingleton<ICollectorConfigPublisher, CollectorConfigPublisher>();
+        services.AddSingleton<NetworkAlertEngine>();
+        services.AddSingleton<AlertMailer>();
+
+        // Comandos y scripts firmados (Fase 6).
+        services.AddScoped<ICompanySigner, CompanySigner>();
+        services.AddSingleton<AgentCommands>();
+        services.AddSingleton<CommandDispatcher>();
+        services.AddSingleton<ICommandDispatcher>(sp => sp.GetRequiredService<CommandDispatcher>());
+        services.AddSingleton<IAgentMessageHandler, CommandResultHandler>();
+        services.AddSingleton<ScheduledTaskRunner>();
+        services.AddSingleton<AgentReleases>();
+        services.AddSingleton<AgentUpdater>();
+        services.AddHostedService<CommandExpiryService>();
+
+        // Relay de sesiones remotas (Fase 6.2).
+        services.AddSingleton<RemoteSessionLog>();
+        services.AddSingleton<IAgentMessageHandler, SessionActivityHandler>();
+        services.AddSingleton<RemoteRelay>();
+        services.AddSingleton<IRemoteRelay>(sp => sp.GetRequiredService<RemoteRelay>());
+
         // Motor de alertas (Fase 3).
         services.AddSingleton(configuration.GetSection("Alerts").Get<AlertEngineOptions>() ?? new AlertEngineOptions());
         services.AddSingleton<AlertEngine>();
@@ -62,6 +92,8 @@ public static class AgentGatewayExtensions
 
         app.MapAgentEndpoints();
         app.Map("/agent/ws", (HttpContext http, AgentGateway gateway) => gateway.HandleAsync(http));
+        app.MapGet(AgentUpdater.DownloadPath, AgentUpdater.DownloadAsync);
+        app.Map("/relay/{id:long}", (long id, HttpContext http, RemoteRelay relay) => relay.HandleAsync(http, id));
         return app;
     }
 }

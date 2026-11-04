@@ -25,6 +25,9 @@ public sealed class AuthOptions
     public TimeSpan LockoutDuration { get; set; } = TimeSpan.FromMinutes(15);
     public TimeSpan PasswordResetLifetime { get; set; } = TimeSpan.FromMinutes(30);
 
+    /// <summary>Enlace que crea un administrador (usuario nuevo o restablecer): da tiempo a entregarlo.</summary>
+    public TimeSpan PasswordInvitationLifetime { get; set; } = TimeSpan.FromHours(72);
+
     /// <summary>Enlace del correo de recuperación; el token se agrega al final.</summary>
     public string PasswordResetUrl { get; set; } = "monitoreoti://restablecer?token=";
 

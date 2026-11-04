@@ -151,6 +151,23 @@ describe('Instaladores (W-18, W-19)', () => {
       session: { load: () => Promise.resolve(null), save: () => Promise.resolve(), clear: () => Promise.resolve() },
       saveFile: () => Promise.resolve({ saved: false }),
       copyText,
+      notify: () => Promise.resolve(),
+      onNotificationClick: () => () => undefined,
+      openTerminal: () => Promise.resolve(),
+      terminalTicket: () => Promise.resolve(null),
+      readText: () => Promise.resolve(''),
+      requestSession: () => Promise.resolve(false),
+      onSessionRequest: () => () => undefined,
+      // El explorador de archivos no se usa en estas pruebas.
+      files: {} as never,
+      view3d: {} as never,
+      deepLinks: { take: () => Promise.resolve(null), onOpen: () => () => undefined },
+      tray: { setCriticalCount: () => Promise.resolve(), onNavigate: () => () => undefined },
+      updates: {
+        status: () => Promise.resolve(null),
+        onReady: () => () => undefined,
+        install: () => Promise.resolve(),
+      },
     };
     try {
       renderWithPanel(

@@ -1,8 +1,13 @@
 using FluentValidation;
+using MonitoreoTI.Api.Remote;
 using MonitoreoTI.Application.Network;
 using MonitoreoTI.Application.Panel;
+using MonitoreoTI.Application.Remote;
+using MonitoreoTI.Application.Users;
 using MonitoreoTI.Infrastructure.Network;
 using MonitoreoTI.Infrastructure.Panel;
+using MonitoreoTI.Infrastructure.Remote;
+using MonitoreoTI.Infrastructure.Users;
 
 namespace MonitoreoTI.Api.Panel;
 
@@ -36,6 +41,20 @@ public static class PanelExtensions
         services.AddSingleton<IAttachmentStore, FileAttachmentStore>();
         services.AddScoped<NetworkQueries>();
         services.AddScoped<NetworkCommands>();
+        services.AddScoped<NetworkImport>();
+        services.AddScoped<NetworkInsights>();
+        services.AddScoped<Maintenances>();
+        services.AddScoped<RemoteCommands>();
+        services.AddScoped<RemoteAccessGuard>();
+        services.AddScoped<RemoteSessions>();
+        services.AddScoped<ScheduledTasks>();
+        services.AddSingleton<IValidator<ScheduledTaskInput>, ScheduledTaskInputValidator>();
+        services.AddSingleton<IValidator<SessionInput>, SessionInputValidator>();
+        services.AddSingleton<IValidator<ScriptInput>, ScriptInputValidator>();
+        services.AddSingleton<IValidator<RunInput>, RunInputValidator>();
+        services.AddSingleton<IValidator<MaintenanceInput>, MaintenanceInputValidator>();
+        services.AddSingleton<IValidator<MaintenanceDoneInput>, MaintenanceDoneInputValidator>();
+        services.AddSingleton<IValidator<ImportInput>, ImportInputValidator>();
         services.AddSingleton<IValidator<RoomInput>, RoomInputValidator>();
         services.AddSingleton<IValidator<RackInput>, RackInputValidator>();
         services.AddSingleton<IValidator<DeviceModelInput>, DeviceModelInputValidator>();
@@ -46,6 +65,18 @@ public static class PanelExtensions
         services.AddSingleton<IValidator<MachineInput>, MachineInputValidator>();
         services.AddSingleton<IValidator<BranchInput>, BranchInputValidator>();
         services.AddSingleton<IValidator<EnrollmentTokenInput>, EnrollmentTokenInputValidator>();
+        services.AddScoped<UserAdministration>();
+        services.AddScoped<RoleAdministration>();
+        services.AddScoped<UserProfile>();
+        services.AddScoped<MonitoreoTI.Infrastructure.Settings.CompanySettingsService>();
+        services.AddScoped<MonitoreoTI.Infrastructure.Reports.ReportQueries>();
+        services.AddSingleton<IValidator<MonitoreoTI.Application.Settings.CompanyInput>, MonitoreoTI.Application.Settings.CompanyInputValidator>();
+        services.AddSingleton<IValidator<MonitoreoTI.Application.Settings.ColorInput>, MonitoreoTI.Application.Settings.ColorInputValidator>();
+        services.AddSingleton<IValidator<MonitoreoTI.Application.Settings.DepartmentInput>, MonitoreoTI.Application.Settings.DepartmentInputValidator>();
+        services.AddSingleton<IValidator<UserInput>, UserInputValidator>();
+        services.AddSingleton<IValidator<RoleInput>, RoleInputValidator>();
+        services.AddSingleton<IValidator<ProfileInput>, ProfileInputValidator>();
+        services.AddSingleton<IValidator<ChangePasswordInput>, ChangePasswordInputValidator>();
         services.AddSignalR();
         services.AddSingleton<IRealtimeNotifier, SignalRNotifier>();
         return services;
@@ -58,6 +89,12 @@ public static class PanelExtensions
         app.MapAlertEndpoints();
         app.MapTicketEndpoints();
         app.MapNetworkEndpoints();
+        app.MapMaintenanceEndpoints();
+        app.MapRemoteEndpoints();
+        app.MapUserEndpoints();
+        app.MapReportEndpoints();
+        app.MapPanelUpdateEndpoints();
+        app.MapSettingsEndpoints();
         app.MapHub<RealtimeHub>(RealtimeHub.Path);
         return app;
     }

@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using MonitoreoTI.Application.Abstractions;
 using MonitoreoTI.Application.Auth;
+using MonitoreoTI.Application.Users;
+using MonitoreoTI.Api.Panel;
 using MonitoreoTI.Infrastructure.Auth;
 
 namespace MonitoreoTI.Api.Auth;
@@ -25,12 +27,21 @@ public static class AuthExtensions
         services.AddSingleton<AuthTokenService>();
         services.AddSingleton<SecretProtector>();
         services.AddSingleton<TwoFactor>();
+        services.AddHttpContextAccessor();
+        services.AddScoped<IClientDevice, ClientDevice>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddSingleton<IValidator<LoginRequest>, LoginRequestValidator>();
         services.AddSingleton<IValidator<ChallengeCodeRequest>, ChallengeCodeRequestValidator>();
         services.AddSingleton<IValidator<PasswordResetConfirmRequest>, PasswordResetConfirmRequestValidator>();
 
-        if (environment.IsDevelopment() || environment.IsEnvironment("Testing"))
+        // Con un servidor SMTP configurado se envía de verdad (también en desarrollo); si no, en desarrollo se guarda en archivos.
+        var smtp = configuration.GetSection("Correo:Smtp").Get<SmtpOptions>();
+        if (smtp is { Host.Length: > 0, From.Length: > 0 } && !environment.IsEnvironment("Testing"))
+        {
+            services.AddSingleton(smtp);
+            services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        }
+        else if (environment.IsDevelopment() || environment.IsEnvironment("Testing"))
         {
             var folder = configuration["Email:DevFolder"] ?? Path.Combine(Path.GetTempPath(), "monitoreoti-correos");
             services.AddSingleton<IEmailSender>(sp => new DevEmailSender(folder, sp.GetRequiredService<ILogger<DevEmailSender>>()));

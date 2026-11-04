@@ -140,6 +140,134 @@ export interface DeviceDetail {
   qrCode: string;
   createdAt: string;
   ports: PortItem[];
+  /** Agente que lo consulta por SNMP; null = nadie lo consulta. */
+  collectorId: number | null;
+  collectorName: string | null;
+  /** Por qué falló el último sondeo SNMP (null si respondió). */
+  lastError: string | null;
+}
+
+/** Un equipo con agente que puede consultar por SNMP los equipos de su sucursal. */
+export interface CollectorItem {
+  agentId: number;
+  machineId: number;
+  machineName: string;
+  branchId: number;
+  ipAddress: string | null;
+  online: boolean;
+  lastContactAt: string | null;
+  deviceCount: number;
+}
+
+/** W-42 Resumen de red. */
+export interface NetworkSummary {
+  devices: number;
+  online: number;
+  warning: number;
+  critical: number;
+  notResponding: number;
+  withoutCollector: number;
+  ports: number;
+  portsConnected: number;
+  portsWithProblems: number;
+  trunks: number;
+  unknownDevices: number;
+  differences: number;
+  openAlerts: number;
+  collectors: number;
+  collectorsOnline: number;
+  attention: DeviceListItem[];
+}
+
+/** W-53 Una MAC sin equipo registrado; las aleatorias de un puerto se agrupan (count). */
+export interface UnknownDeviceItem {
+  mac: string;
+  vendor: string | null;
+  ip: string | null;
+  vlan: number | null;
+  deviceId: number;
+  deviceName: string;
+  portId: number;
+  portLabel: string;
+  isRandom: boolean;
+  count: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  viaAccessPoint: boolean;
+}
+
+/** W-52 Dónde se vio una MAC o una IP. */
+export interface NetworkSearchResult {
+  mac: string;
+  ip: string | null;
+  vendor: string | null;
+  machineId: number | null;
+  machineName: string | null;
+  deviceId: number | null;
+  deviceName: string | null;
+  portId: number | null;
+  portLabel: string | null;
+  vlan: number | null;
+  lastSeenAt: string | null;
+  viaAccessPoint: boolean;
+}
+
+export type DifferenceKind = 'enlace_sin_cable' | 'cable_distinto' | 'equipo_sin_cable';
+
+/** W-66 Lo detectado que no coincide con lo documentado. */
+export interface DifferenceItem {
+  kind: DifferenceKind;
+  title: string;
+  detail: string;
+  deviceId: number | null;
+  portId: number | null;
+  machineId: number | null;
+}
+
+/** W-51 Mapa de topología. */
+export interface TopologyNode {
+  id: number;
+  name: string;
+  type: DeviceType;
+  status: DeviceStatus;
+  branchName: string;
+  trunks: number;
+}
+
+export interface TopologyLink {
+  sourceId: number;
+  targetId: number;
+  sourcePort: string;
+  targetPort: string;
+  /** lldp: lo ve SNMP; cable: solo está documentado. */
+  kind: 'lldp' | 'cable';
+}
+
+export interface Topology {
+  nodes: TopologyNode[];
+  links: TopologyLink[];
+}
+
+/** "Conexión de red" de la ficha del equipo. */
+export interface MachineNetworkInfo {
+  deviceId: number;
+  switchName: string;
+  portId: number;
+  portLabel: string;
+  vlan: number | null;
+  rackName: string | null;
+  roomName: string | null;
+  ipAddress: string | null;
+  macAddress: string;
+  lastSeenAt: string;
+  viaAccessPoint: boolean;
+  isManual: boolean;
+}
+
+/** W-67 Asignación manual; los dos null devuelven el puerto a lo que detecte SNMP. */
+export interface PortAssignmentInput {
+  maquinaId: number | null;
+  troncal: boolean | null;
 }
 
 export interface OutletItem {
@@ -215,6 +343,8 @@ export interface DeviceInput {
   /** Solo para cambiarlas; null conserva las guardadas. */
   snmpClaveAutenticacion?: string | null;
   snmpClavePrivacidad?: string | null;
+  /** Agente de la misma sucursal que lo consulta por SNMP. */
+  recolectorId?: number | null;
 }
 
 export interface PortInput {
@@ -248,6 +378,85 @@ export interface DeviceFilter {
   gabinete?: number | null;
 }
 
+export interface HistoryChange {
+  field: string;
+  before: string | null;
+  after: string | null;
+}
+
+/** Un cambio del data center (W-69), tomado de la auditoría. */
+export interface HistoryItem {
+  id: number;
+  at: string;
+  action: string;
+  title: string;
+  entity: string;
+  entityId: string | null;
+  subject: string | null;
+  /** null = lo hizo el sistema (SNMP, correlación). */
+  user: string | null;
+  changes: HistoryChange[];
+}
+
+export interface HistoryPage {
+  items: HistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface HistoryFilter {
+  entidad?: string | null;
+  id?: string | null;
+  dias?: number;
+  pagina?: number;
+}
+
+export type ImportType = 'dispositivos' | 'rosetas' | 'cables';
+
+export interface ImportRow {
+  line: number;
+  summary: string;
+  errors: string[];
+}
+
+/** Vista previa o resultado de una importación: se guarda todo o nada. */
+export interface ImportResult {
+  type: ImportType;
+  total: number;
+  valid: number;
+  applied: boolean;
+  fileErrors: string[];
+  rows: ImportRow[];
+}
+
+/** Columnas de cada importación (espejo de ImportColumns); con * las obligatorias. */
+export const IMPORT_COLUMNS: Record<ImportType, string[]> = {
+  dispositivos: [
+    'nombre*',
+    'marca*',
+    'modelo*',
+    'sucursal*',
+    'sala',
+    'gabinete',
+    'posicion_u',
+    'ip_gestion',
+    'firmware',
+  ],
+  rosetas: ['codigo*', 'ubicacion', 'sucursal*'],
+  cables: [
+    'dispositivo_a*',
+    'puerto_a*',
+    'dispositivo_b',
+    'puerto_b',
+    'roseta',
+    'tipo_cable',
+    'color',
+    'etiqueta',
+    'notas',
+  ],
+};
+
 type Id = { id: number };
 
 export interface NetworkApi {
@@ -273,10 +482,20 @@ export interface NetworkApi {
   deleteOutlet(id: number): Promise<Id>;
   createCable(input: CableInput): Promise<Id>;
   deleteCable(id: number): Promise<Id>;
+  history(filter?: HistoryFilter): Promise<HistoryPage>;
+  summary(): Promise<NetworkSummary>;
+  collectors(branchId?: number | null): Promise<CollectorItem[]>;
+  unknown(): Promise<UnknownDeviceItem[]>;
+  differences(): Promise<DifferenceItem[]>;
+  topology(): Promise<Topology>;
+  search(q: string): Promise<NetworkSearchResult[]>;
+  assignPort(id: number, input: PortAssignmentInput): Promise<Id>;
+  previewImport(type: ImportType, content: string): Promise<ImportResult>;
+  runImport(type: ImportType, content: string): Promise<ImportResult>;
 }
 
 export function createNetworkApi(
-  get: <T>(path: string, query?: Record<string, string | number | null | undefined>) => Promise<T>,
+  get: <T>(path: string, query?: Record<string, string | number | boolean | null | undefined>) => Promise<T>,
   send: <T>(method: string, path: string, body?: unknown) => Promise<T>,
 ): NetworkApi {
   const save = <T>(path: string, id: number | null, input: T) =>
@@ -306,5 +525,15 @@ export function createNetworkApi(
     deleteOutlet: (id) => send('DELETE', `/red/rosetas/${id}`),
     createCable: (input) => send('POST', '/red/cables', input),
     deleteCable: (id) => send('DELETE', `/red/cables/${id}`),
+    history: (filter = {}) => get('/red/historial', { ...filter }),
+    summary: () => get('/red/resumen'),
+    collectors: (branchId) => get('/red/recolectores', { sucursal: branchId }),
+    unknown: () => get('/red/desconocidos'),
+    differences: () => get('/red/diferencias'),
+    topology: () => get('/red/topologia'),
+    search: (q) => get('/red/buscar', { q }),
+    assignPort: (id, input) => send('PUT', `/red/puertos/${id}/asignacion`, input),
+    previewImport: (tipo, contenido) => send('POST', '/red/importar/vista-previa', { tipo, contenido }),
+    runImport: (tipo, contenido) => send('POST', '/red/importar', { tipo, contenido }),
   };
 }

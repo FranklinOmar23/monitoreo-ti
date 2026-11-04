@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { MachineDetail, MetricPoint, MetricRange, NetworkInterfaceItem } from '@monitoreoti/shared';
+import type { MachineDetail, MetricPoint, MetricRange, NetworkInterfaceItem, SessionType } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
 import { Icon, type IconName } from '@components/Icon';
@@ -33,6 +33,7 @@ const COMPONENT_ICONS: Record<string, IconName> = {
   antivirus: 'shield',
   firewall: 'shield',
   red: 'network',
+  toner: 'printer',
 };
 
 const COMPONENT_NAMES: Record<string, string> = {
@@ -46,9 +47,17 @@ const COMPONENT_NAMES: Record<string, string> = {
   ventilador: 'Ventilador',
   antivirus: 'Antivirus',
   firewall: 'Firewall',
+  toner: 'Consumible',
 };
 
 const HEALTH_LABEL = { sano: 'Sano', advertencia: 'Revisar', critico: 'Reemplazar', desconocido: 'Sin datos' } as const;
+/** Un consumible no se "revisa": se pide o se cambia. */
+const SUPPLY_HEALTH_LABEL = {
+  sano: 'Bien',
+  advertencia: 'Por acabarse',
+  critico: 'Cambiar',
+  desconocido: 'Sin nivel',
+} as const;
 /** Antivirus y firewall no se reemplazan: se activan. */
 const SOFTWARE_HEALTH_LABEL = { ...HEALTH_LABEL, critico: 'Inactivo' } as const;
 const HEALTH_ORDER = { critico: 0, advertencia: 1, sano: 2, desconocido: 3 } as const;
@@ -101,10 +110,27 @@ interface FichaPageProps {
   onRetire?: (machine: MachineDetail) => void;
   /** Solo si el usuario puede crear tickets. */
   onCreateTicket?: (machine: MachineDetail) => void;
+  /** Solo si el usuario gestiona tickets (y con ellos, el calendario de mantenimiento). */
+  onScheduleMaintenance?: (machine: MachineDetail) => void;
+  /** Solo con scripts.ejecutar. */
+  onRunScript?: (machine: MachineDetail) => void;
+  /** Sesiones remotas que el usuario puede abrir (según sus permisos). */
+  remoteTypes?: readonly SessionType[];
+  onOpenSession?: (machine: MachineDetail, type: SessionType) => void;
 }
 
 /** W-06 a W-12 Ficha del equipo. */
-export function FichaPage({ machineId, onBack, onEdit, onRetire, onCreateTicket }: FichaPageProps) {
+export function FichaPage({
+  machineId,
+  onBack,
+  onEdit,
+  onRetire,
+  onCreateTicket,
+  onScheduleMaintenance,
+  onRunScript,
+  remoteTypes = [],
+  onOpenSession,
+}: FichaPageProps) {
   const api = usePanelApi();
   const realtime = useRealtime();
   const queries = useQueryClient();
@@ -204,25 +230,60 @@ export function FichaPage({ machineId, onBack, onEdit, onRetire, onCreateTicket 
           </ul>
         </div>
         <div className="ficha-actions">
-          <button type="button" className="btn btn-primary" disabled title="Escritorio remoto: Fase 7">
-            Conectar
-          </button>
-          <button type="button" className="btn btn-outline" disabled title="Terminal remota: Fase 6">
-            Terminal
-          </button>
-          <button type="button" className="btn btn-outline" disabled title="Archivos remotos: Fase 6">
-            Archivos
-          </button>
-          {onEdit && (
-            <button type="button" className="btn btn-outline" onClick={() => onEdit(machine)}>
-              Editar
+          {(() => {
+            const usable =
+              !!onOpenSession && remoteTypes.includes('escritorio') && machine.hasAgent && machine.status !== 'baja';
+            return (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!usable}
+                title={
+                  usable
+                    ? 'Ver y controlar la pantalla'
+                    : machine.hasAgent
+                      ? 'Sin permiso'
+                      : 'El equipo no tiene agente'
+                }
+                onClick={() => onOpenSession?.(machine, 'escritorio')}
+              >
+                Conectar
+              </button>
+            );
+          })()}
+          {(['terminal', 'archivos'] as const).map((type) => {
+            const usable =
+              !!onOpenSession && remoteTypes.includes(type) && machine.hasAgent && machine.status !== 'baja';
+            return (
+              <button
+                key={type}
+                type="button"
+                className="btn btn-outline"
+                disabled={!usable}
+                title={usable ? undefined : machine.hasAgent ? 'Sin permiso' : 'El equipo no tiene agente'}
+                onClick={() => onOpenSession?.(machine, type)}
+              >
+                {type === 'terminal' ? 'Terminal' : 'Archivos'}
+              </button>
+            );
+          })}
+          {onRunScript && machine.hasAgent && machine.status !== 'baja' && (
+            <button type="button" className="btn btn-outline" onClick={() => onRunScript(machine)}>
+              <Icon name="terminal" size={14} />
+              Ejecutar script
             </button>
           )}
-          {onRetire && machine.status !== 'baja' && (
-            <button type="button" className="btn btn-outline" onClick={() => onRetire(machine)}>
-              Dar de baja
-            </button>
-          )}
+          <MoreActions
+            items={[
+              ...(onEdit ? [{ label: 'Editar', onSelect: () => onEdit(machine) }] : []),
+              ...(onScheduleMaintenance && machine.status !== 'baja'
+                ? [{ label: 'Programar mantenimiento', onSelect: () => onScheduleMaintenance(machine) }]
+                : []),
+              ...(onRetire && machine.status !== 'baja'
+                ? [{ label: 'Dar de baja', onSelect: () => onRetire(machine), danger: true }]
+                : []),
+            ]}
+          />
           {onCreateTicket && (
             <button type="button" className="btn btn-ticket" onClick={() => onCreateTicket(machine)}>
               <Icon name="ticket" size={14} />
@@ -403,8 +464,23 @@ export function FichaPage({ machineId, onBack, onEdit, onRetire, onCreateTicket 
             </Card>
 
             <Card title="Salud de componentes">
+              {machine.snmp && (
+                <p className={machine.snmp.lastError ? 'auth-error device-error' : 'muted note'}>
+                  {machine.snmp.lastError
+                    ? `Último sondeo SNMP fallido: ${machine.snmp.lastError}`
+                    : machine.snmp.lastPollAt
+                      ? `SNMP ${machine.snmp.version} · último sondeo ${timeAgo(machine.snmp.lastPollAt)}${machine.snmp.collectorName ? ` · lo consulta ${machine.snmp.collectorName}` : ''}`
+                      : machine.snmp.collectorName
+                        ? `SNMP ${machine.snmp.version}: esperando el primer sondeo de ${machine.snmp.collectorName}.`
+                        : `SNMP ${machine.snmp.version}: elija un recolector en Editar para leer el tóner.`}
+                </p>
+              )}
               {healthRows.length === 0 ? (
-                <p className="muted">El agente aún no envió el inventario de hardware.</p>
+                <p className="muted">
+                  {machine.snmp
+                    ? 'La impresora aún no informó sus consumibles.'
+                    : 'El agente aún no envió el inventario de hardware.'}
+                </p>
               ) : (
                 <ul className="component-list">
                   {healthRows.map((row) => (
@@ -419,9 +495,11 @@ export function FichaPage({ machineId, onBack, onEdit, onRetire, onCreateTicket 
                         data-status={row.health === 'desconocido' ? undefined : row.health}
                       >
                         {
-                          (row.type === 'antivirus' || row.type === 'firewall' ? SOFTWARE_HEALTH_LABEL : HEALTH_LABEL)[
-                            row.health
-                          ]
+                          (row.type === 'antivirus' || row.type === 'firewall'
+                            ? SOFTWARE_HEALTH_LABEL
+                            : row.type === 'toner'
+                              ? SUPPLY_HEALTH_LABEL
+                              : HEALTH_LABEL)[row.health]
                         }
                       </span>
                     </li>
@@ -447,7 +525,11 @@ function componentHealth(machine: MachineDetail, nics: readonly NetworkInterface
       key: `c${c.id}`,
       type: c.type,
       name: COMPONENT_NAMES[c.type] ?? c.type,
-      caption: [c.description, c.detail ?? c.capacity].filter(Boolean).join(' · ') || null,
+      // Un consumible muestra el porcentaje que le queda; el resto, su detalle (SMART, desgaste…).
+      caption:
+        [c.description, c.type === 'toner' ? (c.capacity ?? c.detail) : (c.detail ?? c.capacity)]
+          .filter(Boolean)
+          .join(' · ') || null,
       health: c.health,
     }));
 
@@ -505,4 +587,67 @@ function axisLabels(points: readonly MetricPoint[], range: MetricRange): string[
       ? new Date(point.at).toLocaleDateString('es-DO', { weekday: 'short' }).replace('.', '').toUpperCase()
       : clock(point.at);
   });
+}
+
+interface MoreItem {
+  label: string;
+  onSelect: () => void;
+  danger?: boolean;
+}
+
+/** Acciones menos frecuentes de la ficha en un menú, para que la cabecera no se aplaste. */
+function MoreActions({ items }: { items: MoreItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (items.length === 0) return null;
+  return (
+    <div className="more-actions" ref={ref}>
+      <button
+        type="button"
+        className="btn btn-outline"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Más
+        <Icon name="dots" size={14} />
+      </button>
+      {open && (
+        <ul className="more-menu" role="menu">
+          {items.map((item) => (
+            <li key={item.label} role="none">
+              <button
+                type="button"
+                role="menuitem"
+                data-danger={item.danger || undefined}
+                onClick={() => {
+                  setOpen(false);
+                  item.onSelect();
+                }}
+              >
+                {item.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }

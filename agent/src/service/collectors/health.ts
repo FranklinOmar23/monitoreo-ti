@@ -86,7 +86,7 @@ export function parseProcesses(json: string): ProcesosDatos {
 
 export const SERVICES_SCRIPT = `${PREAMBLE}
 Get-CimInstance Win32_Service -Filter "StartMode='Auto'" |
-  Select-Object Name, DisplayName, State, StartMode, DelayedAutoStart | ConvertTo-Json -Compress
+  Select-Object Name, DisplayName, State, StartMode, DelayedAutoStart, ExitCode | ConvertTo-Json -Compress
 `;
 
 export function parseServices(json: string): ServiciosDatos {
@@ -104,7 +104,15 @@ export function parseServices(json: string): ServiciosDatos {
           : mode === 'Manual'
             ? 'manual'
             : 'deshabilitado';
-      return { nombre: text(s['Name'])!, nombre_visible: text(s['DisplayName']), estado, inicio };
+      const exitCode = s['ExitCode'];
+      return {
+        nombre: text(s['Name'])!,
+        nombre_visible: text(s['DisplayName']),
+        estado,
+        inicio,
+        // Muchos automáticos se detienen solos al terminar su trabajo (código 0); solo es caída si falló.
+        ...(estado === 'detenido' && typeof exitCode === 'number' ? { codigo_salida: exitCode } : {}),
+      };
     });
   return { servicios };
 }

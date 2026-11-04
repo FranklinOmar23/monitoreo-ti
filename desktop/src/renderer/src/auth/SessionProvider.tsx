@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError, createAuthApi, type AuthApi, type CurrentSession, type SessionTokens } from '@monitoreoti/shared';
+import { cachedAppearance } from '../theme/brand';
 
 export type SessionState =
   | { status: 'loading' }
@@ -15,6 +16,8 @@ interface SessionContextValue {
   completeLogin(tokens: SessionTokens): Promise<void>;
   logout(): Promise<void>;
   switchCompany(companyId: number): Promise<void>;
+  /** Vuelve a leer los datos de la sesión (por ejemplo, tras cambiar el nombre en Mi perfil). */
+  reloadSession(): Promise<void>;
   /** Token de acceso vigente para llamar al API (se renueva solo antes de vencer). */
   accessToken(): string | null;
 }
@@ -166,6 +169,11 @@ export function SessionProvider({ children, api: injectedApi }: SessionProviderP
         await adopt(api, await api.switchCompany(tokens.access, companyId));
         if (previousRefresh) await api.logout(previousRefresh).catch(() => undefined);
       },
+      reloadSession: async () => {
+        if (!tokens.access) return;
+        const session = await api.session(tokens.access);
+        setState((current) => (current.status === 'authenticated' ? { ...current, session } : current));
+      },
       accessToken: () => tokens.access,
     };
   }, [api, serverUrl, state, adopt, clear, tokens]);
@@ -175,9 +183,11 @@ export function SessionProvider({ children, api: injectedApi }: SessionProviderP
 }
 
 export function SplashScreen() {
+  // El logo de la última empresa vista (W-40): todavía no se sabe la sesión.
+  const logo = cachedAppearance()?.logo;
   return (
     <div className="splash" role="status" aria-live="polite">
-      <span className="splash-mark" aria-hidden="true" />
+      {logo ? <img className="splash-logo" src={logo} alt="" /> : <span className="splash-mark" aria-hidden="true" />}
       <span>Cargando…</span>
     </div>
   );

@@ -12,6 +12,8 @@ public sealed record AlertFilter(
     string? Level = null,
     int? BranchId = null,
     int? MachineId = null,
+    /// <summary>true = solo las de red (switches, puertos); false = solo las de equipos.</summary>
+    bool? Network = null,
     int Page = 1,
     int PageSize = 50);
 
@@ -32,7 +34,10 @@ public sealed record AlertListItem(
     DateTime CreatedAt,
     DateTime? ResolvedAt,
     /// <summary>La detectó el motor de alertas (se resuelve sola al corregirse).</summary>
-    bool Automatic);
+    bool Automatic,
+    /// <summary>Alertas de red: el switch o router (y el puerto) donde está el problema.</summary>
+    int? DeviceId = null,
+    string? DeviceName = null);
 
 public sealed record AlertList(PagedResult<AlertListItem> Page, AlertCounts Counts);
 
@@ -60,7 +65,10 @@ public sealed record AlertDetail(
     DateTime? ResolvedAt,
     /// <summary>Veces que el mismo problema se abrió en el mismo equipo en los últimos 30 días (sin contar esta).</summary>
     int Recurrences,
-    IReadOnlyList<AlertHistoryItem> History);
+    IReadOnlyList<AlertHistoryItem> History,
+    int? DeviceId = null,
+    string? DeviceName = null,
+    int? PortId = null);
 
 /// <summary>Atender o resolver una alerta, con una nota opcional para el historial.</summary>
 public sealed record AlertActionInput(string? Nota);

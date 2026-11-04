@@ -88,6 +88,8 @@ type MetricListener = (point: MetricPoint) => void;
 export interface Realtime {
   /** Recibe las métricas nuevas de un equipo mientras su ficha está abierta. Devuelve la función para dejar de recibir. */
   watchMachine(machineId: number, listener: MetricListener): () => void;
+  /** Avisa cada alerta nueva (para el aviso de Windows de las críticas). Devuelve la función para dejar de escuchar. */
+  onNewAlert(listener: (alertId: number) => void): () => void;
 }
 
 function RealtimeProvider({ serverUrl, children }: { serverUrl: string; children: ReactNode }) {
@@ -95,6 +97,7 @@ function RealtimeProvider({ serverUrl, children }: { serverUrl: string; children
   const queries = useQueryClient();
   const [connection, setConnection] = useState<HubConnection | null>(null);
   const listeners = useRef(new Map<number, Set<MetricListener>>());
+  const alertListeners = useRef(new Set<(alertId: number) => void>());
   // El token se renueva cada 15 min; la conexión lo pide al reconectar sin tener que recrearse.
   const tokenRef = useRef(accessToken);
   useEffect(() => {
@@ -127,9 +130,21 @@ function RealtimeProvider({ serverUrl, children }: { serverUrl: string; children
       void queries.invalidateQueries({ queryKey: ['dashboard'] });
       if (event.maquinaId !== null) void queries.invalidateQueries({ queryKey: ['maquina', event.maquinaId] });
     };
-    hub.on('alertaNueva', alertChanged);
+    hub.on('alertaNueva', (event: { alertaId: number; maquinaId: number | null }) => {
+      alertChanged(event);
+      alertListeners.current.forEach((listener) => listener(event.alertaId));
+    });
     hub.on('alertaActualizada', alertChanged);
 
+    // Un puerto o un dispositivo de red cambió de estado (recolector SNMP): todo lo de red se vuelve a pedir.
+    hub.on('puertoEstadoCambio', () => {
+      void queries.invalidateQueries({ queryKey: ['red'] });
+    });
+
+    hub.on('comandoActualizado', (event: { loteId: string | null }) => {
+      void queries.invalidateQueries({ queryKey: ['ejecuciones'] });
+      if (event.loteId) void queries.invalidateQueries({ queryKey: ['ejecuciones', event.loteId] });
+    });
     hub.on('ticketActualizado', (event: { ticketId: number }) => {
       void queries.invalidateQueries({ queryKey: ['tickets'] });
       void queries.invalidateQueries({ queryKey: ['ticket', event.ticketId] });
@@ -210,6 +225,10 @@ function RealtimeProvider({ serverUrl, children }: { serverUrl: string; children
               void connection.invoke('DesuscribirMaquina', machineId).catch(() => undefined);
           }
         };
+      },
+      onNewAlert(listener) {
+        alertListeners.current.add(listener);
+        return () => alertListeners.current.delete(listener);
       },
     }),
     [connection],

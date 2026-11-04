@@ -116,6 +116,30 @@ public sealed class AgentHealthTests(TestDatabase database) : IAsyncLifetime
     }
 
     [DatabaseFact]
+    public async Task A_service_that_stops_cleanly_is_not_a_problem_and_its_alert_resolves()
+    {
+        var (agent, socket) = await ConnectAgentAsync();
+        using var _ = socket;
+
+        object Spooler(string estado, int? codigo) => new
+        {
+            servicios = new object[] { new { nombre = "Spooler", nombre_visible = "Cola de impresión", estado, inicio = "automatico", codigo_salida = codigo } },
+        };
+
+        await SendAckedAsync(socket, "servicios", Spooler("en_ejecucion", null));
+        await SendAckedAsync(socket, "servicios", Spooler("detenido", 0));
+        (await EvaluateAsync(agent)).Opened.Should().Be(0, "terminó sin error: se detuvo solo o a propósito");
+
+        await SendAckedAsync(socket, "servicios", Spooler("en_ejecucion", null));
+        await SendAckedAsync(socket, "servicios", Spooler("detenido", 1067));
+        (await EvaluateAsync(agent)).Opened.Should().Be(1, "terminó con error: es una caída");
+
+        // Windows lo reinició y volvió a terminar bien: la alerta se resuelve sola.
+        await SendAckedAsync(socket, "servicios", Spooler("detenido", 0));
+        (await EvaluateAsync(agent)).Resolved.Should().Be(1);
+    }
+
+    [DatabaseFact]
     public async Task Disk_health_and_processes_reach_the_machine_detail()
     {
         var (agent, socket) = await ConnectAgentAsync();

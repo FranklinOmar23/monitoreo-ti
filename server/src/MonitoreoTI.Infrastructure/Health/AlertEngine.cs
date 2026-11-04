@@ -31,7 +31,8 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         var now = clock.GetUtcNow().UtcDateTime;
 
         var rules = await LoadRulesAsync(db, cancellationToken);
-        var query = db.Machines.Where(m => m.Agent != null && m.Status != MachineStatus.Retired);
+        // Equipos con agente e impresoras que consulta un recolector SNMP.
+        var query = db.Machines.Where(m => (m.Agent != null || m.CollectorAgentId != null) && m.Status != MachineStatus.Retired);
         if (onlyMachineIds is not null)
             query = query.Where(m => onlyMachineIds.Contains(m.Id));
         var machines = await query.ToListAsync(cancellationToken);
@@ -51,8 +52,10 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         var services = await db.Services.AsNoTracking().Where(s => ids.Contains(s.MachineId) && s.StoppedSince != null)
             .Select(s => new { s.MachineId, s.Name, s.DisplayName }).ToListAsync(cancellationToken);
         var components = await db.Components.AsNoTracking()
-            .Where(c => ids.Contains(c.MachineId) && (c.Type == "disco" || c.Type == "antivirus"))
-            .Select(c => new { c.MachineId, c.Type, c.Description, c.HealthStatus, c.Detail }).ToListAsync(cancellationToken);
+            .Where(c => ids.Contains(c.MachineId) && (c.Type == "disco" || c.Type == "antivirus" || c.Type == "toner"))
+            .Select(c => new { c.MachineId, c.Type, c.Description, c.HealthStatus, c.Detail, c.Capacity }).ToListAsync(cancellationToken);
+        // Incluye las de red que nombran al equipo (puerto caído): cuentan para su semáforo, pero las abre y
+        // resuelve el motor de red.
         var open = await db.Alerts.Where(a => a.MachineId != null && ids.Contains(a.MachineId.Value) && a.Status != AlertStatus.Resolved)
             .ToListAsync(cancellationToken);
 
@@ -73,11 +76,11 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
                 events.Where(e => e.MachineId == machine.Id).Select(e => new EventSnapshot(e.Timestamp, e.Source, e.Code)).ToList(),
                 services.Where(s => s.MachineId == machine.Id).Select(s => new StoppedService(s.Name, s.DisplayName)).ToList(),
                 components.Where(c => c.MachineId == machine.Id)
-                    .Select(c => new ComponentSnapshot(c.Type, c.Description, EnumMemberConverter<HealthStatus>.ToProvider(c.HealthStatus), c.Detail))
+                    .Select(c => new ComponentSnapshot(c.Type, c.Description, EnumMemberConverter<HealthStatus>.ToProvider(c.HealthStatus), c.Detail, c.Capacity))
                     .ToList());
 
             var findings = HealthRules.Evaluate(snapshot, machineRules.Set, now);
-            var machineOpen = open.Where(a => a.MachineId == machine.Id && a.Code != null).ToList();
+            var machineOpen = open.Where(a => a.MachineId == machine.Id && a.Code != null && a.DeviceId == null).ToList();
 
             foreach (var finding in findings)
             {

@@ -30,4 +30,7 @@ public class Alert : ITenantEntity
     public string? Source { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ResolvedAt { get; set; }
+
+    /// <summary>Cuándo se avisó por correo; una alerta crítica se avisa una sola vez.</summary>
+    public DateTime? NotifiedAt { get; set; }
 }

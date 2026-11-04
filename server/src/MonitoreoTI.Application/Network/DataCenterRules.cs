@@ -156,6 +156,28 @@ public static class CablePath
         }
     }
 
+    /// <summary>
+    /// El puerto activo al que llega el cableado documentado desde <paramref name="portId"/>, atravesando patch
+    /// panels; null si no hay cable o termina en una roseta. Sirve para comparar con lo que ve LLDP (W-66).
+    /// </summary>
+    public static int? DocumentedPeer(int portId, IReadOnlyDictionary<int, PathPort> ports, IReadOnlyList<PathLink> cables)
+    {
+        var visited = new HashSet<int> { portId };
+        var current = portId;
+        PathLink? via = null;
+        while (true)
+        {
+            var next = cables.FirstOrDefault(l => l != via && !l.Detected && l.PortBId is not null && Touches(l, current) && !visited.Contains(Other(l, current)));
+            if (next is null || !ports.TryGetValue(Other(next, current), out var port))
+                return null;
+            if (port.IsActiveDevice)
+                return port.PortId;
+            visited.Add(port.PortId);
+            current = port.PortId;
+            via = next;
+        }
+    }
+
     private static PathHop Hop(PathPort port, PathLink? via) => new(
         port.IsActiveDevice ? port.DeviceType : "patch_panel",
         port.DeviceId,

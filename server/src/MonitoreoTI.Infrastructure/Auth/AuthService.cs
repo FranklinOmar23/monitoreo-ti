@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
 using MonitoreoTI.Application.Auth;
+using MonitoreoTI.Application.Users;
 using MonitoreoTI.Domain.Entities.Security;
 using MonitoreoTI.Domain.Enums;
 using MonitoreoTI.Infrastructure.Persistence;
@@ -22,6 +23,7 @@ public sealed class AuthService(
     SecretProtector protector,
     IEmailSender mailer,
     AuthOptions options,
+    IClientDevice device,
     TimeProvider clock) : IAuthService
 {
     // Hash BCrypt válido de una contraseña aleatoria: comparar contra él iguala el tiempo de respuesta
@@ -91,8 +93,34 @@ public sealed class AuthService(
         }
 
         user.FailedLoginAttempts = 0;
+        user.LastTwoFactorAt = Now;
         await db.SaveChangesAsync(cancellationToken);
         return await ContinueAfterTwoFactorAsync(user, await LoadMembershipsAsync(user.Id, cancellationToken), ip, cancellationToken);
+    }
+
+    /// <summary>
+    /// Vuelve a pedir el código con la sesión abierta: el acceso remoto exige un 2FA de menos de 8 horas
+    /// (decisión 52). Los fallos cuentan para el bloqueo igual que en el inicio de sesión.
+    /// </summary>
+    public async Task<AuthOutcome<DateTime>> ConfirmRecentTwoFactorAsync(int userId, string code, string? ip, CancellationToken cancellationToken)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null || !user.IsActive || user.TotpSecret is null)
+            return AuthOutcome<DateTime>.Fail(AuthError.InvalidChallenge);
+        if (user.LockedUntil > Now)
+            return AuthOutcome<DateTime>.Fail(AuthError.LockedOut);
+
+        var secret = protector.Unprotect(user.TotpSecret);
+        if (secret is null || !twoFactor.Verify(user.Id, secret, code))
+        {
+            var error = await RegisterFailureAsync(user, "2fa.fallido", ip, cancellationToken);
+            return AuthOutcome<DateTime>.Fail(error == AuthError.LockedOut ? error : AuthError.InvalidCode);
+        }
+
+        user.FailedLoginAttempts = 0;
+        user.LastTwoFactorAt = Now;
+        await db.SaveChangesAsync(cancellationToken);
+        return AuthOutcome<DateTime>.Ok(user.LastTwoFactorAt.Value);
     }
 
     public async Task<AuthOutcome<LoginResult>> ConfirmTwoFactorSetupAsync(string challenge, string code, string? ip, CancellationToken cancellationToken)
@@ -109,6 +137,7 @@ public sealed class AuthService(
             return AuthOutcome<LoginResult>.Fail(AuthError.InvalidCode);
 
         user.TotpSecret = protector.Protect(secret);
+        user.LastTwoFactorAt = Now;
         await db.SaveChangesAsync(cancellationToken);
 
         var memberships = await LoadMembershipsAsync(user.Id, cancellationToken);
@@ -138,6 +167,12 @@ public sealed class AuthService(
         var stored = await db.RefreshTokens.FirstOrDefaultAsync(t => t.TokenHash == hash, cancellationToken);
         if (stored is null)
             return AuthOutcome<SessionTokens>.Fail(AuthError.InvalidRefreshToken);
+
+        if (stored.RevokedAt is not null && stored.ReplacedById is null)
+        {
+            // Cerrado a propósito (cerrar sesión, Mi perfil, desactivado): solo deja de servir.
+            return AuthOutcome<SessionTokens>.Fail(AuthError.InvalidRefreshToken);
+        }
 
         if (stored.RevokedAt is not null)
         {
@@ -294,6 +329,7 @@ public sealed class AuthService(
             TokenHash = refreshHash,
             ExpiresAt = Now + options.RefreshTokenLifetime,
             IpAddress = ip,
+            Device = replacing?.Device ?? device.Name,
         };
         db.RefreshTokens.Add(stored);
         user.LastLoginAt = Now;
@@ -308,7 +344,7 @@ public sealed class AuthService(
 
         var (access, accessExpires) = tokens.CreateAccessToken(new AccessTokenContent(
             user.Id, user.Name, user.Email, membership?.CompanyId, membership?.Role, user.IsSuperAdmin,
-            membership?.Permissions ?? []));
+            membership?.Permissions ?? [], stored.Id));
 
         if (audit)
             await AuditAsync(membership?.CompanyId, user.Id, "login", null, ip, cancellationToken);

@@ -4,3 +4,7 @@ export * from './api/http';
 export * from './api/auth';
 export * from './api/panel';
 export * from './api/network';
+export * from './api/remote';
+export * from './api/users';
+export * from './api/settings';
+export * from './api/reports';

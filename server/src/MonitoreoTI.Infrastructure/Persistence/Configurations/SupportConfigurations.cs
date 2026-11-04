@@ -115,10 +115,43 @@ internal sealed class ScriptConfiguration : IEntityTypeConfiguration<Script>
         b.Property(x => x.CreatedById).HasColumnName("creado_por");
         b.Property(x => x.Name).HasColumnName("nombre").HasMaxLength(150);
         b.Property(x => x.Language).HasColumnName("lenguaje");
+        b.Property(x => x.Description).HasColumnName("descripcion").HasMaxLength(500);
         b.Property(x => x.Content).HasColumnName("contenido");
         b.Property(x => x.Signature).HasColumnName("firma").HasMaxLength(1000);
         b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
+        b.Property(x => x.UpdatedAt).HasColumnName("actualizado");
 
+        b.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class ScheduledTaskConfiguration : IEntityTypeConfiguration<ScheduledTask>
+{
+    public void Configure(EntityTypeBuilder<ScheduledTask> b)
+    {
+        b.ToTable("tareas_programadas");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.Name).HasColumnName("nombre").HasMaxLength(150);
+        b.Property(x => x.ScriptId).HasColumnName("script_id");
+        b.Property(x => x.CreatedById).HasColumnName("creado_por");
+        b.Property(x => x.Target).HasColumnName("objetivo").Varchar(10);
+        b.Property(x => x.BranchId).HasColumnName("sucursal_id");
+        b.Property(x => x.MachineIds).HasColumnName("maquinas").HasMaxLength(2000);
+        b.Property(x => x.Frequency).HasColumnName("frecuencia").Varchar(10);
+        b.Property(x => x.Time).HasColumnName("hora");
+        b.Property(x => x.Date).HasColumnName("fecha");
+        b.Property(x => x.WeekDays).HasColumnName("dias_semana");
+        b.Property(x => x.MonthDay).HasColumnName("dia_mes");
+        b.Property(x => x.TimeoutSeconds).HasColumnName("timeout_s");
+        b.Property(x => x.IsActive).HasColumnName("activa");
+        b.Property(x => x.NextRunAt).HasColumnName("proxima");
+        b.Property(x => x.LastRunAt).HasColumnName("ultima");
+        b.Property(x => x.LastBatchId).HasColumnName("ultimo_lote");
+        b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
+        b.Property(x => x.UpdatedAt).HasColumnName("actualizado");
+
+        b.HasOne<Script>().WithMany().HasForeignKey(x => x.ScriptId).OnDelete(DeleteBehavior.NoAction);
         b.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.NoAction);
     }
 }
@@ -134,10 +167,16 @@ internal sealed class CommandConfiguration : IEntityTypeConfiguration<Command>
         b.Property(x => x.UserId).HasColumnName("usuario_id");
         b.Property(x => x.ScriptId).HasColumnName("script_id");
         b.Property(x => x.Type).HasColumnName("tipo");
+        b.Property(x => x.BatchId).HasColumnName("lote_id");
+        b.Property(x => x.Language).HasColumnName("lenguaje");
         b.Property(x => x.Content).HasColumnName("contenido");
+        b.Property(x => x.TimeoutSeconds).HasColumnName("timeout_s");
+        b.Property(x => x.ExpiresAt).HasColumnName("vence");
         b.Property(x => x.Status).HasColumnName("estado");
         b.Property(x => x.Result).HasColumnName("resultado");
+        b.Property(x => x.ExitCode).HasColumnName("codigo_salida");
         b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
+        b.Property(x => x.SentAt).HasColumnName("enviado");
         b.Property(x => x.CompletedAt).HasColumnName("terminado");
 
         b.HasOne<Machine>().WithMany()
@@ -156,6 +195,8 @@ internal sealed class RemoteSessionConfiguration : IEntityTypeConfiguration<Remo
     {
         b.ToTable("sesiones_remotas");
         b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.Reason).HasColumnName("motivo").HasMaxLength(300);
+        b.Property(x => x.ViewOnly).HasColumnName("solo_ver");
         b.Property(x => x.CompanyId).HasColumnName("empresa_id");
         b.Property(x => x.MachineId).HasColumnName("maquina_id");
         b.Property(x => x.UserId).HasColumnName("usuario_id");

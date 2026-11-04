@@ -113,8 +113,10 @@ public sealed record ProcesoData(string? Nombre, int Pid, decimal Cpu, [property
 
 public sealed record ProcesosData(int Total, List<ProcesoData>? Procesos);
 
+/// <param name="CodigoSalida">Solo si está detenido: 0 = terminó bien (se detuvo solo o a propósito), otro = falló.
+/// Los agentes anteriores no lo envían.</param>
 public sealed record ServicioData(string? Nombre, [property: JsonPropertyName("nombre_visible")] string? NombreVisible,
-    string? Estado, string? Inicio);
+    string? Estado, string? Inicio, [property: JsonPropertyName("codigo_salida")] int? CodigoSalida = null);
 
 public sealed record ServiciosData(List<ServicioData>? Servicios);
 

@@ -37,6 +37,16 @@ public class Machine : ITenantEntity
 
     /// <summary>Procesos en ejecución en la última muestra.</summary>
     public int? ProcessCount { get; set; }
+
+    /// <summary>Impresoras: v2c o v3; el recolector de su sucursal lee sus consumibles por SNMP.</summary>
+    public string? SnmpVersion { get; set; }
+    public string? SnmpUser { get; set; }
+
+    /// <summary>Comunidad v2c o claves v3, cifradas por la aplicación; nunca en texto plano.</summary>
+    public byte[]? SnmpEncryptedCredential { get; set; }
+    public int? CollectorAgentId { get; set; }
+    public DateTime? LastSnmpPollAt { get; set; }
+    public string? LastSnmpError { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public Branch? Branch { get; set; }

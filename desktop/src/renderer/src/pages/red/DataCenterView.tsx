@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from 'react';
+import { lazy, Suspense, useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RackDevice, RackItem, RoomItem } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
@@ -8,6 +8,13 @@ import { StatusBadge } from '@components/StatusBadge';
 import { usePanelApi } from '../../data/PanelData';
 import { DeviceForm, RackForm, RoomForm } from './NetworkForms';
 import { DEVICE_STATUS_LABEL, DEVICE_STATUS_TONE, DEVICE_TYPE_LABEL } from './netLabels';
+import { planRows } from './scene3d';
+import { useOpenView3D } from './View3DWindows';
+
+// three.js pesa: se carga solo al abrir una vista 3D.
+const DataCenter3D = lazy(() => import('./DataCenter3D'));
+
+type RoomMode = 'gabinetes' | 'plano' | '3d';
 
 interface DataCenterViewProps {
   canEdit: boolean;
@@ -78,6 +85,7 @@ export function DataCenterView({ canEdit, onOpenDevice }: DataCenterViewProps) {
             room={room}
             canEdit={canEdit}
             onOpenRack={setRackId}
+            onOpenDevice={onOpenDevice}
             onEditRoom={() => setEditing({ kind: 'sala', room })}
             onAddRack={() => setEditing({ kind: 'gabinete' })}
           />
@@ -96,17 +104,21 @@ function RoomRacks({
   room,
   canEdit,
   onOpenRack,
+  onOpenDevice,
   onEditRoom,
   onAddRack,
 }: {
   room: RoomItem;
   canEdit: boolean;
   onOpenRack: (id: number) => void;
+  onOpenDevice: (id: number) => void;
   onEditRoom: () => void;
   onAddRack: () => void;
 }) {
   const api = usePanelApi();
   const racks = useQuery({ queryKey: ['red', 'gabinetes', room.id], queryFn: () => api.red.racks(room.id) });
+  const [mode, setMode] = useState<RoomMode>('gabinetes');
+  const openWindow = useOpenView3D();
 
   return (
     <Card
@@ -124,16 +136,47 @@ function RoomRacks({
         )
       }
     >
-      <p className="muted">
-        {room.branchName}
-        {room.location && ` · ${room.location}`}
-      </p>
+      <div className="dc-room-bar">
+        <p className="muted">
+          {room.branchName}
+          {room.location && ` · ${room.location}`}
+        </p>
+        <div className="segmented segmented-lg" role="group" aria-label="Cómo ver la sala">
+          {(
+            [
+              ['gabinetes', 'Gabinetes'],
+              ['plano', 'Plano'],
+              ['3d', '3D'],
+            ] as const
+          ).map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={mode === value} onClick={() => setMode(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {openWindow && (
+          <button
+            type="button"
+            className="btn btn-outline"
+            title="Abrir la sala en 3D en su propia ventana (por ejemplo, en otro monitor)"
+            onClick={() => openWindow({ kind: 'sala', id: room.id, title: room.name })}
+          >
+            <Icon name="expand" size={16} /> 3D en ventana
+          </button>
+        )}
+      </div>
       {racks.isPending ? (
         <Loading />
       ) : racks.isError ? (
         <ErrorState error={racks.error} />
       ) : racks.data.length === 0 ? (
         <EmptyState title="La sala no tiene gabinetes" />
+      ) : mode === 'plano' ? (
+        <FloorPlan racks={racks.data} onOpenRack={onOpenRack} />
+      ) : mode === '3d' ? (
+        <Suspense fallback={<Loading label="Cargando la vista 3D…" />}>
+          <DataCenter3D racks={racks.data} onOpenRack={onOpenRack} onOpenDevice={onOpenDevice} />
+        </Suspense>
       ) : (
         <div className="rack-grid">
           {racks.data.map((rack) => (
@@ -159,6 +202,45 @@ function RoomRacks({
   );
 }
 
+/** W-59 Plano de la sala: los gabinetes por fila y posición, vistos desde arriba. */
+function FloorPlan({ racks, onOpenRack }: { racks: RackItem[]; onOpenRack: (id: number) => void }) {
+  const rows = planRows(racks);
+  const columns = Math.max(...rows.flatMap((r) => r.racks.map((x) => x.column)), 1);
+  return (
+    <div className="floor-plan" role="list" aria-label="Plano de la sala">
+      {rows.map((row) => (
+        <div key={row.row ?? 'sin-fila'} className="floor-row" role="listitem">
+          <span className="floor-row-name">{row.row ? `Fila ${row.row}` : 'Sin fila'}</span>
+          <div className="floor-row-racks" style={{ gridTemplateColumns: `repeat(${columns}, minmax(84px, 1fr))` }}>
+            {row.racks.map(({ rack, column }) => {
+              const full = racks.find((r) => r.id === rack.id)!;
+              return (
+                <button
+                  key={rack.id}
+                  type="button"
+                  className="floor-rack"
+                  style={{ gridColumn: column }}
+                  title={`${full.usedUnits} de ${full.heightUnits} U ocupadas`}
+                  onClick={() => onOpenRack(rack.id)}
+                >
+                  <span className="mono">{rack.name}</span>
+                  <span className="rack-usage" aria-hidden="true">
+                    <span style={{ width: `${Math.min(100, (100 * full.usedUnits) / full.heightUnits)}%` }} />
+                  </span>
+                  <span className="muted mono">{full.deviceCount} equipos</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <p className="muted note">
+        El frente de los gabinetes mira al pasillo. La fila y la posición se editan en cada gabinete.
+      </p>
+    </div>
+  );
+}
+
 /** Altura de una U en el dibujo del gabinete. */
 const U_PX = 22;
 
@@ -179,6 +261,8 @@ function RackView({
   const [editingRack, setEditingRack] = useState(false);
   const [adding, setAdding] = useState<number | null>(null);
   const [dropU, setDropU] = useState<number | null>(null);
+  const [in3d, setIn3d] = useState(false);
+  const openWindow = useOpenView3D();
 
   const move = useMutation({
     mutationFn: ({ id, u }: { id: number; u: number }) => api.red.placeDevice(id, rackId, u),
@@ -211,11 +295,33 @@ function RackView({
         <Card
           title={`${rack.name} · ${rack.heightUnits} U`}
           aside={
-            canEdit && (
-              <button type="button" className="btn btn-outline" onClick={() => setEditingRack(true)}>
-                Editar gabinete
-              </button>
-            )
+            <div className="ficha-actions">
+              <div className="segmented segmented-lg" role="group" aria-label="Cómo ver el gabinete">
+                <button type="button" aria-pressed={!in3d} onClick={() => setIn3d(false)}>
+                  2D
+                </button>
+                <button type="button" aria-pressed={in3d} onClick={() => setIn3d(true)}>
+                  3D
+                </button>
+              </div>
+              {openWindow && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  title="Abrir el gabinete en 3D en su propia ventana"
+                  onClick={() =>
+                    openWindow({ kind: 'gabinete', id: rack.id, title: `${rack.roomName} · ${rack.name}` })
+                  }
+                >
+                  <Icon name="expand" size={16} /> 3D en ventana
+                </button>
+              )}
+              {canEdit && (
+                <button type="button" className="btn btn-outline" onClick={() => setEditingRack(true)}>
+                  Editar gabinete
+                </button>
+              )}
+            </div>
           }
         >
           {move.isError && (
@@ -223,62 +329,70 @@ function RackView({
               {move.error.message}
             </p>
           )}
-          {canEdit && (
-            <p className="muted note">
-              Arrastre un equipo a otra U para moverlo, o haga clic en una U libre para agregar uno.
-            </p>
-          )}
-          <div
-            className="rack"
-            style={{ gridTemplateRows: `repeat(${rack.heightUnits}, ${U_PX}px)` }}
-            role="list"
-            aria-label={`Gabinete ${rack.name}`}
-          >
-            {Array.from({ length: rack.heightUnits }, (_, i) => rack.heightUnits - i).map((u) => {
-              const device = occupant(u);
-              const row = rack.heightUnits - u + 1;
-              if (device && u !== device.positionU + device.heightUnits - 1) return null;
-              return device ? (
-                <RackBlock
-                  key={`d${device.id}`}
-                  device={device}
-                  row={row}
-                  draggable={canEdit}
-                  onOpen={() => onOpenDevice(device.id)}
-                />
-              ) : (
-                <div
-                  key={`u${u}`}
-                  role="listitem"
-                  className="rack-slot"
-                  data-over={dropU === u || undefined}
-                  style={{ gridRow: row }}
-                  onDragOver={
-                    canEdit
-                      ? (e) => {
-                          e.preventDefault();
-                          setDropU(u);
-                        }
-                      : undefined
-                  }
-                  onDragLeave={() => setDropU(null)}
-                  onDrop={canEdit ? drop(u) : undefined}
-                >
-                  <span className="rack-u mono">{u}</span>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      className="rack-add"
-                      aria-label={`Agregar equipo en la U ${u}`}
-                      onClick={() => setAdding(u)}
+          {in3d ? (
+            <Suspense fallback={<Loading label="Cargando la vista 3D…" />}>
+              <DataCenter3D racks={[rack]} single onOpenDevice={onOpenDevice} />
+            </Suspense>
+          ) : (
+            <>
+              {canEdit && (
+                <p className="muted note">
+                  Arrastre un equipo a otra U para moverlo, o haga clic en una U libre para agregar uno.
+                </p>
+              )}
+              <div
+                className="rack"
+                style={{ gridTemplateRows: `repeat(${rack.heightUnits}, ${U_PX}px)` }}
+                role="list"
+                aria-label={`Gabinete ${rack.name}`}
+              >
+                {Array.from({ length: rack.heightUnits }, (_, i) => rack.heightUnits - i).map((u) => {
+                  const device = occupant(u);
+                  const row = rack.heightUnits - u + 1;
+                  if (device && u !== device.positionU + device.heightUnits - 1) return null;
+                  return device ? (
+                    <RackBlock
+                      key={`d${device.id}`}
+                      device={device}
+                      row={row}
+                      draggable={canEdit}
+                      onOpen={() => onOpenDevice(device.id)}
+                    />
+                  ) : (
+                    <div
+                      key={`u${u}`}
+                      role="listitem"
+                      className="rack-slot"
+                      data-over={dropU === u || undefined}
+                      style={{ gridRow: row }}
+                      onDragOver={
+                        canEdit
+                          ? (e) => {
+                              e.preventDefault();
+                              setDropU(u);
+                            }
+                          : undefined
+                      }
+                      onDragLeave={() => setDropU(null)}
+                      onDrop={canEdit ? drop(u) : undefined}
                     >
-                      +
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                      <span className="rack-u mono">{u}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className="rack-add"
+                          aria-label={`Agregar equipo en la U ${u}`}
+                          onClick={() => setAdding(u)}
+                        >
+                          +
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </Card>
 
         <Card title="Equipos del gabinete">

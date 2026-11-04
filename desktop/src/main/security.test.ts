@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { buildContentSecurityPolicy, isAllowedNavigation } from './security';
+import { buildContentSecurityPolicy, deviceUserAgent, isAllowedNavigation } from './security';
 
 describe('CSP del panel', () => {
   it('en producción solo permite el propio panel y el servidor configurado', () => {
@@ -39,5 +39,14 @@ describe('navegación', () => {
 
     expect(isAllowedNavigation(app, app)).toBe(true);
     expect(isAllowedNavigation('file:///C:/Windows/System32/drivers/etc/hosts', app)).toBe(false);
+  });
+});
+
+describe('User-Agent con el nombre del equipo', () => {
+  it('agrega el equipo para "Sesiones abiertas" sin caracteres raros', () => {
+    expect(deviceUserAgent('Mozilla/5.0 Electron/33', 'PC-042076')).toBe('Mozilla/5.0 Electron/33 Equipo/PC-042076');
+    expect(deviceUserAgent('UA', 'Sala de Juntas')).toBe('UA Equipo/Sala%20de%20Juntas');
+    expect(deviceUserAgent('UA', 'x'.repeat(80))).toBe(`UA Equipo/${'x'.repeat(40)}`);
+    expect(deviceUserAgent('UA', '  ')).toBe('UA');
   });
 });

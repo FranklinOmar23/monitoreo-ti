@@ -6,12 +6,25 @@ export interface ProfileMenuItem {
   onSelect: () => void;
 }
 
+/** Un aviso de la campana: una alerta abierta. */
+export interface NotificationItem {
+  id: number;
+  level: 'advertencia' | 'critico';
+  message: string;
+  where: string | null;
+  at: string;
+}
+
 interface TopbarProps {
   search: string;
   onSearchChange: (value: string) => void;
   user: { nombre: string; rol: string };
   hasUnreadAlerts: boolean;
   menu: readonly ProfileMenuItem[];
+  /** Alertas abiertas más recientes para la campana; sin la lista, la campana no abre nada. */
+  notifications?: readonly NotificationItem[];
+  onOpenNotification?: (id: number) => void;
+  onSeeAllNotifications?: () => void;
 }
 
 /** "Luis Peña" → "LP". */
@@ -22,18 +35,33 @@ export function initials(name: string): string {
 }
 
 /** Barra superior: buscador global (nombre, QR, IP), notificaciones y perfil. */
-export function Topbar({ search, onSearchChange, user, hasUnreadAlerts, menu }: TopbarProps) {
+export function Topbar({
+  search,
+  onSearchChange,
+  user,
+  hasUnreadAlerts,
+  menu,
+  notifications,
+  onOpenNotification,
+  onSeeAllNotifications,
+}: TopbarProps) {
   const [open, setOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLDivElement>(null);
 
-  // Cerrar el menú al hacer clic fuera o con Escape.
+  // Cerrar el menú y la campana al hacer clic fuera o con Escape.
   useEffect(() => {
-    if (!open) return;
+    if (!open && !bellOpen) return;
     const onClick = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!bellRef.current?.contains(event.target as Node)) setBellOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setBellOpen(false);
+      }
     };
     document.addEventListener('mousedown', onClick);
     document.addEventListener('keydown', onKey);
@@ -41,7 +69,7 @@ export function Topbar({ search, onSearchChange, user, hasUnreadAlerts, menu }: 
       document.removeEventListener('mousedown', onClick);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, bellOpen]);
 
   return (
     <header className="topbar">
@@ -58,14 +86,56 @@ export function Topbar({ search, onSearchChange, user, hasUnreadAlerts, menu }: 
       </label>
 
       <div className="topbar-right">
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={hasUnreadAlerts ? 'Notificaciones (hay nuevas)' : 'Notificaciones'}
-        >
-          <Icon name="bell" />
-          {hasUnreadAlerts && <span className="notif-dot" aria-hidden="true" />}
-        </button>
+        <div className="profile-wrap" ref={bellRef}>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={hasUnreadAlerts ? 'Notificaciones (hay nuevas)' : 'Notificaciones'}
+            aria-haspopup="dialog"
+            aria-expanded={bellOpen}
+            onClick={() => notifications && setBellOpen((value) => !value)}
+          >
+            <Icon name="bell" />
+            {hasUnreadAlerts && <span className="notif-dot" aria-hidden="true" />}
+          </button>
+          {bellOpen && notifications && (
+            <div className="notif-panel" role="dialog" aria-label="Notificaciones">
+              <strong className="notif-title">Alertas abiertas</strong>
+              {notifications.length === 0 ? (
+                <p className="muted">No hay alertas abiertas.</p>
+              ) : (
+                <ul>
+                  {notifications.map((n) => (
+                    <li key={n.id} data-level={n.level}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBellOpen(false);
+                          onOpenNotification?.(n.id);
+                        }}
+                      >
+                        <span>{n.message}</span>
+                        <span className="muted">{n.where ?? 'Sin equipo'}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {onSeeAllNotifications && (
+                <button
+                  type="button"
+                  className="link-quiet notif-all"
+                  onClick={() => {
+                    setBellOpen(false);
+                    onSeeAllNotifications();
+                  }}
+                >
+                  Ver todas las alertas
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <div className="profile-wrap" ref={menuRef}>
           <button
             type="button"

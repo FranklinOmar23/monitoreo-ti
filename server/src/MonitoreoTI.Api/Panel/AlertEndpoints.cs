@@ -40,7 +40,8 @@ public static class AlertEndpoints
         string? nivel = null,
         int? sucursal = null,
         int? maquina = null,
+        bool? red = null,
         int pagina = 1,
         int tamano = 50) =>
-        queries.AlertsAsync(new AlertFilter(search, estado, nivel, sucursal, maquina, pagina, tamano), ct);
+        queries.AlertsAsync(new AlertFilter(search, estado, nivel, sucursal, maquina, red, pagina, tamano), ct);
 }

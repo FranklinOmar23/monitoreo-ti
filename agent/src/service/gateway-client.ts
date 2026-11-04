@@ -1,4 +1,5 @@
 import { createEnvelope, isEnvelope, type Envelope } from '@monitoreoti/shared';
+import { parseCollectorConfig, type CollectorConfig } from './snmp';
 
 /** Lo mínimo del WebSocket que usa el cliente; Node (undici) y las pruebas lo cumplen. */
 export interface SocketLike {
@@ -26,6 +27,10 @@ export interface ServerWelcome {
   heartbeatSeconds: number;
   metricsSeconds: number;
   isCollector: boolean;
+  /** Dispositivos a consultar por SNMP; null si este agente no es recolector. */
+  collector: CollectorConfig | null;
+  /** Llave pública de firma de la empresa (para los agentes registrados antes de que existiera). */
+  companyPublicKey?: string | null;
 }
 
 export interface GatewayOptions {
@@ -203,6 +208,8 @@ export class GatewayClient {
       heartbeatSeconds: positiveInteger(d['heartbeat_s']) ?? this.heartbeatSeconds,
       metricsSeconds: positiveInteger(d['metricas_s']) ?? 60,
       isCollector: d['es_recolector'] === true,
+      collector: parseCollectorConfig(d['recolector']),
+      companyPublicKey: typeof d['llave_empresa'] === 'string' && d['llave_empresa'] ? d['llave_empresa'] : null,
     };
 
     clearTimeout(this.helloTimer);

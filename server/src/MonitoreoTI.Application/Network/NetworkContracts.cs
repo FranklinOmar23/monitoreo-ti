@@ -52,7 +52,12 @@ public sealed record DeviceDetail(
     int Id, string Name, string Type, int ModelId, string Brand, string ModelName, bool IsActiveDevice,
     int BranchId, string BranchName, int? RackId, string? RackName, int? RoomId, string? RoomName,
     int? PositionU, int HeightUnits, string? ManagementIp, string? Firmware, string Status, DateTime? LastPolledAt,
-    string? SnmpUser, bool HasSnmpCredential, Guid QrCode, DateTime CreatedAt, IReadOnlyList<PortItem> Ports);
+    string? SnmpUser, bool HasSnmpCredential, Guid QrCode, DateTime CreatedAt, IReadOnlyList<PortItem> Ports,
+    /// <summary>Agente que lo consulta por SNMP y por qué falló el último sondeo (null si respondió).</summary>
+    int? CollectorId = null, string? CollectorName = null, string? LastError = null);
+
+/// <summary>Un agente que puede consultar por SNMP los equipos de su sucursal (W-49).</summary>
+public sealed record CollectorItem(int AgentId, int MachineId, string MachineName, int BranchId, string? IpAddress, bool Online, DateTime? LastContactAt, int DeviceCount);
 
 /// <summary>
 /// Alta o edición. Las claves SNMPv3 (autenticación SHA y privacidad AES) solo se envían para cambiarlas:
@@ -60,7 +65,9 @@ public sealed record DeviceDetail(
 /// </summary>
 public sealed record DeviceInput(
     string Nombre, int ModeloId, int SucursalId, int? GabineteId, int? PosicionU, string? IpGestion, string? Firmware,
-    string? SnmpUsuario, string? SnmpClaveAutenticacion, string? SnmpClavePrivacidad);
+    string? SnmpUsuario, string? SnmpClaveAutenticacion, string? SnmpClavePrivacidad,
+    /// <summary>Agente de la misma sucursal que lo consulta por SNMP; null = nadie lo consulta.</summary>
+    int? RecolectorId = null);
 
 /// <summary>Mover en el editor de gabinete: otro gabinete, otra U o fuera de gabinete (ambos null).</summary>
 public sealed record DevicePlacementInput(int? GabineteId, int? PosicionU);
@@ -78,6 +85,97 @@ public sealed record CableItem(
     string? Type, string? Color, string? Label, string? Notes, DateTime CreatedAt);
 
 public sealed record CableInput(int PuertoAId, int? PuertoBId, int? PuntoRedId, string? TipoCable, string? Color, string? Etiqueta, string? Notas);
+
+// ------------------------------------------------------------------ correlación y resumen (W-42, W-52, W-53, W-66, W-67)
+
+public sealed record NetworkSummary(
+    int Devices, int Online, int Warning, int Critical, int NotResponding, int WithoutCollector,
+    int Ports, int PortsConnected, int PortsWithProblems, int Trunks,
+    int UnknownDevices, int Differences, int OpenAlerts, int Collectors, int CollectorsOnline,
+    /// <summary>Dispositivos con problemas, los peores primero.</summary>
+    IReadOnlyList<DeviceListItem> Attention);
+
+/// <summary>Una MAC sin equipo registrado vista en un puerto de acceso. Las MAC aleatorias de un puerto se agrupan.</summary>
+public sealed record UnknownDeviceItem(
+    string Mac, string? Vendor, string? Ip, int? Vlan, int DeviceId, string DeviceName, int PortId, string PortLabel,
+    bool IsRandom, int Count, DateTime FirstSeenAt, DateTime LastSeenAt, bool ViaAccessPoint);
+
+/// <summary>Dónde se vio una MAC o una IP, y de qué equipo es (W-52).</summary>
+public sealed record NetworkSearchResult(
+    string Mac, string? Ip, string? Vendor, int? MachineId, string? MachineName, int? DeviceId, string? DeviceName,
+    int? PortId, string? PortLabel, int? Vlan, DateTime? LastSeenAt, bool ViaAccessPoint);
+
+/// <summary>Lo que SNMP ve y no coincide con lo documentado (sección 11.3, paso 5).</summary>
+public sealed record DifferenceItem(string Kind, string Title, string Detail, int? DeviceId, int? PortId, int? MachineId);
+
+/// <summary>W-51 Mapa de topología: los equipos activos y cómo se conectan (LLDP o cableado documentado).</summary>
+public sealed record TopologyNode(int Id, string Name, string Type, string Status, string BranchName, int Trunks);
+
+/// <param name="Kind">lldp (lo ve SNMP) o cable (solo documentado).</param>
+public sealed record TopologyLink(int SourceId, int TargetId, string SourcePort, string TargetPort, string Kind);
+
+public sealed record Topology(IReadOnlyList<TopologyNode> Nodes, IReadOnlyList<TopologyLink> Links);
+
+/// <summary>"Conexión de red" de la ficha del equipo: switch, puerto y VLAN donde se vio por última vez.</summary>
+public sealed record MachineNetworkInfo(
+    int DeviceId, string SwitchName, int PortId, string PortLabel, int? Vlan, string? RackName, string? RoomName,
+    string? IpAddress, string MacAddress, DateTime LastSeenAt, bool ViaAccessPoint, bool IsManual);
+
+/// <summary>
+/// Asignación manual de un puerto (W-67): fijar si es troncal y qué equipo está conectado (por ejemplo, una impresora
+/// sin agente). Con los dos null el puerto vuelve a lo que detecte SNMP.
+/// </summary>
+public sealed record PortAssignmentInput(int? MaquinaId, bool? Troncal);
+
+// ------------------------------------------------------------------ historial (W-69)
+
+/// <summary>Historial del data center: todo, o solo un objeto (entidad + id). Por defecto, los últimos 30 días.</summary>
+public sealed record HistoryFilter(string? Entity = null, string? EntityId = null, int Days = 30, int Page = 1, int PageSize = 50);
+
+public sealed record HistoryChange(string Field, string? Before, string? After);
+
+public sealed record HistoryItem(
+    long Id, DateTime At, string Action, string Title, string Entity, string? EntityId, string? Subject,
+    /// <summary>null = lo hizo el sistema (SNMP, correlación).</summary>
+    string? User, IReadOnlyList<HistoryChange> Changes);
+
+// ------------------------------------------------------------------ importación masiva (W-68)
+
+/// <summary>CSV (coma, punto y coma o tabulador; Excel lo guarda así con "Guardar como CSV").</summary>
+public sealed record ImportInput(string Tipo, string Contenido);
+
+public sealed record ImportRow(int Line, string Summary, IReadOnlyList<string> Errors);
+
+/// <summary>
+/// Vista previa o resultado. Se guarda todo o nada: si una fila tiene errores no se guarda ninguna
+/// (<see cref="Applied"/> = false) y se corrige el archivo.
+/// </summary>
+public sealed record ImportResult(string Type, int Total, int Valid, bool Applied, IReadOnlyList<string> FileErrors, IReadOnlyList<ImportRow> Rows);
+
+/// <summary>Columnas de cada tipo de importación; las marcadas con * son obligatorias.</summary>
+public static class ImportColumns
+{
+    public const int MaxRows = 1000;
+
+    public static readonly IReadOnlyDictionary<string, string[]> ByType = new Dictionary<string, string[]>
+    {
+        ["dispositivos"] = ["nombre*", "marca*", "modelo*", "sucursal*", "sala", "gabinete", "posicion_u", "ip_gestion", "firmware"],
+        ["rosetas"] = ["codigo*", "ubicacion", "sucursal*"],
+        ["cables"] = ["dispositivo_a*", "puerto_a*", "dispositivo_b", "puerto_b", "roseta", "tipo_cable", "color", "etiqueta", "notas"],
+    };
+
+    public static IEnumerable<string> Required(string type) => ByType[type].Where(c => c.EndsWith('*')).Select(c => c.TrimEnd('*'));
+}
+
+public sealed class ImportInputValidator : AbstractValidator<ImportInput>
+{
+    public ImportInputValidator()
+    {
+        RuleFor(x => x.Tipo).Must(t => ImportColumns.ByType.ContainsKey(t)).WithMessage("Tipo de importación no válido.");
+        RuleFor(x => x.Contenido).NotEmpty().WithMessage("El archivo está vacío.")
+            .MaximumLength(2_000_000).WithMessage("El archivo es muy grande (máximo 2 MB).");
+    }
+}
 
 public static class NetworkValues
 {

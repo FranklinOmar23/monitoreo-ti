@@ -5,7 +5,11 @@ using static MonitoreoTI.Api.Panel.PanelWriteEndpoints;
 
 namespace MonitoreoTI.Api.Panel;
 
-/// <summary>Data center (Fase 4.1): salas, gabinetes, catálogo, dispositivos, puertos, rosetas, cableado y ruta. Ver: red.ver; cambiar: red.editar.</summary>
+/// <summary>
+/// Red y data center (Fase 4): salas, gabinetes, catálogo, dispositivos, puertos, rosetas, cableado, ruta, historial,
+/// importación y lo que sale del recolector SNMP (resumen, equipos desconocidos, búsqueda, diferencias).
+/// Ver: red.ver; cambiar: red.editar.
+/// </summary>
 public static class NetworkEndpoints
 {
     public static void MapNetworkEndpoints(this IEndpointRouteBuilder app)
@@ -26,6 +30,16 @@ public static class NetworkEndpoints
         read.MapGet("/cables", (NetworkQueries q, CancellationToken ct, int? dispositivo) => q.CablesAsync(dispositivo, ct));
         read.MapGet("/ruta", async (NetworkQueries q, CancellationToken ct, int? roseta, int? puerto) =>
             await q.PathAsync(roseta, puerto, ct) is { } path ? Results.Ok(path) : Results.NotFound());
+        // Recolector y correlación (Fase 4.2 y 4.3).
+        read.MapGet("/resumen", (NetworkInsights i, CancellationToken ct) => i.SummaryAsync(ct));
+        read.MapGet("/recolectores", (NetworkInsights i, CancellationToken ct, int? sucursal) => i.CollectorsAsync(sucursal, ct));
+        read.MapGet("/desconocidos", (NetworkInsights i, CancellationToken ct) => i.UnknownAsync(ct));
+        read.MapGet("/topologia", (NetworkInsights i, CancellationToken ct) => i.TopologyAsync(ct));
+        read.MapGet("/diferencias", (NetworkInsights i, CancellationToken ct) => i.DifferencesAsync(ct));
+        read.MapGet("/buscar", (NetworkInsights i, CancellationToken ct, [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search) =>
+            i.SearchAsync(search ?? "", ct));
+        read.MapGet("/historial", (NetworkQueries q, CancellationToken ct, string? entidad, string? id, int? dias, int? pagina) =>
+            q.HistoryAsync(new HistoryFilter(entidad, id, dias ?? 30, pagina ?? 1), ct));
 
         var edit = app.MapGroup("/api/v1/red").RequireAuthorization(PermissionPolicies.NetworkEdit);
         edit.MapPost("/salas", async (RoomInput input, IValidator<RoomInput> v, NetworkCommands c, CancellationToken ct) =>
@@ -56,6 +70,9 @@ public static class NetworkEndpoints
         edit.MapPut("/puertos/{id:int}", async (int id, PortInput input, IValidator<PortInput> v, NetworkCommands c, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? ToResult(await c.UpdatePortAsync(id, input, ct)));
 
+        edit.MapPut("/puertos/{id:int}/asignacion", async (int id, PortAssignmentInput input, NetworkCommands c, CancellationToken ct) =>
+            ToResult(await c.AssignPortAsync(id, input, ct)));
+
         edit.MapPost("/rosetas", async (OutletInput input, IValidator<OutletInput> v, NetworkCommands c, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? ToResult(await c.SaveOutletAsync(null, input, ct), created: true));
         edit.MapPut("/rosetas/{id:int}", async (int id, OutletInput input, IValidator<OutletInput> v, NetworkCommands c, CancellationToken ct) =>
@@ -64,6 +81,12 @@ public static class NetworkEndpoints
 
         edit.MapPost("/cables", async (CableInput input, IValidator<CableInput> v, NetworkCommands c, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? ToResult(await c.CreateCableAsync(input, ct), created: true));
+        // Importación masiva (W-68): la vista previa valida sin guardar; importar guarda todo o nada.
+        edit.MapPost("/importar/vista-previa", async (ImportInput input, IValidator<ImportInput> v, NetworkImport i, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? Results.Ok(await i.RunAsync(input, apply: false, ct)));
+        edit.MapPost("/importar", async (ImportInput input, IValidator<ImportInput> v, NetworkImport i, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? Results.Ok(await i.RunAsync(input, apply: true, ct)));
+
         edit.MapDelete("/cables/{id:int}", async (int id, NetworkCommands c, CancellationToken ct) => ToResult(await c.DeleteCableAsync(id, ct)));
     }
 }

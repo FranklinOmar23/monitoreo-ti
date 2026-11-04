@@ -15,4 +15,7 @@ public class RefreshToken
     public DateTime? RevokedAt { get; set; }
     public long? ReplacedById { get; set; }
     public string? IpAddress { get; set; }
+
+    /// <summary>Equipo o programa desde el que se inició la sesión; pasa a cada renovación.</summary>
+    public string? Device { get; set; }
 }

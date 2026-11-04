@@ -18,6 +18,13 @@ public static class PermissionKeys
     public const string NetworkEdit = "red.editar";
     public const string UsersAdmin = "usuarios.administrar";
     public const string AuditView = "auditoria.ver";
+    public const string ReportsView = "reportes.ver";
+    public const string SettingsEdit = "configuracion.editar";
+    public const string RemoteConnect = "remoto.conectar";
+    public const string RemoteTerminal = "remoto.terminal";
+    public const string RemoteFiles = "remoto.archivos";
+    public const string ScriptsRun = "scripts.ejecutar";
+    public const string ScriptsEdit = "scripts.editar";
 
     /// <summary>Permisos que dan control de equipos ajenos: exigen 2FA (sección 7.1).</summary>
     public static readonly IReadOnlySet<string> RequiringTwoFactor = new HashSet<string>(StringComparer.Ordinal)
@@ -95,6 +102,9 @@ public interface IAuthService
     Task<AuthOutcome<LoginResult>> LoginAsync(string email, string password, string? ip, CancellationToken cancellationToken);
     Task<AuthOutcome<LoginResult>> VerifyTwoFactorAsync(string challenge, string code, string? ip, CancellationToken cancellationToken);
     Task<AuthOutcome<LoginResult>> ConfirmTwoFactorSetupAsync(string challenge, string code, string? ip, CancellationToken cancellationToken);
+
+    /// <summary>Código 2FA con la sesión abierta, para el acceso remoto; devuelve la hora del 2FA.</summary>
+    Task<AuthOutcome<DateTime>> ConfirmRecentTwoFactorAsync(int userId, string code, string? ip, CancellationToken cancellationToken);
     Task<AuthOutcome<LoginResult>> SelectCompanyAsync(string challenge, int companyId, string? ip, CancellationToken cancellationToken);
     Task<AuthOutcome<SessionTokens>> RefreshAsync(string refreshToken, string? ip, CancellationToken cancellationToken);
     Task LogoutAsync(string refreshToken, CancellationToken cancellationToken);
@@ -108,6 +118,12 @@ public interface IAuthService
 
 public interface IEmailSender
 {
+    /// <summary>
+    /// El correo llega de verdad al buzón. Si no (archivo de desarrollo, sin SMTP), el panel muestra los enlaces
+    /// de contraseña para entregarlos a mano.
+    /// </summary>
+    bool Delivers => true;
+
     Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken);
 }
 

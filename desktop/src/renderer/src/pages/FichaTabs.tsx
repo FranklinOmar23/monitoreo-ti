@@ -298,49 +298,97 @@ function SoftwareTab({ machineId }: { machineId: number }) {
 
 const INTERFACE_TYPES = { cableada: 'Cableada', wifi: 'Wi-Fi', virtual: 'Virtual', otra: 'Otra' } as const;
 
+/** "Conexión de red": switch, puerto y VLAN donde lo vio el recolector SNMP (o donde lo asignaron a mano). */
+function NetworkConnection({ machineId }: { machineId: number }) {
+  const api = usePanelApi();
+  const query = useQuery({
+    queryKey: ['maquina', machineId, 'conexion-red'],
+    queryFn: () => api.networkConnection(machineId),
+  });
+  if (query.isPending || query.isError) return null;
+  const c = query.data;
+  return (
+    <Card title="Conexión de red" className="net-connection">
+      {c === null ? (
+        <p className="muted">Ningún switch consultado por SNMP ha visto este equipo todavía.</p>
+      ) : (
+        <dl className="info-list">
+          <div>
+            <dt>Switch</dt>
+            <dd className="mono">{c.switchName}</dd>
+          </div>
+          <div>
+            <dt>Puerto</dt>
+            <dd className="mono">
+              {c.portLabel}
+              {c.viaAccessPoint && ' · vía access point'}
+            </dd>
+          </div>
+          <div>
+            <dt>VLAN</dt>
+            <dd className="mono">{c.vlan ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Ubicación</dt>
+            <dd>{c.rackName ? `${c.roomName ?? ''} · ${c.rackName}` : '—'}</dd>
+          </div>
+          <div>
+            <dt>MAC vista</dt>
+            <dd className="mono">{c.macAddress}</dd>
+          </div>
+          <div>
+            <dt>{c.isManual ? 'Asignado a mano' : 'Visto'}</dt>
+            <dd>{timeAgo(c.lastSeenAt)}</dd>
+          </div>
+        </dl>
+      )}
+    </Card>
+  );
+}
+
 function NetworkTab({ machineId }: { machineId: number }) {
   const api = usePanelApi();
   const query = useTab('interfaces', machineId, () => api.interfaces(machineId));
   return (
-    <TabState query={query} empty="Sin tarjetas de red reportadas">
-      {() => (
-        <>
-          <div className="table-card">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tarjeta</th>
-                  <th>Tipo</th>
-                  <th>MAC</th>
-                  <th>IP</th>
-                  <th>Velocidad</th>
-                </tr>
-              </thead>
-              <tbody>
-                {query.data!.map((nic) => (
-                  <tr key={nic.macAddress}>
-                    <td>{nic.name}</td>
-                    <td>{INTERFACE_TYPES[nic.type]}</td>
-                    <td className="mono">{nic.macAddress}</td>
-                    <td className="mono">{nic.ipAddress ?? '—'}</td>
-                    <td className="mono">
-                      {nic.speedMbps === null
-                        ? '—'
-                        : nic.speedMbps >= 1000
-                          ? `${nic.speedMbps / 1000} Gbps`
-                          : `${nic.speedMbps} Mbps`}
-                    </td>
+    <>
+      <NetworkConnection machineId={machineId} />
+      <TabState query={query} empty="Sin tarjetas de red reportadas">
+        {() => (
+          <>
+            <div className="table-card">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Tarjeta</th>
+                    <th>Tipo</th>
+                    <th>MAC</th>
+                    <th>IP</th>
+                    <th>Velocidad</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="muted note">
-            La conexión al switch (puerto y VLAN) se muestra cuando esté el módulo de red (Fase 4).
-          </p>
-        </>
-      )}
-    </TabState>
+                </thead>
+                <tbody>
+                  {query.data!.map((nic) => (
+                    <tr key={nic.macAddress}>
+                      <td>{nic.name}</td>
+                      <td>{INTERFACE_TYPES[nic.type]}</td>
+                      <td className="mono">{nic.macAddress}</td>
+                      <td className="mono">{nic.ipAddress ?? '—'}</td>
+                      <td className="mono">
+                        {nic.speedMbps === null
+                          ? '—'
+                          : nic.speedMbps >= 1000
+                            ? `${nic.speedMbps / 1000} Gbps`
+                            : `${nic.speedMbps} Mbps`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </TabState>
+    </>
   );
 }
 
@@ -352,6 +400,10 @@ const ACTIONS: Record<string, string> = {
   'maquina.baja': 'Equipo dado de baja',
   'agente.aprobado': 'Agente aprobado',
   'agente.rechazado': 'Agente rechazado',
+  'mantenimiento.crear': 'Mantenimiento programado',
+  'mantenimiento.editar': 'Mantenimiento editado',
+  'mantenimiento.realizar': 'Mantenimiento hecho',
+  'mantenimiento.eliminar': 'Mantenimiento eliminado',
 };
 
 function HistoryTab({ machineId }: { machineId: number }) {
