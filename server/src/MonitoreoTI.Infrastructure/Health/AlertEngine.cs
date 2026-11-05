@@ -3,11 +3,13 @@ using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
 using MonitoreoTI.Application.Health;
 using MonitoreoTI.Application.Panel;
+using MonitoreoTI.Application.Remote;
 using MonitoreoTI.Domain.Entities.Monitoring;
 using MonitoreoTI.Domain.Enums;
 using MonitoreoTI.Infrastructure.Panel;
 using MonitoreoTI.Infrastructure.Persistence;
 using MonitoreoTI.Infrastructure.Persistence.Conversions;
+using MonitoreoTI.Infrastructure.Remote;
 
 namespace MonitoreoTI.Infrastructure.Health;
 
@@ -62,6 +64,8 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         int opened = 0, updated = 0, resolved = 0;
         var touched = new HashSet<int>();
         var changed = new List<(Alert Alert, int BranchId, bool IsNew)>();
+        // Servicios detenidos que la regla de la sucursal manda reparar solos (decisión 73).
+        var repairs = new List<(int MachineId, string Service, int UserId)>();
 
         foreach (var machine in machines)
         {
@@ -99,6 +103,8 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
                     opened++;
                     touched.Add(machine.Id);
                     changed.Add((alert, machine.BranchId, true));
+                    if (machineRules.RepairUserId is int repairUser && ServiceRepairRules.ServiceFromAlertCode(finding.Code) is { } service)
+                        repairs.Add((machine.Id, service, repairUser));
                 }
                 else if (alert.Level != level || alert.Message != Cut(finding.Message, 500))
                 {
@@ -130,6 +136,7 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         await db.SaveChangesAsync(cancellationToken);
         foreach (var (alert, branchId, isNew) in changed)
             await notifier.AlertChangedAsync(companyId, branchId, alert.Id, alert.MachineId, isNew, cancellationToken);
+        await RepairAsync(scope, db, companyId, repairs, now, cancellationToken);
 
         // Semáforo: el peor nivel entre las alertas abiertas del equipo (incluidas las creadas a mano).
         var statusChanges = new List<(int BranchId, int MachineId, MachineStatus Status)>();
@@ -158,7 +165,33 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         return new AlertEngineResult(opened, updated, resolved, statusChanges.Count);
     }
 
-    private sealed record MachineRules(RuleSet Set, Dictionary<string, int> Ids);
+    /// <summary>
+    /// Manda iniciar los servicios recién caídos, como máximo <see cref="ServiceRepairRules.MaxAutomaticPerDay"/> veces al
+    /// día por servicio y equipo (uno que se cae de nuevo no queda en bucle). Si el equipo no tiene agente, no se intenta.
+    /// </summary>
+    private static async Task RepairAsync(
+        AsyncServiceScope scope, MonitoreoDbContext db, int companyId, List<(int MachineId, string Service, int UserId)> repairs,
+        DateTime now, CancellationToken ct)
+    {
+        if (repairs.Count == 0 || scope.ServiceProvider.GetService<ICommandDispatcher>() is not { } dispatcher)
+            return;
+        var commands = new List<long>();
+        foreach (var (machineId, service, userId) in repairs)
+        {
+            if (!await ServiceRepair.HasAgentAsync(db, machineId, ct)
+                || await ServiceRepair.AttemptsTodayAsync(db, machineId, service, now, ct) >= ServiceRepairRules.MaxAutomaticPerDay)
+                continue;
+            var (batch, commandId) = await ServiceRepair.QueueAsync(db, machineId, service, userId, now, ct);
+            ServiceRepair.AuditAutomatic(db, machineId, service, batch);
+            commands.Add(commandId);
+        }
+        await db.SaveChangesAsync(ct);
+        if (commands.Count > 0)
+            await dispatcher.DispatchAsync(companyId, commands, ct);
+    }
+
+    /// <param name="RepairUserId">La regla de servicio detenido pide repararlos solos: a nombre de quien la activó.</param>
+    private sealed record MachineRules(RuleSet Set, Dictionary<string, int> Ids, int? RepairUserId);
 
     /// <summary>Reglas de la empresa: para cada sucursal, la de la sucursal; si no hay, la de la empresa; si no, la sección 14.</summary>
     private sealed class CompanyRules(List<AlertRule> rows)
@@ -172,14 +205,17 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
 
             var thresholds = new Dictionary<string, RuleThreshold>();
             var ids = new Dictionary<string, int>();
+            int? repairUser = null;
             // Primero las de la empresa; las de la sucursal las reemplazan.
             foreach (var rule in rows.Where(r => r.BranchId is null).Concat(rows.Where(r => r.BranchId == branchId)))
             {
                 var metric = EnumMemberConverter<AlertMetric>.ToProvider(rule.Metric);
                 thresholds[metric] = new RuleThreshold(rule.WarningThreshold, rule.CriticalThreshold, rule.DurationMinutes, rule.IsActive);
                 ids[metric] = rule.Id;
+                if (rule.Metric == AlertMetric.ServiceStopped)
+                    repairUser = rule.IsActive && rule.AutoRepair ? rule.AutoRepairUserId : null;
             }
-            return _byBranch[branchId] = new MachineRules(new RuleSet(thresholds), ids);
+            return _byBranch[branchId] = new MachineRules(new RuleSet(thresholds), ids, repairUser);
         }
     }
 

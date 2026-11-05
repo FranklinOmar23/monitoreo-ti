@@ -153,7 +153,7 @@ export function EquiposPage({
       )}
 
       {list.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={9} />
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : (

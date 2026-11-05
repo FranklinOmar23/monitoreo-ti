@@ -24,6 +24,7 @@ export function Sparkline({ values, min = 0, max = 100 }: SparklineProps) {
         stroke="currentColor"
         strokeWidth="1.5"
         vectorEffect="non-scaling-stroke"
+        pathLength={1}
       />
     </svg>
   );

@@ -20,7 +20,7 @@ export function ReglasPage({ canManage }: { canManage: boolean }) {
   const rules = useQuery({ queryKey: ['reglas'], queryFn: () => api.rules() });
   const [editing, setEditing] = useState<RuleItem | null>(null);
 
-  if (rules.isPending) return <Loading />;
+  if (rules.isPending) return <Loading variant="table" columns={5} />;
   if (rules.isError) return <ErrorState error={rules.error} onRetry={() => void rules.refetch()} />;
   if (rules.data.length === 0) return <EmptyState title="Sin reglas" />;
 
@@ -57,6 +57,9 @@ export function ReglasPage({ canManage }: { canManage: boolean }) {
                     {rule.isActive ? 'Activa' : 'Inactiva'}
                   </span>
                   {rule.id === null && <span className="row-sub">Valor por defecto</span>}
+                  {(rule.autoRepair || rule.overrides.some((o) => o.autoRepair)) && (
+                    <span className="row-sub">Reparación automática</span>
+                  )}
                 </td>
                 <td>{rule.overrides.length === 0 ? '—' : rule.overrides.map((o) => o.branchName).join(', ')}</td>
                 {canManage && (
@@ -91,7 +94,7 @@ function RuleForm({ rule, onClose }: { rule: RuleItem; onClose: () => void }) {
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
   const [scope, setScope] = useState('');
 
-  const current: Pick<RuleOverride, 'warning' | 'critical' | 'durationMinutes' | 'isActive'> =
+  const current: Pick<RuleOverride, 'warning' | 'critical' | 'durationMinutes' | 'isActive' | 'autoRepair'> =
     rule.overrides.find((o) => String(o.branchId) === scope) ?? rule;
   const override = rule.overrides.find((o) => String(o.branchId) === scope);
 
@@ -160,7 +163,7 @@ function RuleValues({
 }: {
   rule: RuleItem;
   branchId: number | null;
-  initial: Pick<RuleOverride, 'warning' | 'critical' | 'durationMinutes' | 'isActive'>;
+  initial: Pick<RuleOverride, 'warning' | 'critical' | 'durationMinutes' | 'isActive' | 'autoRepair'>;
   onSaved: () => void;
 }) {
   const api = usePanelApi();
@@ -169,6 +172,7 @@ function RuleValues({
     critical: initial.critical === null ? '' : String(initial.critical),
     duration: String(initial.durationMinutes),
     active: initial.isActive,
+    autoRepair: initial.autoRepair ?? false,
   });
 
   const save = useMutation({
@@ -180,6 +184,8 @@ function RuleValues({
         umbralCritico: form.critical === '' ? null : Number(form.critical),
         duracionMin: Number(form.duration) || 0,
         activa: form.active,
+        // Solo la regla que lo admite manda el campo (sin él, el servidor no lo cambia).
+        ...(rule.canAutoRepair ? { repararAuto: form.autoRepair } : {}),
       }),
     onSuccess: onSaved,
   });
@@ -247,6 +253,22 @@ function RuleValues({
         <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
         Regla activa
       </label>
+      {rule.canAutoRepair && (
+        <label className="check form-span">
+          <input
+            type="checkbox"
+            checked={form.autoRepair}
+            onChange={(e) => setForm({ ...form, autoRepair: e.target.checked })}
+          />
+          <span>
+            Iniciar automáticamente los servicios que se detengan
+            <span className="row-sub">
+              Centinela manda un comando firmado al agente para iniciarlo, como máximo 3 veces al día por servicio. Los
+              comandos van a su nombre y quedan en la auditoría.
+            </span>
+          </span>
+        </label>
+      )}
       <div className="form-span rule-actions">
         <button type="submit" className="btn btn-primary" disabled={save.isPending}>
           {save.isPending ? 'Guardando…' : 'Guardar'}

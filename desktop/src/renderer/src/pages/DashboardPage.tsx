@@ -27,7 +27,7 @@ export function DashboardPage({ onOpenEquipo, onNavigate }: DashboardPageProps) 
         subtitle={`Todas sus sucursales · actualizado ${query.dataUpdatedAt ? timeAgo(new Date(query.dataUpdatedAt).toISOString()) : '…'}`}
       />
       {query.isPending ? (
-        <Loading />
+        <Loading variant="dashboard" />
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (

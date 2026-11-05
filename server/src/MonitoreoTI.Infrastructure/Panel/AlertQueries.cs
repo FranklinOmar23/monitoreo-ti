@@ -202,7 +202,7 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             var fallback = RuleSet.Defaults.GetValueOrDefault(metric.Key) ?? new RuleThreshold(null, null);
             var overrides = mine.Where(r => r.Rule.BranchId is not null)
                 .Select(r => new RuleOverride(r.Rule.Id, r.Rule.BranchId!.Value, r.Branch ?? "—", r.Rule.WarningThreshold,
-                    r.Rule.CriticalThreshold, r.Rule.DurationMinutes, r.Rule.IsActive))
+                    r.Rule.CriticalThreshold, r.Rule.DurationMinutes, r.Rule.IsActive, r.Rule.AutoRepair))
                 .OrderBy(o => o.BranchName)
                 .ToList();
 
@@ -213,7 +213,9 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
                 company is null ? fallback.Critical : company.CriticalThreshold,
                 company?.DurationMinutes ?? fallback.DurationMinutes,
                 company?.IsActive ?? fallback.Active,
-                overrides);
+                overrides,
+                company?.AutoRepair ?? false,
+                metric.Key == "servicio_detenido");
         }).ToList();
     }
 }

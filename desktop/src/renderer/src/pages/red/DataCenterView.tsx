@@ -31,7 +31,7 @@ export function DataCenterView({ canEdit, onOpenDevice }: DataCenterViewProps) {
     { kind: 'sala'; room?: RoomItem } | { kind: 'gabinete'; rack?: RackItem } | null
   >(null);
 
-  if (rooms.isPending) return <Loading />;
+  if (rooms.isPending) return <Loading variant="cards" />;
   if (rooms.isError) return <ErrorState error={rooms.error} onRetry={() => void rooms.refetch()} />;
 
   const room = rooms.data.find((r) => r.id === roomId) ?? rooms.data[0];

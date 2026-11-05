@@ -38,6 +38,14 @@ public static class NetworkEndpoints
         read.MapGet("/diferencias", (NetworkInsights i, CancellationToken ct) => i.DifferencesAsync(ct));
         read.MapGet("/buscar", (NetworkInsights i, CancellationToken ct, [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search) =>
             i.SearchAsync(search ?? "", ct));
+        // Direcciones IP (decisión 72).
+        read.MapGet("/subredes", (IpAddresses ips, CancellationToken ct, int? sucursal) => ips.SubnetsAsync(sucursal, ct));
+        read.MapGet("/subredes/{id:int}", async (int id, IpAddresses ips, CancellationToken ct) =>
+            await ips.SubnetAsync(id, ct) is { } subnet ? Results.Ok(subnet) : Results.NotFound());
+        read.MapGet("/subredes/{id:int}/instalaciones", async (int id, RemoteInstalls installs, CancellationToken ct) =>
+            await installs.ListAsync(id, ct) is { } list ? Results.Ok(list) : Results.NotFound());
+        read.MapGet("/subredes/{id:int}/historial", async (int id, string ip, IpAddresses ips, CancellationToken ct, int? dias) =>
+            await ips.HistoryAsync(id, ip, dias ?? 30, ct) is { } history ? Results.Ok(history) : Results.NotFound());
         read.MapGet("/historial", (NetworkQueries q, CancellationToken ct, string? entidad, string? id, int? dias, int? pagina) =>
             q.HistoryAsync(new HistoryFilter(entidad, id, dias ?? 30, pagina ?? 1), ct));
 
@@ -65,6 +73,14 @@ public static class NetworkEndpoints
             await ValidateAsync(input, v, ct) ?? ToResult(await c.UpdateDeviceAsync(id, input, ct)));
         edit.MapPut("/dispositivos/{id:int}/ubicacion", async (int id, DevicePlacementInput input, NetworkCommands c, CancellationToken ct) =>
             ToResult(await c.PlaceDeviceAsync(id, input, ct)));
+        edit.MapPost("/dispositivos/{id:int}/sondear", async (int id, NetworkCommands c, CancellationToken ct) => ToResult(await c.PollNowAsync(id, ct)));
+        edit.MapPost("/dispositivos/{id:int}/probar-api", async (int id, ApiTestInput input, IValidator<ApiTestInput> v, NetworkCommands c, CancellationToken ct) =>
+        {
+            if (await ValidateAsync(input, v, ct) is { } invalid)
+                return invalid;
+            var (error, result) = await c.TestApiAsync(id, input, ct);
+            return error is not null ? ToResult(error) : Results.Ok(result);
+        });
         edit.MapPost("/dispositivos/{id:int}/baja", async (int id, NetworkCommands c, CancellationToken ct) => ToResult(await c.RetireDeviceAsync(id, ct)));
 
         edit.MapPut("/puertos/{id:int}", async (int id, PortInput input, IValidator<PortInput> v, NetworkCommands c, CancellationToken ct) =>
@@ -72,6 +88,30 @@ public static class NetworkEndpoints
 
         edit.MapPut("/puertos/{id:int}/asignacion", async (int id, PortAssignmentInput input, NetworkCommands c, CancellationToken ct) =>
             ToResult(await c.AssignPortAsync(id, input, ct)));
+
+        edit.MapPost("/subredes", async (SubnetInput input, IValidator<SubnetInput> v, IpAddresses ips, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await ips.SaveSubnetAsync(null, input, ct), created: true));
+        edit.MapPut("/subredes/{id:int}", async (int id, SubnetInput input, IValidator<SubnetInput> v, IpAddresses ips, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await ips.SaveSubnetAsync(id, input, ct)));
+        edit.MapDelete("/subredes/{id:int}", async (int id, IpAddresses ips, CancellationToken ct) => ToResult(await ips.DeleteSubnetAsync(id, ct)));
+        edit.MapPost("/subredes/{id:int}/reservas", async (int id, IpReservationInput input, IValidator<IpReservationInput> v, IpAddresses ips, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await ips.AddReservationAsync(id, input, ct), created: true));
+        edit.MapDelete("/subredes/{id:int}/reservas/{reserva:int}", async (int id, int reserva, IpAddresses ips, CancellationToken ct) =>
+            ToResult(await ips.DeleteReservationAsync(id, reserva, ct)));
+        // Instalar el agente en equipos de la subred (decisión 77): permiso de instaladores, módulo remoto y 2FA reciente.
+        app.MapPost("/api/v1/red/subredes/{id:int}/instalar-agente", async (
+            int id, RemoteInstallInput input, IValidator<RemoteInstallInput> v, MonitoreoTI.Infrastructure.Remote.RemoteAccessGuard guard,
+            RemoteInstalls installs, HttpContext http, CancellationToken ct) =>
+        {
+            if (await ValidateAsync(input, v, ct) is { } invalid)
+                return invalid;
+            if (await guard.CheckAsync(ct) is { } denial)
+                return MonitoreoTI.Api.Remote.RemoteEndpoints.Denied(denial);
+            return ToResult(await installs.StartAsync(id, input, $"{http.Request.Scheme}://{http.Request.Host}", ct), created: true);
+        }).RequireAuthorization(PermissionPolicies.InstallersGenerate);
+
+        edit.MapPost("/subredes/{id:int}/escanear", async (int id, IpAddresses ips, CancellationToken ct) =>
+            ToResult(await ips.RequestSweepAsync(id, ct)));
 
         edit.MapPost("/rosetas", async (OutletInput input, IValidator<OutletInput> v, NetworkCommands c, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? ToResult(await c.SaveOutletAsync(null, input, ct), created: true));

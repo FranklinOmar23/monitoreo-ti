@@ -20,4 +20,10 @@ public class AlertRule : ITenantEntity
     /// <summary>Minutos que debe sostenerse la condición.</summary>
     public int DurationMinutes { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Servicio detenido: Centinela intenta iniciarlo solo (como máximo 3 veces al día por servicio).</summary>
+    public bool AutoRepair { get; set; }
+
+    /// <summary>Quien activó la reparación automática: a su nombre van los comandos que se mandan solos.</summary>
+    public int? AutoRepairUserId { get; set; }
 }

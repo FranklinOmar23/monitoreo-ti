@@ -12,7 +12,7 @@ export interface BrandTones {
 
 /** Superficies del panel (styles.css): contra ellas se mide el principal. */
 const LIGHT_SURFACE = '#ffffff';
-const DARK_SURFACE = '#16262c';
+const DARK_SURFACE = '#141a1f';
 /** WCAG AA para texto normal: el principal se usa como color de enlaces. */
 const MIN_CONTRAST = 4.5;
 

@@ -13,7 +13,9 @@ import { Sender } from './sender';
 import type { CommandExecutor } from './executor';
 import type { RemoteSessions } from './remote-sessions';
 import type { AgentUpdater } from './updater';
-import { parseCollectorConfig, SnmpPoller, type SnmpQuery } from './snmp';
+import { IpSweeper, type HostSweep } from './ipsweep';
+import { fortiHttpGet, testFortiApi, type FortiHttp } from './fortigate';
+import { openApiToken, parseCollectorConfig, SnmpPoller, type SnmpQuery } from './snmp';
 
 export type Log = (level: 'info' | 'error', message: string, extra?: Record<string, unknown>) => void;
 
@@ -63,7 +65,9 @@ export interface RuntimeOptions {
     onMessage: (message: Envelope) => void;
   }) => Gateway;
   /** Recolector SNMP (Fase 4): se activa si el servidor le asigna dispositivos. */
-  snmp?: { credential: string; query: SnmpQuery; firstDelayMs?: number };
+  snmp?: { credential: string; query: SnmpQuery; firstDelayMs?: number; fortiHttp?: FortiHttp };
+  /** Barrido de IP del recolector (decisión 72): ping y ARP con el anfitrión C#. */
+  ipSweep?: HostSweep;
   /** Ejecutor de comandos firmados (Fase 6); recibe la función para encolar sus resultados. */
   executor?: (submit: (envelope: Envelope) => void) => CommandExecutor;
   /** Sesiones remotas por el relay (Fase 6.2). */
@@ -97,6 +101,7 @@ export class AgentRuntime {
   private networkSignature = '';
   private stopped = false;
   private readonly snmp: SnmpPoller | undefined;
+  private readonly ipSweeper: IpSweeper | undefined;
   private readonly executor: CommandExecutor | undefined;
 
   constructor(private readonly options: RuntimeOptions) {
@@ -110,6 +115,14 @@ export class AgentRuntime {
         credential: options.snmp.credential,
         query: options.snmp.query,
         firstDelayMs: options.snmp.firstDelayMs,
+        fortiHttp: options.snmp.fortiHttp,
+        submit: (envelope) => this.submit(envelope),
+        log: options.log,
+      });
+    if (options.ipSweep)
+      this.ipSweeper = new IpSweeper({
+        sweep: options.ipSweep,
+        arpOf: (deviceId) => this.snmp?.arpOf(deviceId) ?? Promise.resolve(null),
         submit: (envelope) => this.submit(envelope),
         log: options.log,
       });
@@ -177,6 +190,14 @@ export class AgentRuntime {
     if (message.tipo === 'config_actualizada') {
       const datos = (message.datos ?? {}) as Record<string, unknown>;
       this.snmp?.configure(parseCollectorConfig(datos['recolector']));
+    } else if (message.tipo === 'sondear_ahora') {
+      const id = (message.datos as { dispositivo_id?: unknown } | null)?.dispositivo_id;
+      if (typeof id === 'number' && !this.snmp?.pollById(id))
+        this.options.log('error', 'Sondeo pedido de un dispositivo que este recolector no tiene', { dispositivo: id });
+    } else if (message.tipo === 'probar_api' && this.options.snmp) {
+      void this.guarded(() => this.testApi(message.datos), 'prueba de API');
+    } else if (message.tipo === 'barrido_ip' && this.ipSweeper) {
+      void this.guarded(() => this.ipSweeper!.handle(message.datos), 'barrido de IP');
     } else if (message.tipo === 'actualizar_agente') {
       if (this.options.updater) void this.guarded(() => this.options.updater!.handle(message.datos), 'actualización');
     } else if (message.tipo === 'abrir_sesion_remota') {
@@ -187,6 +208,28 @@ export class AgentRuntime {
     } else if (message.tipo === 'ejecutar_comando' && this.executor) {
       void this.guarded(() => this.executor!.handle(message.datos), 'comando');
     }
+  }
+
+  /** "Probar API" desde el panel: system/status del FortiGate con el token que mandó el servidor (sellado). */
+  private async testApi(datos: unknown): Promise<void> {
+    const v = (datos ?? {}) as Record<string, unknown>;
+    const id = v['solicitud_id'];
+    if (typeof id !== 'string' || typeof v['url'] !== 'string' || typeof v['token'] !== 'string') return;
+    let result: Record<string, unknown>;
+    try {
+      const token = openApiToken(this.options.snmp!.credential, v['token']);
+      result = {
+        ...(await testFortiApi(this.options.snmp!.fortiHttp ?? fortiHttpGet, {
+          url: v['url'],
+          token,
+          acceptSelfSigned: v['aceptar_certificado'] !== false,
+        })),
+      };
+    } catch {
+      result = { ok: false, error: 'No se pudo abrir el token de la API.' };
+    }
+    this.options.log('info', 'Prueba de API', { url: v['url'], ok: result['ok'], error: result['error'] });
+    this.submit(createEnvelope('api_prueba_resultado', { solicitudId: id, ...result }));
   }
 
   private scheduleMetrics(): void {

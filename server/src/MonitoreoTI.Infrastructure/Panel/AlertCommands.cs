@@ -16,7 +16,8 @@ public sealed class AlertCommands(
     IAuditTrail audit,
     IRealtimeNotifier notifier,
     TenantContext tenant,
-    TimeProvider clock)
+    TimeProvider clock,
+    MonitoreoTI.Application.Remote.ICommandDispatcher dispatcher)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
 
@@ -73,6 +74,29 @@ public sealed class AlertCommands(
         return CommandResult.Ok(id);
     }
 
+    /// <summary>
+    /// "Iniciar servicio" desde una alerta de servicio detenido (decisión 73): un comando firmado que lo inicia en el
+    /// equipo. Devuelve el lote para seguir el resultado; si el servicio arranca, la alerta se resuelve sola.
+    /// </summary>
+    public async Task<(CommandResult Result, Guid? Batch)> StartServiceAsync(long id, CancellationToken ct)
+    {
+        if (await FindAlertAsync(id, ct) is not { } found)
+            return (CommandResult.NotFound(), null);
+        var (alert, _) = found;
+        if (alert.Status == AlertStatus.Resolved)
+            return (CommandResult.Conflict("La alerta ya está resuelta."), null);
+        if (alert.MachineId is not int machineId || MonitoreoTI.Application.Health.ServiceRepairRules.ServiceFromAlertCode(alert.Code) is not { } service)
+            return (CommandResult.Invalid("La alerta no es de un servicio detenido."), null);
+        if (!await MonitoreoTI.Infrastructure.Remote.ServiceRepair.HasAgentAsync(db, machineId, ct))
+            return (CommandResult.Invalid("El equipo no tiene un agente que pueda recibir el comando."), null);
+
+        var (batch, commandId) = await MonitoreoTI.Infrastructure.Remote.ServiceRepair.QueueAsync(db, machineId, service, user.UserId, Now, ct);
+        await audit.RecordAsync("alerta.iniciar_servicio", "alertas", id.ToString(), null, new { servicio = service, maquinaId = machineId, lote = batch }, ct);
+        if (tenant.CompanyId is int company)
+            await dispatcher.DispatchAsync(company, [commandId], ct);
+        return (CommandResult.Ok(id), batch);
+    }
+
     // ------------------------------------------------------------------ reglas
 
     /// <summary>
@@ -110,6 +134,13 @@ public sealed class AlertCommands(
         rule.CriticalThreshold = metric.HasThresholds ? input.UmbralCritico : fallback?.Critical;
         rule.DurationMinutes = metric.HasDuration ? input.DuracionMin : 0;
         rule.IsActive = input.Activa;
+        // Reparación automática (solo servicio detenido): los comandos que se manden solos van a nombre de quien la activó.
+        if (metric.Key == "servicio_detenido" && input.RepararAuto is bool repair)
+        {
+            if (repair && !rule.AutoRepair)
+                rule.AutoRepairUserId = user.UserId;
+            rule.AutoRepair = repair;
+        }
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync(before is null ? "regla.crear" : "regla.editar", "reglas_alerta", rule.Id.ToString(), before, Snapshot(rule), ct);
@@ -139,6 +170,7 @@ public sealed class AlertCommands(
         advertencia = r.WarningThreshold,
         critico = r.CriticalThreshold,
         duracionMin = r.DurationMinutes,
+        repararAuto = r.AutoRepair,
         activa = r.IsActive,
     };
 }

@@ -11,6 +11,7 @@ import {
   dialog,
   ipcMain,
   nativeImage,
+  nativeTheme,
   Notification,
   safeStorage,
   session,
@@ -60,9 +61,9 @@ function createMainWindow(): BrowserWindow {
     minHeight: 720,
     show: false,
     title: 'MonitoreoTI',
-    backgroundColor: '#faf8f3',
+    backgroundColor: '#0d1115',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: '#6a7479', height: 64 },
+    titleBarOverlay: { color: '#00000000', symbolColor: '#8d99a5', height: 44 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -207,7 +208,7 @@ function createTerminalWindow(ticket: TerminalTicket): void {
     minWidth: 640,
     minHeight: 360,
     title: `${desktop ? 'Escritorio' : 'Terminal'} · ${ticket.machineName}`,
-    backgroundColor: desktop ? '#05121a' : '#0b1f26',
+    backgroundColor: desktop ? '#0a0e11' : '#0d1115',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -260,7 +261,7 @@ function showView3DWindow(snapshot: View3DSnapshot, open: boolean): void {
     minWidth: 640,
     minHeight: 420,
     title: `Vista 3D · ${snapshot.title}`,
-    backgroundColor: '#f3f0e8',
+    backgroundColor: '#0d1115',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -529,6 +530,8 @@ if (!app.requestSingleInstanceLock()) {
   pendingLink = findDeepLink(process.argv);
 
   void app.whenReady().then(() => {
+    // Tema oscuro por defecto (decisión 71): el panel y sus ventanas se ven oscuros aunque Windows esté en claro.
+    nativeTheme.themeSource = 'dark';
     applySessionSecurity();
     registerIpc();
     mainWindow = createMainWindow();

@@ -27,7 +27,7 @@ export function NetworkSummaryView({
   const summary = useQuery({ queryKey: ['red', 'resumen'], queryFn: () => api.red.summary() });
   const alerts = useQuery({ queryKey: ['alertas', 'red'], queryFn: () => api.alerts({ red: true, tamano: 8 }) });
 
-  if (summary.isPending) return <Loading />;
+  if (summary.isPending) return <Loading variant="dashboard" />;
   if (summary.isError) return <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />;
   const s = summary.data;
 
@@ -99,7 +99,7 @@ export function NetworkSummaryView({
         </Card>
         <Card title="Alertas de red" className="ficha-side">
           {alerts.isPending ? (
-            <Loading />
+            <Loading variant="table" columns={5} />
           ) : alerts.isError ? (
             <ErrorState error={alerts.error} onRetry={() => void alerts.refetch()} />
           ) : alerts.data.page.items.length === 0 ? (
@@ -129,7 +129,7 @@ export function UnknownList({ onOpenDevice }: Pick<Navigation, 'onOpenDevice'>) 
   const api = usePanelApi();
   const list = useQuery({ queryKey: ['red', 'desconocidos'], queryFn: () => api.red.unknown() });
 
-  if (list.isPending) return <Loading />;
+  if (list.isPending) return <Loading variant="table" columns={5} />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   if (list.data.length === 0)
     return (
@@ -192,7 +192,7 @@ export function DifferencesList({ onOpenDevice, onOpenEquipo }: Navigation) {
   const api = usePanelApi();
   const list = useQuery({ queryKey: ['red', 'diferencias'], queryFn: () => api.red.differences() });
 
-  if (list.isPending) return <Loading />;
+  if (list.isPending) return <Loading variant="table" columns={5} />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   if (list.data.length === 0)
     return (
@@ -258,7 +258,7 @@ export function NetworkSearch({ onOpenDevice, onOpenEquipo }: Navigation) {
       {q.length < 2 ? (
         <EmptyState title="Escriba al menos dos caracteres de una MAC, una IP o un nombre." />
       ) : results.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={5} />
       ) : results.isError ? (
         <ErrorState error={results.error} onRetry={() => void results.refetch()} />
       ) : results.data.length === 0 ? (

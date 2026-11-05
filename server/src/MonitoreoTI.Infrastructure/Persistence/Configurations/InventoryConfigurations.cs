@@ -198,6 +198,7 @@ internal sealed class EnrollmentTokenConfiguration : IEntityTypeConfiguration<En
         b.Property(x => x.CompanyId).HasColumnName("empresa_id");
         b.Property(x => x.BranchId).HasColumnName("sucursal_id");
         b.Property(x => x.TokenHash).HasColumnName("token_hash").HasMaxLength(255);
+        b.Property(x => x.EncryptedToken).HasColumnName("token_cifrado");
         b.Property(x => x.ExpiresAt).HasColumnName("vence");
         b.Property(x => x.MaxUses).HasColumnName("usos_max");
         b.Property(x => x.Uses).HasColumnName("usos");

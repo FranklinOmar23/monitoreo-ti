@@ -212,6 +212,32 @@ public sealed class NetworkApiTests(TestDatabase database) : IAsyncLifetime
         await CreateAsync(admin, "modelos", new { marca = "Prueba", modelo = "SW-24", tipo = "switch", alturaU = 1, cantidadPuertos = 26, tipoPuertos = "24 RJ45 + 2 SFP", esActivo = true });
     }
 
+    [DatabaseFact]
+    public async Task Changing_the_ports_of_a_model_in_use_adjusts_its_devices()
+    {
+        var admin = await ClientAsync();
+        var (branch, _, rack) = await RackAsync(admin);
+        var name = $"FG-{Random.Shared.Next(100000)}";
+        object Model(int ports, string description) =>
+            new { marca = "Prueba", modelo = name, tipo = "firewall", alturaU = 1, cantidadPuertos = ports, tipoPuertos = description, esActivo = true };
+        var model = await CreateAsync(admin, "modelos", Model(10, "10 RJ45"));
+        var device = await CreateAsync(admin, "dispositivos", Device("PRUEBA-FGT", model, branch, rack, 30));
+
+        // Más puertos: se agregan al dispositivo con su tipo.
+        await JsonAsync(await admin.PutAsJsonAsync($"/api/v1/red/modelos/{model}", Model(30, "22 RJ45 + 8 SFP+")));
+        var ports = (await JsonAsync(await admin.GetAsync($"/api/v1/red/dispositivos/{device}"))).GetProperty("ports").EnumerateArray().ToList();
+        ports.Should().HaveCount(30);
+        ports.Single(p => p.GetProperty("number").GetInt32() == 30).GetProperty("type").GetString().Should().Be("sfp_plus");
+
+        // Menos puertos: se quitan los libres; uno con cable lo impide.
+        var outlet = await CreateAsync(admin, "rosetas", new { codigo = $"PRUEBA-{Random.Shared.Next(100000)}", sucursalId = branch });
+        var port28 = ports.Single(p => p.GetProperty("number").GetInt32() == 28).GetProperty("id").GetInt32();
+        await CreateAsync(admin, "cables", new { puertoAId = port28, puntoRedId = outlet });
+        (await admin.PutAsJsonAsync($"/api/v1/red/modelos/{model}", Model(24, "24 RJ45"))).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await JsonAsync(await admin.PutAsJsonAsync($"/api/v1/red/modelos/{model}", Model(28, "22 RJ45 + 6 SFP+")));
+        (await JsonAsync(await admin.GetAsync($"/api/v1/red/dispositivos/{device}"))).GetProperty("ports").GetArrayLength().Should().Be(28);
+    }
+
     private static async Task<JsonElement> ImportAsync(HttpClient client, string type, string csv, bool apply) =>
         await JsonAsync(await client.PostAsJsonAsync(apply ? "/api/v1/red/importar" : "/api/v1/red/importar/vista-previa", new { tipo = type, contenido = csv }));
 

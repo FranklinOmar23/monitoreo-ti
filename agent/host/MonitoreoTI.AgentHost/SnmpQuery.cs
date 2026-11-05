@@ -218,7 +218,7 @@ public static class SnmpQuery
             var entries = new List<SnmpArp>();
             foreach (var (suffix, data) in await WalkAsync("1.3.6.1.2.1.4.22.1.2", ct))
                 if (suffix.Length == 5 && data is OctetString octets && octets.GetRaw().Length == 6)
-                    entries.Add(new SnmpArp { Ip = string.Join('.', suffix[1..]), Mac = Mac(octets.GetRaw().Select(b => (uint)b).ToArray()) });
+                    entries.Add(new SnmpArp { Ip = string.Join('.', suffix[1..]), Mac = Mac(octets.GetRaw().Select(b => (uint)b).ToArray()), IfIndex = (int)suffix[0] });
             return entries;
         }
 
@@ -377,6 +377,9 @@ public sealed class SnmpArp
 {
     public string Mac { get; set; } = "";
     public string Ip { get; set; } = "";
+
+    /// <summary>Interfaz del equipo donde está la entrada (ipNetToMediaIfIndex): dice en qué VLAN se ve la IP.</summary>
+    public int? IfIndex { get; set; }
 }
 
 public sealed class SnmpNeighbor

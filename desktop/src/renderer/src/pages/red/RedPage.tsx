@@ -7,6 +7,7 @@ import { NetworkHistory } from './NetworkHistory';
 import { NetworkImport } from './NetworkImport';
 import { DifferencesList, NetworkSearch, NetworkSummaryView, UnknownList } from './NetworkInsights';
 import { CatalogList, DevicesList, OutletsList } from './NetworkLists';
+import { IpAddressesView } from './IpAddressesView';
 import { TopologyMap } from './TopologyMap';
 
 const TABS = [
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'dispositivos', label: 'Dispositivos' },
   { id: 'rosetas', label: 'Rosetas' },
   { id: 'topologia', label: 'Topología' },
+  { id: 'ips', label: 'Direcciones IP' },
   { id: 'desconocidos', label: 'Desconocidos' },
   { id: 'diferencias', label: 'Diferencias' },
   { id: 'buscar', label: 'Buscar MAC/IP' },
@@ -64,7 +66,8 @@ export function RedPage({
       {tab === 'datacenter' && <DataCenterView canEdit={canEdit} onOpenDevice={setDeviceId} />}
       {tab === 'dispositivos' && <DevicesList canEdit={canEdit} onOpenDevice={setDeviceId} />}
       {tab === 'rosetas' && <OutletsList canEdit={canEdit} />}
-      {tab === 'topologia' && <TopologyMap onOpenDevice={setDeviceId} />}
+      {tab === 'topologia' && <TopologyMap onOpenDevice={setDeviceId} onOpenEquipo={onOpenEquipo} />}
+      {tab === 'ips' && <IpAddressesView canEdit={canEdit} onOpenEquipo={onOpenEquipo} />}
       {tab === 'desconocidos' && <UnknownList onOpenDevice={setDeviceId} />}
       {tab === 'diferencias' && <DifferencesList onOpenDevice={setDeviceId} onOpenEquipo={onOpenEquipo} />}
       {tab === 'buscar' && <NetworkSearch onOpenDevice={setDeviceId} onOpenEquipo={onOpenEquipo} />}

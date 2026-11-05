@@ -240,6 +240,7 @@ public sealed class AgentGateway(
             credencial = d.Credencial,
             version = d.Version,
             origen = d.Origen,
+            api = d.Api is null ? null : new { url = d.Api.Url, token = d.Api.Token, aceptar_certificado = d.Api.AceptarCertificado },
         }),
     };
 

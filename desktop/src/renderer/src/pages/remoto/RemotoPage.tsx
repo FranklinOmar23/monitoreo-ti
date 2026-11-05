@@ -111,7 +111,7 @@ function RunsList({ onOpen }: { onOpen: (batchId: string) => void }) {
   const api = usePanelApi();
   const runs = useQuery({ queryKey: ['ejecuciones'], queryFn: () => api.remoto.runs() });
 
-  if (runs.isPending) return <Loading />;
+  if (runs.isPending) return <Loading variant="table" columns={6} />;
   if (runs.isError) return <ErrorState error={runs.error} onRetry={() => void runs.refetch()} />;
   if (runs.data.length === 0)
     return <EmptyState title="Todavía no se ha ejecutado nada">Use "Ejecutar script" para lanzar uno.</EmptyState>;
@@ -310,7 +310,7 @@ function SessionHistory({ onOpenEquipo }: { onOpenEquipo: (id: number) => void }
   const [page, setPage] = useState(1);
   const sessions = useQuery({ queryKey: ['sesiones', page], queryFn: () => api.remoto.sessions({ pagina: page }) });
 
-  if (sessions.isPending) return <Loading />;
+  if (sessions.isPending) return <Loading variant="table" columns={6} />;
   if (sessions.isError) return <ErrorState error={sessions.error} onRetry={() => void sessions.refetch()} />;
   const { items, total, pageSize } = sessions.data;
   if (items.length === 0)
@@ -393,7 +393,7 @@ function ScriptLibrary({ canEdit, onRun }: { canEdit: boolean; onRun?: (scriptId
     onSuccess: () => void queries.invalidateQueries({ queryKey: ['scripts'] }),
   });
 
-  if (scripts.isPending) return <Loading />;
+  if (scripts.isPending) return <Loading variant="cards" />;
   if (scripts.isError) return <ErrorState error={scripts.error} onRetry={() => void scripts.refetch()} />;
 
   return (

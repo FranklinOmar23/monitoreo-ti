@@ -143,34 +143,54 @@ export class AgentUpdater {
     // Solo se guarda la última descarga.
     await mkdir(this.updatesDir, { recursive: true });
     for (const old of await readdir(this.updatesDir)) await rm(join(this.updatesDir, old), { force: true });
-
-    const response = await (this.options.fetchImpl ?? fetch)(new URL(offer.url, this.options.serverUrl), {
-      headers: { Authorization: `Bearer ${this.options.credential}` },
-    });
-    if (!response.ok || !response.body) throw new Error(`El servidor respondió ${response.status}.`);
-
     const file = join(this.updatesDir, `MonitoreoTI-Agente-${offer.version}.exe`);
-    const hash = createHash('sha256');
-    let size = 0;
-    await new Promise<void>((resolve, reject) => {
-      const out = createWriteStream(file);
-      const body = Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>);
-      body.on('data', (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > offer.tamano) body.destroy(new Error('El archivo es más grande de lo anunciado.'));
-        hash.update(chunk);
-      });
-      body.on('error', reject);
-      out.on('error', reject);
-      out.on('finish', resolve);
-      body.pipe(out);
+    await downloadRelease({
+      serverUrl: this.options.serverUrl,
+      credential: this.options.credential,
+      offer,
+      file,
+      fetchImpl: this.options.fetchImpl,
     });
-
-    const digest = hash.digest('hex');
-    if (size !== offer.tamano || digest !== offer.sha256) {
-      await rm(file, { force: true });
-      throw new Error('El archivo descargado no coincide con el publicado (tamaño o SHA-256).');
-    }
     return file;
+  }
+}
+
+/**
+ * Descarga el instalador publicado con la credencial del agente y comprueba tamaño y SHA-256 (la firma la verifica quien
+ * llama). Lo usan el actualizador y la instalación remota.
+ */
+export async function downloadRelease(options: {
+  serverUrl: URL;
+  credential: string;
+  offer: Pick<UpdateOffer, 'url' | 'sha256' | 'tamano'>;
+  file: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const { offer, file } = options;
+  const response = await (options.fetchImpl ?? fetch)(new URL(offer.url, options.serverUrl), {
+    headers: { Authorization: `Bearer ${options.credential}` },
+  });
+  if (!response.ok || !response.body) throw new Error(`El servidor respondió ${response.status}.`);
+
+  const hash = createHash('sha256');
+  let size = 0;
+  await new Promise<void>((resolve, reject) => {
+    const out = createWriteStream(file);
+    const body = Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>);
+    body.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > offer.tamano) body.destroy(new Error('El archivo es más grande de lo anunciado.'));
+      hash.update(chunk);
+    });
+    body.on('error', reject);
+    out.on('error', reject);
+    out.on('finish', resolve);
+    body.pipe(out);
+  });
+
+  const digest = hash.digest('hex');
+  if (size !== offer.tamano || digest !== offer.sha256) {
+    await rm(file, { force: true });
+    throw new Error('El archivo descargado no coincide con el publicado (tamaño o SHA-256).');
   }
 }

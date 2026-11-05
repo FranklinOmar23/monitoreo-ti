@@ -9,6 +9,12 @@ public class EnrollmentToken : ITenantEntity
     public int CompanyId { get; set; }
     public int BranchId { get; set; }
     public string TokenHash { get; set; } = string.Empty;
+
+    /// <summary>
+    /// El token cifrado por la aplicación, para volver a mostrar el comando de instalación (solo a quien puede
+    /// generar instaladores, y queda en la auditoría). Los tokens creados antes no lo tienen.
+    /// </summary>
+    public byte[]? EncryptedToken { get; set; }
     public DateTime ExpiresAt { get; set; }
 
     /// <summary>Etiqueta para reconocerlo en el panel.</summary>

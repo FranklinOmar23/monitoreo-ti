@@ -28,6 +28,10 @@ public static class TestHost
         builder.UseSetting("Agents:RegisterRateLimitPerMinute", "10000");
         // El servicio de presencia se prueba llamando a TickAsync, no esperando el temporizador.
         builder.UseSetting("Agents:Presence:Interval", "01:00:00");
+        // Cada API de prueba hace un ciclo al arrancar: con 3 minutos, una corrida larga (base lenta) marcaba
+        // desconectados los equipos de ejemplo y fallaban las pruebas que leen sus estados. Las pruebas de presencia
+        // envejecen el contacto más que esto.
+        builder.UseSetting("Agents:Presence:DisconnectAfter", "06:00:00");
         // Las pruebas vacían el escritor de métricas a mano con FlushAsync.
         builder.UseSetting("Agents:Metrics:FlushInterval", "01:00:00");
         // El motor de alertas se prueba llamando a TickAsync.

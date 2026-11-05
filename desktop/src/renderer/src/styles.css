@@ -1,63 +1,105 @@
-/* Diseño Centinela (ESPECIFICACION.md §19, decisión 10). Fuentes del sistema: la CSP no permite fuentes remotas. */
+/* Diseño Centinela técnico (ESPECIFICACION.md §19, decisiones 10 y 71). Fuentes del sistema: la CSP no permite
+   fuentes remotas. Bordes antes que sombras, esquinas casi rectas y el color reservado al estado. */
 
 :root {
   --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-mono: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
 
-  --sidebar-bg: #0b1f26;
-  --sidebar-hover: #12303a;
-  --sidebar-text: #a9bcc2;
+  /* Barra lateral: oscura en los dos temas. */
+  --sidebar-bg: #0f161b;
+  --sidebar-hover: #1a242b;
+  --sidebar-active: #1f2d35;
+  --sidebar-text: #a4b0ba;
   --sidebar-text-strong: #ffffff;
+  --sidebar-line: #1f2a31;
 
-  --color-bg: #faf8f3;
+  --color-bg: #eceff2;
   --color-surface: #ffffff;
-  --color-surface-muted: #f3f0e8;
-  --color-border: #e8e4d9;
-  --color-text: #0d1b20;
-  --color-muted: #6a7479;
+  --color-surface-muted: #f6f7f9;
+  --color-surface-raised: #f6f7f9;
+  --color-surface-sunken: #e3e7eb;
+  --color-border: #d3d9df;
+  --color-border-strong: #878f98;
+  --color-text: #0f151a;
+  --color-muted: #56616c;
+  --color-faint: #737e89;
   --color-primary: #0f766e;
   --color-primary-hover: #0c5f59;
   --color-on-primary: #ffffff;
-  --color-ticket: #ff5a36;
+  --color-primary-subtle: color-mix(in srgb, var(--color-primary) 11%, var(--color-surface));
+  --color-ticket: #c2410c;
+  --color-on-ticket: #ffffff;
 
-  --st-sano: #2f9e6f;
-  --st-advertencia: #e8971a;
-  --st-critico: #d9452f;
-  --st-desconectado: #aaa69d;
-  --st-sano-bg: #e1f3ea;
-  --st-advertencia-bg: #fdf0d9;
-  --st-critico-bg: #fbe4df;
-  --st-desconectado-bg: #ecebe6;
-  --st-advertencia-text: #a96a07;
-  --st-critico-text: #b3321f;
+  --st-sano: #1a7f37;
+  --st-advertencia: #bf8700;
+  --st-critico: #cf222e;
+  --st-desconectado: #8c959f;
+  --st-sano-bg: #dcf5e3;
+  --st-advertencia-bg: #fbf1d0;
+  --st-critico-bg: #ffe7e5;
+  --st-desconectado-bg: #eaeef2;
+  --st-sano-text: #116329;
+  --st-advertencia-text: #7d4e00;
+  --st-critico-text: #a40e26;
+  --st-info: #0860ca;
+  --st-info-bg: #ddeeff;
 
-  --chart-cpu: #0f766e;
-  --chart-ram: #e8971a;
+  --chart-cpu: var(--color-primary);
+  --chart-ram: #8250df;
+  --chart-grid: #e6eaee;
 
-  --radius: 14px;
-  --shadow: 0 1px 2px rgba(13, 27, 32, 0.04);
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: none;
+  --shadow-overlay: 0 8px 24px rgba(15, 21, 26, 0.14);
+
+  --control-h: 32px;
+  --control-sm: 28px;
+  --row-h: 36px;
   color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --sidebar-bg: #07161b;
-    --color-bg: #0f1b20;
-    --color-surface: #16262c;
-    --color-surface-muted: #1b2d34;
-    --color-border: #26393f;
-    --color-text: #e6eef0;
-    --color-muted: #8fa0a6;
+    --sidebar-bg: #080b0e;
+    --sidebar-hover: #141b21;
+    --sidebar-active: #16222a;
+    --sidebar-text: #9aa7b2;
+    --sidebar-line: #161d23;
+
+    --color-bg: #0d1115;
+    --color-surface: #141a1f;
+    --color-surface-muted: #1a2127;
+    --color-surface-raised: #1a2127;
+    --color-surface-sunken: #0a0e11;
+    --color-border: #252d34;
+    --color-border-strong: #5d6974;
+    --color-text: #e2e8ee;
+    --color-muted: #8d99a5;
+    --color-faint: #6b7782;
     --color-primary: #1fa396;
-    --color-primary-hover: #29b8aa;
+    --color-primary-hover: #2bbbad;
     --color-on-primary: #04211e;
-    --st-sano-bg: #163a2e;
-    --st-advertencia-bg: #3d2f12;
-    --st-critico-bg: #432019;
-    --st-desconectado-bg: #2a3236;
-    --st-advertencia-text: #f0b04a;
-    --st-critico-text: #f08a79;
-    --chart-cpu: #29b8aa;
+    --color-ticket: #f0643f;
+    --color-on-ticket: #1f0a03;
+
+    --st-sano: #3fb950;
+    --st-advertencia: #d29922;
+    --st-critico: #f85149;
+    --st-desconectado: #6e7781;
+    --st-sano-bg: #11261a;
+    --st-advertencia-bg: #2b2110;
+    --st-critico-bg: #2e1517;
+    --st-desconectado-bg: #1d232a;
+    --st-sano-text: #56d364;
+    --st-advertencia-text: #e3b341;
+    --st-critico-text: #ff7b72;
+    --st-info: #4493f8;
+    --st-info-bg: #11233b;
+
+    --chart-ram: #c297ff;
+    --chart-grid: #1f272e;
+    --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -186,7 +228,7 @@ button {
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: var(--color-primary);
   color: #fff;
 }
@@ -212,7 +254,7 @@ button {
   width: 100%;
   padding: 9px 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--sidebar-text);
   text-align: left;
@@ -236,8 +278,8 @@ button {
 .nav-badge {
   min-width: 24px;
   padding: 1px 7px;
-  border-radius: 999px;
-  background: #1c3a45;
+  border-radius: var(--radius-sm);
+  background: var(--sidebar-active);
   color: var(--sidebar-text-strong);
   font-size: 11px;
   text-align: center;
@@ -248,7 +290,7 @@ button {
   flex-direction: column;
   gap: 3px;
   padding: 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--sidebar-hover);
   color: var(--sidebar-text-strong);
 }
@@ -287,7 +329,7 @@ button {
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   color: var(--color-muted);
 }
@@ -312,7 +354,7 @@ button {
 .search kbd {
   padding: 2px 6px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
   font-size: 11px;
 }
@@ -330,7 +372,7 @@ button {
   width: 40px;
   height: 40px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   color: var(--color-text);
 }
@@ -362,7 +404,7 @@ button {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: #e8971a;
+  background: var(--color-primary);
   color: #fff;
   font-weight: 700;
   font-size: 13px;
@@ -434,7 +476,7 @@ button {
   height: 38px;
   padding: 0 18px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -491,7 +533,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 3px 11px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -696,7 +738,7 @@ button {
   justify-content: flex-start;
   gap: 1px;
   overflow: hidden;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .stacked-seg {
@@ -747,7 +789,7 @@ button {
   gap: 1px;
   height: 6px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
 }
 
@@ -781,7 +823,7 @@ button {
   flex: none;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 .alert-icon[data-status='critico'],
@@ -872,7 +914,7 @@ button {
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   color: var(--color-muted);
 }
@@ -907,7 +949,7 @@ button {
 .chip {
   padding: 5px 12px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
 }
@@ -957,14 +999,14 @@ button {
   gap: 8px;
   padding: 8px 16px;
   border: 0;
-  border-radius: 999px;
-  background: #1a3541;
+  border-radius: var(--radius-sm);
+  background: var(--sidebar-hover);
   color: #fff;
   font-weight: 600;
 }
 
 .bulk-action:hover {
-  background: #244756;
+  background: var(--sidebar-active);
 }
 
 .bulk-clear {
@@ -1076,14 +1118,14 @@ button {
   width: 88px;
   height: 4px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-border);
 }
 
 .mini-bar-fill {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--st-sano);
 }
 
@@ -1206,15 +1248,15 @@ button {
   list-style: none;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(13, 27, 32, 0.12);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
 }
 
 .more-menu button {
   width: 100%;
   padding: 9px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: none;
   color: var(--color-text);
   text-align: left;
@@ -1263,7 +1305,7 @@ button {
 
 .tab-count {
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--st-critico-bg);
   color: var(--st-critico-text);
   font-size: 11px;
@@ -1375,14 +1417,14 @@ button {
 .segmented {
   display: inline-flex;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
 }
 
 .segmented button {
   padding: 3px 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1470,7 +1512,7 @@ button {
   display: flex;
   gap: 12px;
   padding: 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -1487,7 +1529,7 @@ button {
   gap: 8px;
   padding: 9px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   font-size: 12px;
   line-height: 1.45;
@@ -1673,7 +1715,7 @@ button {
   height: 44px;
   padding: 0 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   outline: 0;
   background: var(--color-surface);
   font-weight: 400;
@@ -1706,7 +1748,7 @@ button {
 .auth-info {
   margin-bottom: 16px;
   padding: 12px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -1727,13 +1769,13 @@ button {
   gap: 16px;
   padding: 14px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface);
 }
 
 .auth-qr img {
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: #fff;
   image-rendering: pixelated;
 }
@@ -1761,7 +1803,7 @@ button {
   width: 100%;
   padding: 14px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   text-align: left;
 }
@@ -1785,7 +1827,7 @@ button {
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--st-sano-bg);
   color: var(--color-primary);
 }
@@ -1802,7 +1844,7 @@ button {
 .splash-mark {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-primary);
 }
 
@@ -1827,7 +1869,7 @@ button {
 button.profile {
   padding: 4px 8px 4px 4px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: transparent;
   text-align: left;
 }
@@ -1846,15 +1888,15 @@ button.profile:hover {
   min-width: 220px;
   padding: 6px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface);
-  box-shadow: 0 8px 24px rgba(13, 27, 32, 0.12);
+  box-shadow: var(--shadow-overlay);
 }
 
 .profile-menu button {
   padding: 9px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: none;
   text-align: left;
 }
@@ -1981,7 +2023,7 @@ button.profile:hover {
   margin: 4px 0 0;
   padding: 8px 10px;
   overflow-x: auto;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   font-size: 11px;
   color: var(--color-muted);
@@ -2063,10 +2105,10 @@ button.profile:hover {
   max-height: calc(100vh - 64px);
   padding: 0;
   border: 1px solid var(--color-border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   color: var(--color-text);
-  box-shadow: 0 24px 64px rgba(13, 27, 32, 0.25);
+  box-shadow: 0 24px 64px rgba(10, 14, 17, 0.25);
 }
 
 .modal-wide {
@@ -2074,7 +2116,7 @@ button.profile:hover {
 }
 
 .modal::backdrop {
-  background: rgba(7, 22, 27, 0.45);
+  background: rgba(4, 6, 8, 0.62);
 }
 
 .modal-header {
@@ -2128,7 +2170,7 @@ button.profile:hover {
   height: 44px;
   padding: 0 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   font-weight: 400;
 }
@@ -2149,7 +2191,7 @@ button.profile:hover {
 .field textarea {
   padding: 10px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   outline: 0;
   background: var(--color-surface);
   font: inherit;
@@ -2171,7 +2213,7 @@ button.profile:hover {
 .alert-status {
   display: inline-block;
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   font-size: 12px;
   font-weight: 600;
@@ -2228,7 +2270,7 @@ button.profile:hover {
 .timeline-note {
   margin: 4px 0 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   font-size: 12px;
 }
@@ -2252,7 +2294,7 @@ button.profile:hover {
 
 :root {
   /* Colores de puerto (sección 12.4); el troncal es azul. */
-  --port-troncal: #2f6fdb;
+  --port-troncal: var(--st-info);
 }
 
 .dc-layout {
@@ -2265,7 +2307,7 @@ button.profile:hover {
 .dc-rooms {
   padding: 14px;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--color-surface);
 }
 
@@ -2289,7 +2331,7 @@ button.profile:hover {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: none;
   font-size: 13px;
   text-align: left;
@@ -2318,7 +2360,7 @@ button.profile:hover {
   gap: 6px;
   padding: 14px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   font-size: 12px;
   text-align: left;
@@ -2337,7 +2379,7 @@ button.profile:hover {
 .rack-usage {
   height: 6px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
 }
 
@@ -2354,7 +2396,7 @@ button.profile:hover {
   max-width: 460px;
   padding: 10px 14px;
   border: 6px solid #3a3a38;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: #22221f;
 }
 
@@ -2400,7 +2442,7 @@ button.profile:hover {
   overflow: hidden;
   border: 1px solid #55554f;
   border-left: 4px solid var(--st-sano);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: linear-gradient(180deg, #4a4a45, #3b3b37);
   color: #f2f0ea;
   font-size: 11px;
@@ -2456,7 +2498,7 @@ button.profile:hover {
   place-items: center;
   height: 34px;
   border: 2px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--st-desconectado-bg);
   color: var(--color-text);
   font-size: 11px;
@@ -2529,7 +2571,7 @@ button.profile:hover {
 
 .port-chip {
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
 }
@@ -2606,7 +2648,7 @@ button.profile:hover {
   margin: 0;
   padding: 12px 14px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .snmp-fieldset legend {
@@ -2641,7 +2683,7 @@ button.profile:hover {
   min-height: 240px;
   padding: 12px;
   border: 1px dashed transparent;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -2672,7 +2714,7 @@ button.profile:hover {
   gap: 6px;
   padding: 12px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface);
 }
 
@@ -2707,7 +2749,7 @@ button.profile:hover {
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   font-size: 11px;
 }
@@ -2731,7 +2773,7 @@ button.profile:hover {
 .priority {
   display: inline-block;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   font-size: 11px;
   font-weight: 600;
@@ -2750,7 +2792,7 @@ button.profile:hover {
 .ticket-status {
   display: inline-block;
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   font-size: 12px;
   font-weight: 600;
@@ -2783,7 +2825,7 @@ button.profile:hover {
   margin-top: 14px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   font-size: 12px;
   text-align: left;
@@ -2851,7 +2893,7 @@ button.profile:hover {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   cursor: zoom-in;
 }
@@ -2888,7 +2930,7 @@ button.profile:hover {
   gap: 6px 12px;
   padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -2976,7 +3018,7 @@ button.profile:hover {
   margin: 0;
   padding: 14px;
   border: 1px dashed var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: #fff;
   color: #0d1b20;
   break-inside: avoid;
@@ -3070,7 +3112,7 @@ button.profile:hover {
 
 .import-columns span {
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   font-size: 12px;
 }
@@ -3239,7 +3281,7 @@ button.profile:hover {
 .device-error {
   margin: 10px 0 0;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 13px;
 }
 
@@ -3295,7 +3337,7 @@ button.profile:hover {
   min-height: 96px;
   padding: 10px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   text-align: left;
   font-size: 12px;
@@ -3309,7 +3351,7 @@ button.profile:hover {
 .dc-3d {
   position: relative;
   height: 560px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: var(--color-surface-muted);
 }
@@ -3357,8 +3399,8 @@ button.profile:hover {
   display: flex;
   flex-direction: column;
   padding: 2px 6px;
-  border-radius: 6px;
-  background: rgb(13 27 32 / 82%);
+  border-radius: var(--radius-sm);
+  background: rgb(10 14 17 / 88%);
   color: #fff;
   font-size: 11px;
   white-space: nowrap;
@@ -3366,7 +3408,7 @@ button.profile:hover {
 }
 
 .dc-3d-rack-label {
-  background: rgb(15 118 110 / 90%);
+  background: color-mix(in srgb, var(--color-primary) 90%, transparent);
 }
 
 .topology {
@@ -3436,7 +3478,7 @@ button.profile:hover {
 
 .calendar-overdue {
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--st-critico-bg);
   color: var(--st-critico-text);
   font-size: 12px;
@@ -3504,7 +3546,7 @@ button.profile:hover {
   padding: 3px 6px;
   border: 0;
   border-left: 3px solid var(--color-primary);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   text-align: left;
   font-size: 11px;
@@ -3559,9 +3601,9 @@ button.profile:hover {
   padding: 12px;
   overflow-y: auto;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface);
-  box-shadow: 0 12px 32px rgb(13 27 32 / 14%);
+  box-shadow: var(--shadow-overlay);
 }
 
 .notif-panel ul {
@@ -3581,7 +3623,7 @@ button.profile:hover {
   padding: 6px 8px 6px 10px;
   border: 0;
   border-left: 3px solid var(--st-advertencia);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   text-align: left;
   font-size: 13px;
@@ -3612,8 +3654,8 @@ button.profile:hover {
   max-height: 360px;
   overflow: auto;
   background: var(--sidebar-bg);
-  color: #e6efe9;
-  border-radius: 10px;
+  color: #e2e8ee;
+  border-radius: var(--radius);
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.5;
@@ -3666,7 +3708,7 @@ button.profile:hover {
 .command-status {
   display: inline-block;
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 12.5px;
   background: var(--st-desconectado-bg);
 }
@@ -3693,7 +3735,7 @@ button.profile:hover {
 
 .machine-picker {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 10px 12px;
   margin: 0 0 8px;
 }
@@ -3795,7 +3837,7 @@ button.profile:hover {
   grid-template-rows: auto 1fr;
   height: 100vh;
   background: var(--sidebar-bg);
-  color: #e6efe9;
+  color: #e2e8ee;
 }
 
 .terminal-bar {
@@ -3803,7 +3845,7 @@ button.profile:hover {
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  border-bottom: 1px solid #1d3a44;
+  border-bottom: 1px solid #252d34;
 }
 
 .terminal-bar .muted {
@@ -3812,8 +3854,8 @@ button.profile:hover {
 }
 
 .terminal-bar .btn-outline {
-  color: #e6efe9;
-  border-color: #2b4a55;
+  color: #e2e8ee;
+  border-color: #3a454f;
   background: transparent;
 }
 
@@ -3824,7 +3866,7 @@ button.profile:hover {
 
 .terminal-status {
   align-content: center;
-  color: #e6efe9;
+  color: #e2e8ee;
 }
 
 /* Explorador de archivos remoto (W-31) */
@@ -3868,7 +3910,7 @@ button.profile:hover {
   gap: 6px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -3952,8 +3994,8 @@ button.profile:hover {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100vh;
-  background: #05121a;
-  color: #e6efe9;
+  background: #0a0e11;
+  color: #e2e8ee;
 }
 
 .desktop-bar {
@@ -3962,9 +4004,9 @@ button.profile:hover {
 
 .desktop-bar select {
   background: transparent;
-  color: #e6efe9;
-  border: 1px solid #2b4a55;
-  border-radius: 8px;
+  color: #e2e8ee;
+  border: 1px solid #3a454f;
+  border-radius: var(--radius);
   padding: 6px 8px;
 }
 
@@ -3974,7 +4016,7 @@ button.profile:hover {
 
 .desktop-body {
   min-height: 0;
-  background: #05121a;
+  background: #0a0e11;
 }
 
 .desktop-stage {
@@ -4003,7 +4045,7 @@ button.profile:hover {
   margin-bottom: 12px;
   padding: 10px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
 }
 
@@ -4028,7 +4070,7 @@ button.profile:hover {
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   color: var(--color-primary);
 }
@@ -4065,7 +4107,7 @@ button.profile:hover {
   gap: 4px;
   padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -4096,7 +4138,7 @@ button.profile:hover {
   display: grid;
   gap: 10px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -4130,14 +4172,14 @@ button.profile:hover {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
-  background: #05121a;
-  color: #e6efe9;
+  background: #0a0e11;
+  color: #e2e8ee;
 }
 
 .desktop-window.desktop-centered {
   grid-template-rows: 1fr;
   place-items: center;
-  background: radial-gradient(circle at 50% 40%, #12303a 0%, #05121a 70%);
+  background: radial-gradient(circle at 50% 40%, #141a1f 0%, #0a0e11 70%);
 }
 
 .desktop-main {
@@ -4173,7 +4215,7 @@ button.profile:hover {
   inset: 0;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at 50% 40%, #12303a 0%, #05121a 70%);
+  background: radial-gradient(circle at 50% 40%, #141a1f 0%, #0a0e11 70%);
 }
 
 /* W-29 Conectando */
@@ -4193,7 +4235,7 @@ button.profile:hover {
 
 .connect-steps .muted {
   margin: 0;
-  color: #a9bcc2;
+  color: #9aa7b2;
 }
 
 .connect-icons {
@@ -4207,9 +4249,9 @@ button.profile:hover {
   place-items: center;
   width: 62px;
   height: 62px;
-  border-radius: 16px;
-  background: #16323c;
-  color: #e6efe9;
+  border-radius: var(--radius);
+  background: #1a2127;
+  color: #e2e8ee;
 }
 
 .connect-dots {
@@ -4221,7 +4263,7 @@ button.profile:hover {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #2f7fd8;
+  background: var(--st-info);
   animation: connect-dot 1.4s infinite ease-in-out;
 }
 
@@ -4259,9 +4301,9 @@ button.profile:hover {
   margin: 6px 0 4px;
   padding: 6px 16px;
   list-style: none;
-  border: 1px solid #1d3a44;
-  border-radius: 12px;
-  background: #0d2129;
+  border: 1px solid #252d34;
+  border-radius: var(--radius);
+  background: #11171c;
   text-align: left;
 }
 
@@ -4275,11 +4317,11 @@ button.profile:hover {
 }
 
 .connect-steps li + li {
-  border-top: 1px solid #16323c;
+  border-top: 1px solid #1a2127;
 }
 
 .connect-steps li[data-state='pendiente'] {
-  color: #6f8790;
+  color: #6b7782;
 }
 
 .step-mark {
@@ -4287,18 +4329,18 @@ button.profile:hover {
   place-items: center;
   width: 20px;
   height: 20px;
-  border: 2px solid #3a5560;
+  border: 2px solid #5d6974;
   border-radius: 50%;
 }
 
 .connect-steps li[data-state='listo'] .step-mark {
-  border-color: #2f9e6f;
-  background: #2f9e6f;
+  border-color: var(--st-sano);
+  background: var(--st-sano);
   color: #ffffff;
 }
 
 .connect-steps li[data-state='activo'] .step-mark {
-  border-color: #2f7fd8;
+  border-color: var(--st-info);
   border-top-color: transparent;
   animation: spin 0.9s linear infinite;
 }
@@ -4314,7 +4356,7 @@ button.profile:hover {
   gap: 12px;
   width: min(460px, 92vw);
   padding: 28px;
-  border-radius: 22px;
+  border-radius: var(--radius);
   background: #ffffff;
   color: var(--color-text);
 }
@@ -4333,7 +4375,7 @@ button.profile:hover {
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--st-critico-bg);
   color: var(--st-critico-text);
 }
@@ -4342,7 +4384,7 @@ button.profile:hover {
   margin: 0;
   padding: 4px 14px;
   list-style: none;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -4360,7 +4402,7 @@ button.profile:hover {
 
 .connect-error-code {
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -4390,9 +4432,9 @@ button.profile:hover {
   width: fit-content;
   margin: 0 auto;
   padding: 6px;
-  border: 1px solid #1d3a44;
-  border-radius: 16px;
-  background: rgba(8, 24, 31, 0.94);
+  border: 1px solid #252d34;
+  border-radius: var(--radius);
+  background: rgba(13, 17, 21, 0.96);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
@@ -4400,7 +4442,7 @@ button.profile:hover {
   display: grid;
   margin-right: 6px;
   padding: 0 12px 0 8px;
-  border-right: 1px solid #1d3a44;
+  border-right: 1px solid #252d34;
   line-height: 1.25;
 }
 
@@ -4411,7 +4453,7 @@ button.profile:hover {
 
 .toolbar-id span {
   font-size: 11px;
-  color: #a9bcc2;
+  color: #9aa7b2;
 }
 
 .tool-menu {
@@ -4424,9 +4466,9 @@ button.profile:hover {
   gap: 6px;
   padding: 8px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: transparent;
-  color: #e6efe9;
+  color: #e2e8ee;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -4436,7 +4478,7 @@ button.profile:hover {
 .tool-button:hover:not(:disabled),
 .tool-button[aria-expanded='true'],
 .tool-button[aria-pressed='true'] {
-  background: #16323c;
+  background: #1a2127;
 }
 
 .tool-button:disabled {
@@ -4451,8 +4493,8 @@ button.profile:hover {
   margin-left: 6px;
   padding: 9px 14px;
   border: 0;
-  border-radius: 12px;
-  background: #e0442f;
+  border-radius: var(--radius);
+  background: var(--st-critico);
   color: #ffffff;
   font: inherit;
   font-weight: 700;
@@ -4460,7 +4502,7 @@ button.profile:hover {
 }
 
 .toolbar-end:hover {
-  background: #c33a27;
+  background: #b62324;
 }
 
 /* Ventana estrecha: solo íconos (el nombre sigue en la descripción emergente). */
@@ -4483,7 +4525,7 @@ button.profile:hover {
   gap: 2px;
   width: 290px;
   padding: 10px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: #ffffff;
   color: var(--color-text);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
@@ -4511,7 +4553,7 @@ button.profile:hover {
   width: 100%;
   padding: 9px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: none;
   color: inherit;
   font: inherit;
@@ -4572,7 +4614,7 @@ button.profile:hover {
   max-height: 90px;
   overflow: auto;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   font-size: 12px;
   white-space: pre-wrap;
@@ -4594,7 +4636,7 @@ button.profile:hover {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 12.5px;
 }
 
@@ -4618,7 +4660,7 @@ button.profile:hover {
   gap: 6px;
   padding: 10px 6px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: none;
   font: inherit;
   font-size: 11.5px;
@@ -4627,9 +4669,9 @@ button.profile:hover {
 }
 
 .monitor-tile[aria-pressed='true'] {
-  border-color: #2f7fd8;
-  background: #eaf2fc;
-  color: #2f7fd8;
+  border-color: var(--st-info);
+  background: var(--st-info-bg);
+  color: var(--st-info);
 }
 
 .monitor-screen {
@@ -4638,7 +4680,7 @@ button.profile:hover {
   width: 40px;
   height: 26px;
   border: 2px solid currentColor;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-weight: 700;
 }
 
@@ -4653,7 +4695,7 @@ button.profile:hover {
   display: grid;
   gap: 2px;
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   font-size: 11px;
   color: var(--color-muted);
@@ -4672,9 +4714,9 @@ button.profile:hover {
   max-width: 80%;
   padding: 10px 16px;
   transform: translateX(-50%);
-  border: 1px solid #1d3a44;
-  border-radius: 10px;
-  background: rgba(8, 24, 31, 0.94);
+  border: 1px solid #252d34;
+  border-radius: var(--radius);
+  background: rgba(13, 17, 21, 0.96);
   font-size: 13px;
 }
 
@@ -4684,7 +4726,7 @@ button.profile:hover {
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   width: 380px;
   min-width: 300px;
-  border-left: 1px solid #1d3a44;
+  border-left: 1px solid #252d34;
   background: #ffffff;
   color: var(--color-text);
 }
@@ -4717,10 +4759,10 @@ button.profile:hover {
   gap: 4px;
   margin: 12px 16px;
   padding: 16px;
-  border: 1.5px dashed #9ec3ef;
-  border-radius: 12px;
-  background: #f1f7fe;
-  color: #2f7fd8;
+  border: 1.5px dashed var(--st-info);
+  border-radius: var(--radius);
+  background: var(--st-info-bg);
+  color: var(--st-info);
   text-align: center;
   font-size: 13px;
 }
@@ -4731,8 +4773,8 @@ button.profile:hover {
 }
 
 .file-drop[data-active='true'] {
-  border-color: #2f7fd8;
-  background: #e1eefc;
+  border-color: var(--st-info);
+  background: var(--st-info-bg);
 }
 
 .file-drop[data-disabled='true'] {
@@ -4830,7 +4872,7 @@ button.file-row {
 .file-transfer progress {
   width: 100%;
   height: 5px;
-  accent-color: #2f7fd8;
+  accent-color: var(--st-info);
 }
 
 .file-transfer[data-status='listo'] progress {
@@ -4848,10 +4890,10 @@ button.file-row {
   align-items: center;
   gap: 6px 22px;
   padding: 8px 16px;
-  border-top: 1px solid #1d3a44;
-  background: #08181f;
+  border-top: 1px solid #252d34;
+  background: #0d1115;
   font-size: 12.5px;
-  color: #a9bcc2;
+  color: #9aa7b2;
 }
 
 .desktop-status > span {
@@ -4873,12 +4915,12 @@ button.file-row {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #2f9e6f;
+  background: var(--st-sano);
 }
 
 .desktop-status > span:first-child .status-dot-live,
 .connect-note .status-dot-live {
-  background: #e0442f;
+  background: var(--st-critico);
 }
 
 /* ===================== Usuarios (W-36, W-37), roles (W-38) y Mi perfil (W-41) ===================== */
@@ -4902,7 +4944,7 @@ button.file-row {
   align-items: flex-start;
   padding: 10px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
   font-size: 13px;
   line-height: 1.45;
@@ -5075,7 +5117,7 @@ button.file-row {
   align-items: center;
   margin-left: 8px;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--st-advertencia-bg);
   color: var(--st-advertencia-text);
   font-size: 10px;
@@ -5094,7 +5136,7 @@ button.file-row {
   gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 .role-permissions legend {
@@ -5193,7 +5235,7 @@ button.file-row {
   grid-column: 1 / -1;
   height: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
 }
 
@@ -5225,7 +5267,7 @@ button.file-row {
   margin-bottom: 8px;
   padding: 16px;
   border: 1px dashed var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface-muted);
 }
 
@@ -5251,7 +5293,7 @@ button.file-row {
   height: 40px;
   padding: 2px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   cursor: pointer;
 }
@@ -5263,7 +5305,7 @@ button.file-row {
   gap: 12px;
   padding: 16px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--color-surface);
 }
 
@@ -5351,7 +5393,7 @@ button.file-row {
   width: 38px;
   height: 38px;
   margin-bottom: 4px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
   color: var(--color-primary);
 }
@@ -5364,7 +5406,7 @@ button.file-row {
 .report-lock {
   margin-top: 4px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   color: var(--color-muted);
   font-size: 11px;
@@ -5390,7 +5432,7 @@ button.file-row {
   height: 34px;
   padding: 0 10px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
@@ -5447,7 +5489,7 @@ button.file-row {
   display: inline-block;
   margin: 1px 4px 1px 0;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
   font-size: 12px;
   white-space: nowrap;
@@ -5512,14 +5554,14 @@ button.file-row {
 .bar-list-track {
   height: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-muted);
 }
 
 .bar-list-track span {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--color-primary);
 }
 
@@ -5594,7 +5636,7 @@ button.file-row {
   margin: 0 28px;
   padding: 10px 14px;
   border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
   font-size: 13px;
 }

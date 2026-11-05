@@ -39,7 +39,7 @@ export function ScheduledTasks({ onOpenRun }: { onOpenRun: (batchId: string) => 
     onSuccess: () => void queries.invalidateQueries({ queryKey: ['tareas'] }),
   });
 
-  if (tasks.isPending) return <Loading />;
+  if (tasks.isPending) return <Loading variant="table" columns={6} />;
   if (tasks.isError) return <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />;
 
   return (

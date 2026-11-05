@@ -6,7 +6,7 @@
      1. Empresas, planes y suscripciones   (5 tablas)
      2. Usuarios y seguridad                (7 tablas)
      3. Organización e inventario           (9 tablas)
-     4. Red y data center                   (10 tablas)
+     4. Red y data center                   (14 tablas)
      5. Monitoreo y alertas                 (6 tablas)
      6. Soporte y gestión remota            (8 tablas)
      7. Índices
@@ -382,6 +382,7 @@ CREATE TABLE dbo.tokens_registro (
     empresa_id      INT NOT NULL REFERENCES dbo.empresas(id),
     sucursal_id     INT NOT NULL,
     token_hash      NVARCHAR(255) NOT NULL UNIQUE,
+    token_cifrado       VARBINARY(MAX) NULL,           -- cifrado por la aplicación, para volver a mostrar el comando
     vence           DATETIME2(0) NOT NULL,
     nombre          NVARCHAR(100) NULL,               -- etiqueta para reconocerlo en el panel
     usos_max        INT NULL,                         -- NULL = sin límite
@@ -471,6 +472,11 @@ CREATE TABLE dbo.dispositivos_red (
                             CHECK (estado IN ('en_linea','advertencia','critico','sin_respuesta','pasivo','baja')),
     ultimo_sondeo           DATETIME2(0) NULL,        -- último sondeo SNMP que respondió
     ultimo_error            NVARCHAR(300) NULL,       -- por qué falló el último sondeo (sin datos sensibles)
+    api_url                 NVARCHAR(200) NULL,       -- API REST del FortiGate (https://ip:puerto)
+    api_token_cifrado       VARBINARY(MAX) NULL,      -- token de solo lectura, cifrado por la aplicación
+    api_aceptar_certificado BIT NOT NULL DEFAULT 1,   -- certificado propio (autofirmado) del equipo
+    api_ultimo_ok           DATETIME2(0) NULL,
+    api_ultimo_error        NVARCHAR(300) NULL,
     creado                  DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CHECK (gabinete_id IS NULL OR posicion_u IS NOT NULL),
     CONSTRAINT UQ_dispositivos_red_empresa_nombre UNIQUE (empresa_id, nombre),
@@ -597,6 +603,119 @@ CREATE TABLE dbo.cableado (
 );
 GO
 
+-- Subredes IPv4 cuyo uso se inventaría (decisión 72): el recolector las barre con ping y la ARP dice quién está
+CREATE TABLE dbo.subredes (
+    id                  INT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id          INT NOT NULL REFERENCES dbo.empresas(id),
+    sucursal_id         INT NOT NULL,
+    nombre              NVARCHAR(100) NOT NULL,       -- ej. 'Datos Santo Domingo'
+    red                 VARCHAR(15) NOT NULL,         -- dirección de red, ej. '192.168.3.0'
+    prefijo             TINYINT NOT NULL CHECK (prefijo BETWEEN 22 AND 30),   -- hasta 1022 direcciones por barrido
+    vlan                INT NULL CHECK (vlan BETWEEN 1 AND 4094),
+    puerta_enlace       VARCHAR(15) NULL,
+    recolector_id       INT NULL,                     -- agente que hace el barrido
+    dispositivo_arp_id  INT NULL,                     -- equipo de red (el firewall) cuya ARP se lee tras el barrido
+    barrido_horas       SMALLINT NOT NULL DEFAULT 24 CHECK (barrido_horas BETWEEN 0 AND 168),   -- 0 = solo a mano
+    dias_libre          SMALLINT NOT NULL DEFAULT 30 CHECK (dias_libre BETWEEN 1 AND 365),     -- sin verse en N días = libre
+    ultimo_barrido      DATETIME2(0) NULL,
+    barrido_pedido      DATETIME2(0) NULL,            -- se pidió al recolector y aún no responde
+    ultimo_error        NVARCHAR(300) NULL,
+    creado              DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_subredes_empresa_red UNIQUE (empresa_id, red, prefijo),
+    CONSTRAINT UQ_subredes_empresa_id UNIQUE (empresa_id, id),
+    CONSTRAINT FK_subredes_sucursal FOREIGN KEY (empresa_id, sucursal_id)
+        REFERENCES dbo.sucursales(empresa_id, id),
+    CONSTRAINT FK_subredes_recolector FOREIGN KEY (empresa_id, recolector_id)
+        REFERENCES dbo.agentes(empresa_id, id),
+    CONSTRAINT FK_subredes_dispositivo_arp FOREIGN KEY (empresa_id, dispositivo_arp_id)
+        REFERENCES dbo.dispositivos_red(empresa_id, id)
+);
+GO
+
+-- Cada dirección que se vio en uso: por ping, por la ARP de un equipo de red o del recolector
+CREATE TABLE dbo.direcciones_ip (
+    id                  BIGINT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id          INT NOT NULL REFERENCES dbo.empresas(id),
+    subred_id           INT NOT NULL,
+    ip                  VARCHAR(15) NOT NULL,
+    mac                 VARCHAR(17) NULL,
+    fabricante          NVARCHAR(150) NULL,
+    maquina_id          INT NULL REFERENCES dbo.maquinas(id) ON DELETE SET NULL,
+    origen              VARCHAR(10) NOT NULL CHECK (origen IN ('ping','arp')),   -- cómo se vio la última vez
+    primera_vez         DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    ultima_vez          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    ultimo_ping         DATETIME2(0) NULL,            -- última vez que respondió al ping
+    mac_anterior        VARCHAR(17) NULL,             -- la IP pasó de esta MAC a la actual (posible conflicto)
+    cambio_mac          DATETIME2(0) NULL,
+    nombre_host         NVARCHAR(255) NULL,           -- nombre que dio el equipo (NetBIOS) o el DNS inverso
+    nombre_origen       VARCHAR(10) NULL CHECK (nombre_origen IN ('netbios','dns','fortigate')),
+    interfaz            NVARCHAR(64) NULL,            -- interfaz o VLAN del firewall donde se vio en la ARP
+    sistema             NVARCHAR(100) NULL,           -- sistema operativo según el FortiGate
+    dhcp                BIT NULL,                     -- 1 = concesión del DHCP del FortiGate; NULL = no se sabe
+    dhcp_vence          DATETIME2(0) NULL,
+    CONSTRAINT UQ_direcciones_ip UNIQUE (empresa_id, subred_id, ip),
+    CONSTRAINT FK_direcciones_ip_subred FOREIGN KEY (empresa_id, subred_id)
+        REFERENCES dbo.subredes(empresa_id, id) ON DELETE CASCADE
+);
+GO
+
+-- Quién tuvo cada dirección y cuándo: un período por equipo (MAC o agente); se guardan 90 días
+CREATE TABLE dbo.historial_ip (
+    id                  BIGINT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id          INT NOT NULL REFERENCES dbo.empresas(id),
+    subred_id           INT NOT NULL,
+    ip                  VARCHAR(15) NOT NULL,
+    mac                 VARCHAR(17) NULL,
+    fabricante          NVARCHAR(150) NULL,
+    maquina_id          INT NULL REFERENCES dbo.maquinas(id) ON DELETE SET NULL,
+    maquina_nombre      NVARCHAR(100) NULL,           -- el nombre de entonces, aunque luego cambie
+    origen              VARCHAR(10) NOT NULL CHECK (origen IN ('ping','arp','agente')),
+    desde               DATETIME2(0) NOT NULL,
+    hasta               DATETIME2(0) NOT NULL,
+    CHECK (hasta >= desde),
+    CONSTRAINT FK_historial_ip_subred FOREIGN KEY (empresa_id, subred_id)
+        REFERENCES dbo.subredes(empresa_id, id) ON DELETE CASCADE
+);
+GO
+
+-- Rangos que no se deben asignar: el DHCP, impresoras, cámaras…
+-- Instalación remota del agente (decisión 77): la hace el recolector de la subred con una cuenta del dominio.
+-- La clave nunca se guarda; cuenta = DOMINIO\usuario.
+CREATE TABLE dbo.instalaciones_remotas (
+    id                  INT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id          INT NOT NULL REFERENCES dbo.empresas(id),
+    subred_id           INT NOT NULL,
+    ip                  VARCHAR(15) NOT NULL,
+    recolector_id       INT NOT NULL,                 -- agente que instala
+    usuario_id          INT NOT NULL REFERENCES dbo.usuarios(id),
+    cuenta              NVARCHAR(150) NOT NULL,
+    token_id            INT NULL,                     -- token de registro de un solo uso de esta instalación
+    estado              VARCHAR(12) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado IN ('pendiente','conectando','copiando','instalando','instalado','registrado','error','omitido')),
+    detalle             NVARCHAR(400) NULL,
+    sistema             NVARCHAR(100) NULL,
+    maquina_id          INT NULL,                     -- el equipo que se registró
+    creado              DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    actualizado         DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_instalaciones_remotas_subred FOREIGN KEY (empresa_id, subred_id)
+        REFERENCES dbo.subredes(empresa_id, id) ON DELETE CASCADE
+);
+GO
+
+CREATE TABLE dbo.reservas_ip (
+    id                  INT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id          INT NOT NULL REFERENCES dbo.empresas(id),
+    subred_id           INT NOT NULL,
+    desde               VARCHAR(15) NOT NULL,
+    hasta               VARCHAR(15) NOT NULL,
+    motivo              NVARCHAR(150) NOT NULL,
+    origen              VARCHAR(10) NOT NULL DEFAULT 'manual' CHECK (origen IN ('manual','fortigate')),
+    creado              DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_reservas_ip_subred FOREIGN KEY (empresa_id, subred_id)
+        REFERENCES dbo.subredes(empresa_id, id) ON DELETE CASCADE
+);
+GO
+
 
 /* =====================================================================
    5. MONITOREO Y ALERTAS
@@ -707,6 +826,8 @@ CREATE TABLE dbo.reglas_alerta (
     umbral_critico      DECIMAL(10,2) NULL,
     duracion_min        INT NOT NULL DEFAULT 0,       -- minutos que debe sostenerse
     activa              BIT NOT NULL DEFAULT 1,
+    reparar_auto        BIT NOT NULL DEFAULT 0,       -- servicio detenido: intentar iniciarlo solo
+    reparar_usuario_id  INT NULL REFERENCES dbo.usuarios(id),   -- quien lo activó (a su nombre van los comandos)
     CONSTRAINT FK_reglas_alerta_sucursal FOREIGN KEY (empresa_id, sucursal_id)
         REFERENCES dbo.sucursales(empresa_id, id)
 );
@@ -957,6 +1078,12 @@ CREATE INDEX IX_metricas_puerto_purga    ON dbo.metricas_puerto (empresa_id, fec
 CREATE INDEX IX_cableado_puerto_a        ON dbo.cableado (empresa_id, puerto_a_id);
 CREATE INDEX IX_cableado_puerto_b        ON dbo.cableado (empresa_id, puerto_b_id) WHERE puerto_b_id IS NOT NULL;
 CREATE INDEX IX_cableado_punto_red       ON dbo.cableado (empresa_id, punto_red_id) WHERE punto_red_id IS NOT NULL;
+CREATE INDEX IX_subredes_recolector       ON dbo.subredes (empresa_id, recolector_id) WHERE recolector_id IS NOT NULL;
+CREATE INDEX IX_direcciones_ip_mac       ON dbo.direcciones_ip (empresa_id, mac) WHERE mac IS NOT NULL;
+CREATE INDEX IX_reservas_ip_subred       ON dbo.reservas_ip (empresa_id, subred_id);
+CREATE INDEX IX_instalaciones_subred     ON dbo.instalaciones_remotas (empresa_id, subred_id, creado DESC);
+CREATE INDEX IX_instalaciones_token      ON dbo.instalaciones_remotas (token_id) WHERE token_id IS NOT NULL;
+CREATE INDEX IX_historial_ip_ip          ON dbo.historial_ip (empresa_id, subred_id, ip, hasta);
 
 -- Soporte y auditoría
 CREATE INDEX IX_tickets_estado           ON dbo.tickets (empresa_id, estado, prioridad) INCLUDE (asignado_a, maquina_id);

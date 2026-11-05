@@ -133,6 +133,8 @@ export interface OpenProblem {
   /** De dónde sale (ej. "SMART · 148 sectores dañados"). */
   source: string | null;
   createdAt: string;
+  /** Qué problema es ("servicio:Spooler"): define la acción que se ofrece. */
+  code?: string | null;
 }
 
 export interface VolumeItem {
@@ -344,6 +346,8 @@ export interface InstallerToken {
   createdAt: string;
   createdBy: string | null;
   state: 'activo' | 'vencido' | 'agotado' | 'revocado';
+  /** Se puede volver a ver el comando (activo y guardado cifrado; los tokens anteriores no). */
+  canShowCommand?: boolean;
 }
 
 export interface InstallerTokenInput {
@@ -354,7 +358,7 @@ export interface InstallerTokenInput {
   requiereAprobacion: boolean;
 }
 
-/** Token recién creado: es la única vez que se ve en claro. */
+/** Token recién creado, o vuelto a mostrar con "Ver comando" (queda en la auditoría). */
 export interface CreatedInstallerToken {
   id: number;
   token: string;
@@ -462,6 +466,7 @@ export interface RuleOverride {
   critical: number | null;
   durationMinutes: number;
   isActive: boolean;
+  autoRepair?: boolean;
 }
 
 export interface RuleItem {
@@ -481,6 +486,10 @@ export interface RuleItem {
   durationMinutes: number;
   isActive: boolean;
   overrides: RuleOverride[];
+  /** Servicio detenido: Centinela intenta iniciarlo solo. */
+  autoRepair?: boolean;
+  /** La métrica admite reparación automática (hoy, solo servicio detenido). */
+  canAutoRepair?: boolean;
 }
 
 export interface RuleInput {
@@ -491,6 +500,8 @@ export interface RuleInput {
   umbralCritico: number | null;
   duracionMin: number;
   activa: boolean;
+  /** Solo servicio detenido; sin indicar, no se cambia. */
+  repararAuto?: boolean | null;
 }
 
 // ------------------------------------------------------------------ tickets (W-24 a W-26)
@@ -614,6 +625,8 @@ export interface PanelApi {
   createInstaller(input: InstallerTokenInput): Promise<CreatedInstallerToken>;
   revokeInstaller(id: number): Promise<{ id: number }>;
   deleteInstaller(id: number): Promise<{ id: number }>;
+  /** Vuelve a mostrar el token y el comando de instalación (409 si ya no está activo). */
+  installerCommand(id: number): Promise<CreatedInstallerToken>;
   pendingAgents(): Promise<PendingAgent[]>;
   approveAgent(agentId: number): Promise<{ id: number }>;
   rejectAgent(agentId: number): Promise<{ id: number }>;
@@ -621,6 +634,8 @@ export interface PanelApi {
   alert(id: number): Promise<AlertDetail>;
   attendAlert(id: number, note?: string | null): Promise<{ id: number }>;
   resolveAlert(id: number, note?: string | null): Promise<{ id: number }>;
+  /** Inicia el servicio de una alerta de servicio detenido; devuelve el lote para seguir el resultado. */
+  startAlertService(id: number): Promise<{ lote: string }>;
   rules(): Promise<RuleItem[]>;
   saveRule(input: RuleInput): Promise<{ id: number }>;
   deleteRule(id: number): Promise<{ id: number }>;
@@ -690,6 +705,7 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     installers: () => get('/instaladores'),
     createInstaller: (input) => send('POST', '/instaladores', input),
     revokeInstaller: (id) => send('POST', `/instaladores/${id}/revocar`),
+    installerCommand: (id) => get(`/instaladores/${id}/comando`),
     deleteInstaller: (id) => send('DELETE', `/instaladores/${id}`),
     pendingAgents: () => get('/equipos-pendientes'),
     approveAgent: (id) => send('POST', `/equipos-pendientes/${id}/aprobar`),
@@ -698,6 +714,7 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     alert: (id) => get(`/alertas/${id}`),
     attendAlert: (id, note) => send('POST', `/alertas/${id}/atender`, { nota: note ?? null }),
     resolveAlert: (id, note) => send('POST', `/alertas/${id}/resolver`, { nota: note ?? null }),
+    startAlertService: (id) => send('POST', `/alertas/${id}/iniciar-servicio`),
     rules: () => get('/reglas-alerta'),
     saveRule: (input) => send('PUT', '/reglas-alerta', input),
     deleteRule: (id) => send('DELETE', `/reglas-alerta/${id}`),

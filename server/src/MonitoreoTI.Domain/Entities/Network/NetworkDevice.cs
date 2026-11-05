@@ -41,6 +41,17 @@ public class NetworkDevice : ITenantEntity
 
     /// <summary>Por qué falló el último sondeo SNMP; null si respondió.</summary>
     public string? LastError { get; set; }
+
+    /// <summary>API REST del FortiGate (decisión 76): dirección ("https://192.168.3.3:12443") y token cifrado por la aplicación.</summary>
+    public string? ApiUrl { get; set; }
+
+    public byte[]? ApiEncryptedToken { get; set; }
+
+    /// <summary>Aceptar el certificado propio del equipo (los FortiGate traen uno autofirmado).</summary>
+    public bool ApiAcceptSelfSigned { get; set; } = true;
+
+    public DateTime? ApiLastOkAt { get; set; }
+    public string? ApiLastError { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public Rack? Rack { get; set; }

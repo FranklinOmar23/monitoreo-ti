@@ -5,6 +5,8 @@ using MonitoreoTI.AgentHost;
 //   MonitoreoTI.AgentHost.exe install --server <url> --token <tok>  (lo llama el instalador, como administrador)
 //   MonitoreoTI.AgentHost.exe uninstall [--keep-data]               (lo llama el desinstalador)
 //   MonitoreoTI.AgentHost.exe snmp                                  (lo llama el agente recolector: petición JSON por stdin)
+//   MonitoreoTI.AgentHost.exe ping                                  (barrido de IP del recolector: petición JSON por stdin)
+//   MonitoreoTI.AgentHost.exe instalar-remoto                       (instala el agente en otro equipo por SMB; ver RemoteInstaller)
 //   MonitoreoTI.AgentHost.exe pty --shell powershell|cmd --cols N --rows N   (terminal remota; ver PtyHost)
 //   MonitoreoTI.AgentHost.exe escritorio                            (escritorio remoto: abre el asistente en la sesión del usuario)
 //   MonitoreoTI.AgentHost.exe asistente                             (asistente de sesión; lo abre "escritorio")
@@ -22,6 +24,10 @@ switch (command)
         return Installation.Uninstall(paths, options, Console.Out);
     case "snmp":
         return await SnmpQuery.RunAsync(Console.In, Console.Out);
+    case "ping":
+        return await IpSweep.RunAsync(Console.In, Console.Out);
+    case "instalar-remoto":
+        return await RemoteInstaller.RunAsync(Console.In, Console.Out);
     case "pty":
         return await PtyHost.RunAsync(args);
     case "escritorio":
@@ -38,6 +44,6 @@ switch (command)
         await builder.Build().RunAsync();
         return 0;
     default:
-        Console.Error.WriteLine($"Comando desconocido: {command}. Use run, install, uninstall, snmp, pty, escritorio, asistente o prueba-pantalla.");
+        Console.Error.WriteLine($"Comando desconocido: {command}. Use run, install, uninstall, snmp, ping, instalar-remoto, pty, escritorio, asistente o prueba-pantalla.");
         return 2;
 }

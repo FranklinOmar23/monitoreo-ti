@@ -140,6 +140,11 @@ public sealed class AgentCommands(IServiceScopeFactory scopes, IRealtimeNotifier
 
         await db.SaveChangesAsync(cancellationToken);
         await NotifyAsync(db, command, cancellationToken);
+
+        // Un servicio iniciado desde Centinela: su alerta se resuelve ya, sin esperar el próximo reporte del agente.
+        if (await ServiceRepair.OnCompletedAsync(db, command, cancellationToken)
+            && scope.ServiceProvider.GetService<MonitoreoTI.Infrastructure.Health.AlertEngine>() is { } engine)
+            await engine.EvaluateCompanyAsync(identity.CompanyId, cancellationToken, [command.MachineId]);
     }
 
     /// <summary>

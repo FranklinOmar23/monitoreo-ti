@@ -116,7 +116,8 @@ public sealed record PrinterSnmpInfo(
 public sealed record ComponentItem(int Id, string Type, string? Description, string? Capacity, string Health, string? Detail, DateTime UpdatedAt);
 
 /// <summary>Problema abierto del equipo con su explicación y qué hacer (motor de alertas).</summary>
-public sealed record OpenProblem(long Id, string Level, string Message, string? Detail, string? Advice, string? Source, DateTime CreatedAt);
+/// <param name="Code">Qué problema es ("servicio:Spooler"): el panel ofrece la acción que corresponde.</param>
+public sealed record OpenProblem(long Id, string Level, string Message, string? Detail, string? Advice, string? Source, DateTime CreatedAt, string? Code = null);
 
 public sealed record VolumeItem(string Drive, string? Label, decimal TotalGb, decimal FreeGb, DateTime UpdatedAt);
 

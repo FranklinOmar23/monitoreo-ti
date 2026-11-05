@@ -72,3 +72,13 @@ public enum CableType
     [EnumMember(Value = "dac")] Dac,
     [EnumMember(Value = "otro")] Other,
 }
+
+/// <summary>Cómo se vio una dirección IP la última vez.</summary>
+public enum IpSource
+{
+    [EnumMember(Value = "ping")] Ping,
+    [EnumMember(Value = "arp")] Arp,
+
+    /// <summary>La reporta el agente del equipo (solo en historial_ip).</summary>
+    [EnumMember(Value = "agente")] Agent,
+}

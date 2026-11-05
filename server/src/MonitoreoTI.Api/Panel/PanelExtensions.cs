@@ -43,6 +43,10 @@ public static class PanelExtensions
         services.AddScoped<NetworkCommands>();
         services.AddScoped<NetworkImport>();
         services.AddScoped<NetworkInsights>();
+        services.AddScoped<IpAddresses>();
+        services.AddScoped<RemoteInstalls>();
+        services.AddSingleton<IValidator<SubnetInput>, SubnetInputValidator>();
+        services.AddSingleton<IValidator<IpReservationInput>, IpReservationInputValidator>();
         services.AddScoped<Maintenances>();
         services.AddScoped<RemoteCommands>();
         services.AddScoped<RemoteAccessGuard>();
@@ -59,6 +63,8 @@ public static class PanelExtensions
         services.AddSingleton<IValidator<RackInput>, RackInputValidator>();
         services.AddSingleton<IValidator<DeviceModelInput>, DeviceModelInputValidator>();
         services.AddSingleton<IValidator<DeviceInput>, DeviceInputValidator>();
+        services.AddSingleton<IValidator<ApiTestInput>, ApiTestInputValidator>();
+        services.AddSingleton<IValidator<RemoteInstallInput>, RemoteInstallInputValidator>();
         services.AddSingleton<IValidator<PortInput>, PortInputValidator>();
         services.AddSingleton<IValidator<OutletInput>, OutletInputValidator>();
         services.AddSingleton<IValidator<CableInput>, CableInputValidator>();

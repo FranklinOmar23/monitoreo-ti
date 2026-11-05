@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
 using MonitoreoTI.Application.Agents;
+using MonitoreoTI.Application.Network;
 using MonitoreoTI.Domain.Entities.Inventory;
 using MonitoreoTI.Domain.Enums;
+using MonitoreoTI.Infrastructure.Network;
 using MonitoreoTI.Infrastructure.Persistence;
 using static MonitoreoTI.Application.Agents.TelemetryRules;
 
@@ -14,7 +16,7 @@ namespace MonitoreoTI.Infrastructure.Agents;
 /// dentro de una transacción: nunca queda un inventario a medias. La máquina y la empresa salen de la
 /// identidad autenticada, jamás del mensaje.
 /// </summary>
-public sealed class AgentInventory(IServiceScopeFactory scopes) : IAgentInventory
+public sealed class AgentInventory(IServiceScopeFactory scopes, OuiDirectory oui) : IAgentInventory
 {
     /// <summary>Tipos de componente que manda el inventario de hardware (el resto llega por otros mensajes).</summary>
     private static readonly string[] HardwareComponentTypes = ["cpu", "ram", "disco", "gpu", "placa_base", "bios", "bateria", "ventilador"];
@@ -148,6 +150,13 @@ public sealed class AgentInventory(IServiceScopeFactory scopes) : IAgentInventor
             var machine = await db.Machines.FirstAsync(m => m.Id == identity.MachineId, cancellationToken);
             if (machine.MacAddress is not null && reported.TryGetValue(machine.MacAddress, out var primary) && Trim(primary.Ip, 45) is { } ip)
                 machine.IpAddress = ip;
+
+            // Historial de direcciones IP (decisión 72): este equipo tiene estas IP ahora.
+            var seen = reported
+                .Select(r => IpRules.TryParse(r.Value.Ip, out var address) ? new IpInventory.Observation(address, r.Key, false, identity.MachineId, FromAgent: true) : null)
+                .OfType<IpInventory.Observation>()
+                .ToList();
+            await IpInventory.RecordAsync(db, oui, seen, null, DateTime.UtcNow, cancellationToken);
 
             await db.SaveChangesAsync(cancellationToken);
         }, cancellationToken);

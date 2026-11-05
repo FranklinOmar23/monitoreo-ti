@@ -11,6 +11,12 @@ public static class SnmpRules
     /// <summary>Más MAC que esto en un puerto (sin ser host de VMs) lo hacen troncal (sección 11.3).</summary>
     public const int TrunkMacThreshold = 10;
 
+    /// <summary>Primera versión del agente que entiende "sondear_ahora".</summary>
+    public static readonly Version PollNowVersion = new(0, 3, 4);
+
+    public static bool SupportsPollNow(string? agentVersion) =>
+        Version.TryParse(agentVersion?.Split('-', '+')[0], out var version) && version >= PollNowVersion;
+
     // ethernetCsmacd, iso88023Csmacd, fastEther, gigabitEthernet; fibreChannel.
     private static readonly HashSet<int> PhysicalTypes = [6, 7, 62, 69, 117, 56];
 

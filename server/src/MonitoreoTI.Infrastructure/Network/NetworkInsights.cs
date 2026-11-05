@@ -231,9 +231,76 @@ public sealed class NetworkInsights(MonitoreoDbContext db, NetworkQueries querie
                 Add(port.Id, peer, "cable");
 
         var visible = devices.Select(d => d.Id).ToHashSet();
+        var (endpoints, clients) = await EndpointsAsync(ports, ct);
         var nodes = devices.Select(d => new TopologyNode(d.Id, d.Name, d.Type, d.Status, d.BranchName,
-            ports.Values.Count(p => p.DeviceId == d.Id && p.IsTrunk))).ToList();
-        return new Topology(nodes, links.Values.Where(l => visible.Contains(l.SourceId) && visible.Contains(l.TargetId)).ToList());
+            ports.Values.Count(p => p.DeviceId == d.Id && p.IsTrunk), d.BranchId, d.ManagementIp, $"{d.Brand} {d.ModelName}".Trim(),
+            clients.GetValueOrDefault(d.Id))).ToList();
+        var readAt = devices.Max(d => d.LastPolledAt);
+        return new Topology(nodes, links.Values.Where(l => visible.Contains(l.SourceId) && visible.Contains(l.TargetId)).ToList(), endpoints, readAt);
+    }
+
+    /// <summary>Lo máximo de equipos finales en el mapa (una red grande se recorre por sucursal y VLAN).</summary>
+    private const int MaxEndpoints = 600;
+
+    /// <summary>
+    /// Equipos finales de cada puerto de acceso (decisión 74): las MAC vistas en 24 h en puertos que no son troncales ni
+    /// llevan a un access point (lo de ahí es Wi-Fi: se cuenta como clientes del AP), más los puertos asignados a mano
+    /// cuyo equipo no se ve. Las MAC aleatorias (celulares) no se dibujan.
+    /// </summary>
+    private async Task<(List<TopologyEndpoint> Endpoints, Dictionary<int, int> ApClients)> EndpointsAsync(
+        Dictionary<int, PortInfo> ports, CancellationToken ct)
+    {
+        var since = Now - RecentWindow;
+        var ids = ports.Keys.ToList();
+        var ap = await AccessPointPortsAsync(ports, ct);
+        var portRows = await db.Ports.AsNoTracking().Where(p => ids.Contains(p.Id))
+            .Select(p => new { p.Id, p.Number, p.Vlan, p.SpeedMbps }).ToDictionaryAsync(p => p.Id, ct);
+        var macs = await db.MacTable.AsNoTracking()
+            .Where(m => ids.Contains(m.PortId) && (m.LastSeenAt >= since || m.MachineId != null))
+            .ToListAsync(ct);
+        var machineIds = macs.Where(m => m.MachineId != null).Select(m => m.MachineId!.Value).Distinct().ToList();
+        var machines = await db.Machines.AsNoTracking().Where(m => machineIds.Contains(m.Id))
+            .Select(m => new { m.Id, m.Name, m.Type, m.Status, m.IpAddress, HasAgent = m.Agent != null })
+            .ToDictionaryAsync(m => m.Id, ct);
+
+        var seenMacs = macs.Select(m => m.MacAddress).Distinct().ToList();
+        var hostnames = (await db.IpAddresses.AsNoTracking()
+                .Where(r => r.MacAddress != null && r.Hostname != null && seenMacs.Contains(r.MacAddress))
+                .Select(r => new { r.MacAddress, r.Hostname, r.LastSeenAt })
+                .ToListAsync(ct))
+            .GroupBy(r => r.MacAddress!)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.LastSeenAt).First().Hostname);
+
+        // Clientes Wi-Fi: las MAC que se ven por el puerto que lleva a cada AP.
+        var apDevices = ports.Values.Where(p => p.DeviceType == DeviceType.AccessPoint).Select(p => p.DeviceId).ToHashSet();
+        var clients = new Dictionary<int, int>();
+        foreach (var apId in apDevices)
+        {
+            var apLinkPorts = ap.Where(id => ports[id].DeviceId != apId).ToHashSet();
+            clients[apId] = macs.Count(m => apLinkPorts.Contains(m.PortId) && m.LastSeenAt >= since);
+        }
+
+        var list = new List<TopologyEndpoint>();
+        foreach (var m in macs.OrderBy(m => ports[m.PortId].DeviceName).ThenBy(m => portRows[m.PortId].Number))
+        {
+            var port = ports[m.PortId];
+            if (port.IsTrunk || ap.Contains(port.Id) || !port.IsActive || (m.MachineId is null && SnmpRules.IsRandomMac(m.MacAddress)))
+                continue;
+            var seen = m.LastSeenAt >= since;
+            // Una MAC conocida que ya no se ve solo cuenta si el puerto se asignó a mano (documentado).
+            if (!seen && !port.IsManual)
+                continue;
+            var machine = m.MachineId is int id ? machines.GetValueOrDefault(id) : null;
+            var (category, inferred) = EndpointRules.Category(machine is null ? null : Text(machine.Type), m.Vendor);
+            var row = portRows[m.PortId];
+            list.Add(new TopologyEndpoint(
+                port.DeviceId, port.Id, row.Number, port.PortName, m.Vlan ?? row.Vlan, row.SpeedMbps, m.MacAddress, m.IpAddress ?? machine?.IpAddress,
+                m.Vendor, machine?.Id, machine?.Name, machine is null ? null : Text(machine.Status), machine?.HasAgent ?? false,
+                category, inferred, seen ? "detectado" : "documentado", m.FirstSeenAt, m.LastSeenAt, hostnames.GetValueOrDefault(m.MacAddress)));
+            if (list.Count >= MaxEndpoints)
+                break;
+        }
+        return (list, clients);
     }
 
     // ------------------------------------------------------------------ diferencias (W-66)

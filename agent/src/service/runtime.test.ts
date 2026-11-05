@@ -1,3 +1,4 @@
+import { createCipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 import type { Envelope } from '@monitoreoti/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ensureCredential } from './bootstrap';
@@ -145,6 +146,7 @@ describe('AgentRuntime', () => {
   const createRuntime = (
     override: Partial<Collectors> = {},
     snmp?: ConstructorParameters<typeof AgentRuntime>[0]['snmp'],
+    ipSweep?: ConstructorParameters<typeof AgentRuntime>[0]['ipSweep'],
   ) =>
     new AgentRuntime({
       outbox,
@@ -152,6 +154,7 @@ describe('AgentRuntime', () => {
       log: vi.fn(),
       startupDelaysMs: { hardware: 1_000, software: 2_000, interfaces: 3_000 },
       snmp,
+      ipSweep,
       createGateway: (callbacks) => {
         onReady = callbacks.onReady;
         onMessage = callbacks.onMessage;
@@ -249,6 +252,66 @@ describe('AgentRuntime', () => {
       datos: { recolector: null },
     });
     expect(runtime.snmpDevices).toBe(0);
+    runtime.stop();
+  });
+
+  it('atiende el pedido de barrido de IP del servidor', async () => {
+    online = true;
+    const sweep = vi.fn(() => Promise.resolve({ ok: true, responden: ['10.0.0.1'] }));
+    const runtime = createRuntime({}, undefined, sweep);
+    runtime.start();
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false, collector: null });
+
+    onMessage({
+      v: 1,
+      tipo: 'barrido_ip',
+      id: 'b1',
+      ts: new Date().toISOString(),
+      datos: { subred_id: 8, ips: ['10.0.0.1', '10.0.0.2'] },
+    });
+    await flush();
+    await flush();
+
+    expect(sweep).toHaveBeenCalledWith(['10.0.0.1', '10.0.0.2']);
+    expect(sent.find((m) => m.tipo === 'barrido_ip_resultado')?.datos).toMatchObject({ subredId: 8, ok: true });
+    runtime.stop();
+  });
+
+  it('prueba la API del FortiGate cuando lo pide el panel y responde con el mismo id, sin el token', async () => {
+    online = true;
+    const credential = '7.vector-de-prueba-para-el-agente';
+    const hash = createHash('sha256').update(credential, 'utf8').digest('hex');
+    const key = Buffer.from(hkdfSync('sha256', Buffer.from(hash, 'hex'), Buffer.alloc(0), 'monitoreoti/snmp/v1', 32));
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', key, nonce);
+    const data = Buffer.concat([
+      cipher.update(JSON.stringify({ token: 'tok3n-de-prueba-123456' }), 'utf8'),
+      cipher.final(),
+    ]);
+    const sealed = Buffer.concat([nonce, data, cipher.getAuthTag()]).toString('base64');
+    const fortiHttp = vi.fn(() =>
+      Promise.resolve({ status: 200, body: JSON.stringify({ version: 'v7.4.4', results: { hostname: 'FGT' } }) }),
+    );
+    const runtime = createRuntime({}, { credential, query: () => Promise.resolve({ ok: true }), fortiHttp });
+    runtime.start();
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false, collector: null });
+
+    onMessage({
+      v: 1,
+      tipo: 'probar_api',
+      id: 'p1',
+      ts: new Date().toISOString(),
+      datos: { solicitud_id: 'abc', url: 'https://10.0.0.1:12443', token: sealed, aceptar_certificado: true },
+    });
+    await flush();
+    await flush();
+
+    expect(fortiHttp).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 'tok3n-de-prueba-123456', acceptSelfSigned: true }),
+    );
+    const reply = sent.find((m) => m.tipo === 'api_prueba_resultado');
+    expect(reply?.datos).toMatchObject({ solicitudId: 'abc', ok: true, nombre: 'FGT', version: 'v7.4.4' });
+    expect(JSON.stringify(sent)).not.toContain('tok3n');
     runtime.stop();
   });
 

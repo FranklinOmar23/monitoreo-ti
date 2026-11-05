@@ -98,7 +98,7 @@ export function BarList({ items, label }: { items: readonly { key: string; count
 /** Nombre del equipo como botón que abre su ficha. */
 function MachineLink({ id, name, ctx }: { id: number; name: string; ctx: ReportContext }) {
   return (
-    <button type="button" className="row-name" onClick={() => ctx.onOpenEquipo(id)}>
+    <button type="button" className="row-name mono" onClick={() => ctx.onOpenEquipo(id)}>
       {name}
     </button>
   );
@@ -542,6 +542,7 @@ const performance = define<PerformanceReport>({
           <Card title="Uso promedio de la flota">
             <LineChart
               xLabels={data.trend.map((d) => dayLabel(d.date))}
+              pointLabels={data.trend.map((d) => d.date)}
               series={[
                 { name: 'CPU', color: 'cpu', values: data.trend.map((d) => d.cpu ?? 0) },
                 { name: 'RAM', color: 'ram', values: data.trend.map((d) => d.ram ?? 0), area: true },

@@ -64,6 +64,11 @@ public class MonitoreoDbContext(DbContextOptions<MonitoreoDbContext> options, IT
     public DbSet<NetworkOutlet> NetworkOutlets => Set<NetworkOutlet>();
     public DbSet<Cable> Cables => Set<Cable>();
     public DbSet<MachineNetworkLocation> MachineNetworkLocations => Set<MachineNetworkLocation>();
+    public DbSet<Subnet> Subnets => Set<Subnet>();
+    public DbSet<IpAddressEntry> IpAddresses => Set<IpAddressEntry>();
+    public DbSet<IpReservation> IpReservations => Set<IpReservation>();
+    public DbSet<IpHistoryEntry> IpHistory => Set<IpHistoryEntry>();
+    public DbSet<RemoteInstall> RemoteInstalls => Set<RemoteInstall>();
 
     public DbSet<Metric> Metrics => Set<Metric>();
     public DbSet<HourlyMetric> HourlyMetrics => Set<HourlyMetric>();
@@ -103,6 +108,13 @@ public class MonitoreoDbContext(DbContextOptions<MonitoreoDbContext> options, IT
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
+    private static readonly ValueConverter<DateTime, DateTime> UtcConverter =
+        new(v => v.Kind == DateTimeKind.Local ? v.ToUniversalTime() : v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+
+    private static readonly ValueConverter<DateTime?, DateTime?> NullableUtcConverter =
+        new(v => v.HasValue && v.Value.Kind == DateTimeKind.Local ? v.Value.ToUniversalTime() : v,
+            v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+
     /// <summary>
     /// Enums como texto VARCHAR con el valor de [EnumMember]; fechas como DATETIME2(0).
     /// </summary>
@@ -121,6 +133,9 @@ public class MonitoreoDbContext(DbContextOptions<MonitoreoDbContext> options, IT
             else if (clrType == typeof(DateTime))
             {
                 property.SetColumnType("datetime2(0)");
+                // La base guarda UTC sin zona: al leer se marca como UTC para que la API la mande con "Z" y el panel la
+                // muestre en la hora local (sin esto llegaba como hora local y se veía adelantada).
+                property.SetValueConverter(property.ClrType == typeof(DateTime) ? UtcConverter : NullableUtcConverter);
             }
         }
     }

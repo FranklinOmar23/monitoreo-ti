@@ -112,4 +112,27 @@ public sealed class CollectorConfigPublisher(AgentConnectionRegistry registry, I
             }
         }
     }
+
+    public async Task<bool> PollNowAsync(int companyId, int agentId, int deviceId, bool agentSupportsPollNow, CancellationToken cancellationToken)
+    {
+        if (registry.Get(agentId) is not { } connection || connection.Identity.CompanyId != companyId)
+            return false;
+        try
+        {
+            if (agentSupportsPollNow)
+                await connection.SendAsync("sondear_ahora", new { dispositivo_id = deviceId }, cancellationToken);
+            else
+            {
+                // Al recibir la lista, el agente reprograma sus sondeos y el primero sale a los pocos segundos.
+                var config = await collectors.ConfigAsync(connection.Identity, cancellationToken);
+                await connection.SendAsync("config_actualizada", new { recolector = AgentGateway.CollectorMessage(config) }, cancellationToken);
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Net.WebSockets.WebSocketException or ObjectDisposedException)
+        {
+            logger.LogInformation("Agente {AgentId}: no se pudo pedir el sondeo del dispositivo {DeviceId}.", agentId, deviceId);
+            return false;
+        }
+    }
 }

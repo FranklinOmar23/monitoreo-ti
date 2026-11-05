@@ -127,7 +127,9 @@ public sealed record EnrollmentTokenItem(
     DateTime CreatedAt,
     string? CreatedBy,
     /// <summary>activo, vencido, agotado o revocado.</summary>
-    string State);
+    string State,
+    /// <summary>Se puede volver a ver el comando: está activo y se guardó cifrado (los tokens anteriores no).</summary>
+    bool CanShowCommand = false);
 
 public sealed record PendingAgentItem(int AgentId, int MachineId, string MachineName, string? IpAddress, string? MacAddress,
     string? OperatingSystem, string BranchName, DateTime RegisteredAt);

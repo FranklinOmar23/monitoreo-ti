@@ -107,6 +107,8 @@ internal sealed class AlertRuleConfiguration : IEntityTypeConfiguration<AlertRul
         b.Property(x => x.CriticalThreshold).HasColumnName("umbral_critico").HasPrecision(10, 2);
         b.Property(x => x.DurationMinutes).HasColumnName("duracion_min");
         b.Property(x => x.IsActive).HasColumnName("activa");
+        b.Property(x => x.AutoRepair).HasColumnName("reparar_auto");
+        b.Property(x => x.AutoRepairUserId).HasColumnName("reparar_usuario_id");
 
         b.HasOne<Branch>().WithMany()
             .HasForeignKey(x => new { x.CompanyId, x.BranchId })

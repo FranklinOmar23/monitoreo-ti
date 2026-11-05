@@ -16,9 +16,10 @@ import { Loading, ErrorState } from '@components/AsyncState';
 import { Modal } from '@components/Modal';
 import { usePanelApi } from '../../data/PanelData';
 import { CABLE_TYPE_LABEL, DEVICE_TYPE_LABEL, PORT_TYPE_LABEL, keysOf } from './netLabels';
+import { ApiTestButton, offersApi, suggestedApiUrl } from './FortiGateApi';
 
 /** Guardar y refrescar todo lo del data center (las vistas comparten la clave ['red']). */
-function useNetworkSave<T>(fn: (value: T) => Promise<{ id: number }>, onSaved: (id: number) => void) {
+export function useNetworkSave<T>(fn: (value: T) => Promise<{ id: number }>, onSaved: (id: number) => void) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: fn,
@@ -29,7 +30,7 @@ function useNetworkSave<T>(fn: (value: T) => Promise<{ id: number }>, onSaved: (
   });
 }
 
-function FormModal({
+export function FormModal({
   id,
   title,
   pending,
@@ -80,10 +81,10 @@ function FormModal({
   );
 }
 
-const numberOrNull = (value: string) => (value.trim() === '' ? null : Number(value));
-const textOrNull = (value: string) => value.trim() || null;
+export const numberOrNull = (value: string) => (value.trim() === '' ? null : Number(value));
+export const textOrNull = (value: string) => value.trim() || null;
 
-function BranchSelect({
+export function BranchSelect({
   value,
   onChange,
   disabled,
@@ -406,12 +407,17 @@ export function DeviceForm({
     auth: '',
     priv: '',
     recolectorId: device?.collectorId ? String(device.collectorId) : '',
+    apiUrl: device?.apiUrl ?? '',
+    apiToken: '',
+    apiCert: device?.apiAcceptSelfSigned ?? true,
   });
   const model = models.data?.find((m) => String(m.id) === form.modeloId);
   const rack = racks.data?.find((r) => String(r.id) === form.gabineteId);
   // Si va en un gabinete, la sucursal es la del gabinete.
   const branchId = rack ? String(rack.branchId) : form.sucursalId;
   const active = model?.isActiveDevice ?? device?.isActiveDevice ?? true;
+  const withApi = active && offersApi(model?.type ?? device?.type, device?.apiUrl);
+  const apiSuggestion = suggestedApiUrl(form.ipGestion);
   // Recolectores posibles: equipos con agente de la sucursal del dispositivo.
   const collectors = useQuery({
     queryKey: ['red', 'recolectores', branchId],
@@ -433,6 +439,9 @@ export function DeviceForm({
         snmpClaveAutenticacion: active && form.auth ? form.auth : null,
         snmpClavePrivacidad: active && form.priv ? form.priv : null,
         recolectorId: active ? numberOrNull(form.recolectorId) : null,
+        apiUrl: withApi ? form.apiUrl.trim() || null : null,
+        apiToken: withApi && form.apiToken.trim() ? form.apiToken.trim() : null,
+        apiAceptarCertificado: form.apiCert,
       }),
     (id) => {
       onSaved?.(id);
@@ -592,6 +601,75 @@ export function DeviceForm({
               )}
             </div>
           </fieldset>
+          {withApi && (
+            <fieldset className="form-span snmp-fieldset">
+              <legend>API REST del FortiGate (opcional)</legend>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Dirección</span>
+                  <input
+                    maxLength={200}
+                    autoComplete="off"
+                    value={form.apiUrl}
+                    placeholder={apiSuggestion ?? 'https://IP:12443'}
+                    onChange={(e) => setForm({ ...form, apiUrl: e.target.value })}
+                  />
+                </label>
+                <span className="muted snmp-note">
+                  {!form.apiUrl && apiSuggestion ? (
+                    <button
+                      type="button"
+                      className="link-quiet"
+                      onClick={() => setForm({ ...form, apiUrl: apiSuggestion })}
+                    >
+                      Usar {apiSuggestion}
+                    </button>
+                  ) : (
+                    'Vacía: sin API (todo sigue por SNMP, ping y NetBIOS).'
+                  )}
+                </span>
+                <label className="field">
+                  <span>Token del usuario API</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    maxLength={128}
+                    value={form.apiToken}
+                    placeholder={device?.hasApiToken ? 'Guardado: vacío lo conserva' : 'Pegue el token'}
+                    onChange={(e) => setForm({ ...form, apiToken: e.target.value })}
+                  />
+                </label>
+                <label className="check snmp-note">
+                  <input
+                    type="checkbox"
+                    checked={form.apiCert}
+                    onChange={(e) => setForm({ ...form, apiCert: e.target.checked })}
+                  />
+                  Aceptar el certificado propio del equipo
+                </label>
+                <div className="form-span">
+                  {device ? (
+                    <ApiTestButton
+                      deviceId={device.id}
+                      disabled={!form.apiUrl.trim() && !device.apiUrl && !apiSuggestion}
+                      input={{
+                        apiUrl: form.apiUrl.trim() || apiSuggestion,
+                        apiToken: form.apiToken.trim() || null,
+                        apiAceptarCertificado: form.apiCert,
+                      }}
+                    />
+                  ) : (
+                    <span className="muted">Guarde el dispositivo para poder probar la API.</span>
+                  )}
+                  <p className="muted api-help">
+                    Lee el DHCP (concesiones, rango y reservas) y los dispositivos que identifica el FortiGate. Usuario
+                    REST API de solo lectura con la IP del recolector en Trusted Hosts. El token se guarda cifrado y no
+                    se vuelve a mostrar.
+                  </p>
+                </div>
+              </div>
+            </fieldset>
+          )}
         </>
       )}
       {!device && model && (

@@ -202,7 +202,7 @@ public sealed class AgentGatewayTests(TestDatabase database) : IAsyncLifetime
         _api.Factory.Services.GetServices<IHostedService>().OfType<AgentPresenceService>().Single().TickAsync(CancellationToken.None);
 
     private Task MakeContactOldAsync(RegisteredAgent agent) =>
-        _api.ExecuteAsync("UPDATE dbo.agentes SET ultimo_contacto = DATEADD(MINUTE, -10, SYSUTCDATETIME()) WHERE id = @id", ("@id", agent.AgentId));
+        _api.ExecuteAsync("UPDATE dbo.agentes SET ultimo_contacto = DATEADD(HOUR, -7, SYSUTCDATETIME()) WHERE id = @id", ("@id", agent.AgentId));
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {

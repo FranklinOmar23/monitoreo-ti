@@ -18,7 +18,8 @@ namespace MonitoreoTI.Infrastructure.Network;
 /// Las claves SNMP se cifran con la llave de la aplicación (AES-GCM) y nunca se devuelven ni se auditan.
 /// </summary>
 public sealed class NetworkCommands(
-    MonitoreoDbContext db, NetworkQueries queries, IAuditTrail audit, SecretProtector protector, ICurrentUser user, ICollectorConfigPublisher collectors)
+    MonitoreoDbContext db, NetworkQueries queries, IAuditTrail audit, SecretProtector protector, ICurrentUser user, ICollectorConfigPublisher collectors,
+    IFortiGateApiTester apiTester)
 {
     private async Task<bool> CanUseBranchAsync(int branchId, CancellationToken ct)
     {
@@ -137,8 +138,6 @@ public sealed class NetworkCommands(
                 return CommandResult.NotFound();
             if (model.CompanyId is null)
                 return CommandResult.Invalid("Los modelos del catálogo base no se editan: cree uno propio.");
-            if (model.PortCount != input.CantidadPuertos && await db.NetworkDevices.AnyAsync(d => d.ModelId == modelId, ct))
-                return CommandResult.Invalid("Hay dispositivos de este modelo: la cantidad de puertos ya no se puede cambiar.");
         }
         var brand = input.Marca.Trim();
         var name = input.Modelo.Trim();
@@ -146,6 +145,17 @@ public sealed class NetworkCommands(
             return CommandResult.Conflict("Ese modelo ya está en el catálogo de la empresa.");
 
         var before = model is null ? null : ModelSnapshot(model);
+        // Otra cantidad o tipo de puertos en un modelo en uso: sus dispositivos se ajustan (decisión 74).
+        var portsChanged = model is not null
+            && (model.PortCount != input.CantidadPuertos || model.PortDescription != Clean(input.TipoPuertos));
+        var adjusted = 0;
+        if (portsChanged && await ResizePortsAsync(model!.Id, input.CantidadPuertos, Clean(input.TipoPuertos),
+                Parse<DeviceType>(input.Tipo) == DeviceType.PatchPanel, ct) is { } resize)
+        {
+            if (resize.Error is not null)
+                return resize.Error;
+            adjusted = resize.Devices;
+        }
         model ??= db.DeviceModels.Add(new DeviceModel()).Entity;
         model.Brand = brand;
         model.ModelName = name;
@@ -156,8 +166,44 @@ public sealed class NetworkCommands(
         model.IsActiveDevice = input.EsActivo;
         await db.SaveChangesAsync(ct);
 
-        await audit.RecordAsync(before is null ? "modelo.crear" : "modelo.editar", "modelos_dispositivo", model.Id.ToString(), before, ModelSnapshot(model), ct);
+        await audit.RecordAsync(before is null ? "modelo.crear" : "modelo.editar", "modelos_dispositivo", model.Id.ToString(), before,
+            adjusted > 0 ? new { modelo = ModelSnapshot(model), dispositivosAjustados = adjusted } : ModelSnapshot(model), ct);
         return CommandResult.Ok(model.Id);
+    }
+
+    /// <summary>
+    /// Lleva los puertos de los dispositivos de un modelo a la cantidad y los tipos nuevos: agrega los que faltan y
+    /// quita los que sobran solo si están libres (sin cable, sin enlace detectado y sin asignación a mano). No guarda.
+    /// </summary>
+    private async Task<(CommandResult? Error, int Devices)?> ResizePortsAsync(int modelId, int count, string? description, bool patchPanel, CancellationToken ct)
+    {
+        var devices = await db.NetworkDevices.Include(d => d.Ports).Where(d => d.ModelId == modelId).ToListAsync(ct);
+        if (devices.Count == 0)
+            return null;
+        var plan = PortPlan.FromModel(count, description, patchPanel);
+        var extraIds = devices.SelectMany(d => d.Ports.Where(p => p.Number > count)).Select(p => p.Id).ToList();
+        if (extraIds.Count > 0)
+        {
+            var busy = await db.Cables.AnyAsync(c => extraIds.Contains(c.PortAId) || (c.PortBId != null && extraIds.Contains(c.PortBId.Value)), ct)
+                || await db.NetworkLinks.AnyAsync(l => extraIds.Contains(l.SourcePortId) || extraIds.Contains(l.TargetPortId), ct)
+                || devices.SelectMany(d => d.Ports).Any(p => p.Number > count && p.IsManualAssignment);
+            if (busy)
+                return (CommandResult.Invalid($"Algún dispositivo de este modelo tiene cables o equipos asignados en los puertos que sobran (después del {count}): quítelos antes de reducir."), 0);
+        }
+        foreach (var device in devices)
+        {
+            foreach (var extra in device.Ports.Where(p => p.Number > count).ToList())
+                db.Ports.Remove(extra);
+            foreach (var planned in plan)
+            {
+                var port = device.Ports.FirstOrDefault(p => p.Number == planned.Number);
+                if (port is null)
+                    device.Ports.Add(new Port { Number = planned.Number, Name = planned.Name, Type = Parse<PortType>(planned.Type) });
+                else
+                    port.Type = Parse<PortType>(planned.Type);
+            }
+        }
+        return (null, devices.Count);
     }
 
     private static object ModelSnapshot(DeviceModel m) => new
@@ -204,6 +250,7 @@ public sealed class NetworkCommands(
             CollectorAgentId = input.RecolectorId,
         };
         ApplySnmp(device, input);
+        ApplyApi(device, input);
         foreach (var port in PortPlan.FromModel(model.PortCount, model.PortDescription, model.Type == DeviceType.PatchPanel))
             device.Ports.Add(new Port { Number = port.Number, Name = port.Name, Type = Parse<PortType>(port.Type) });
 
@@ -228,6 +275,8 @@ public sealed class NetworkCommands(
             return CommandResult.Conflict("Ya hay un dispositivo con ese nombre.");
         if (device.Status == NetworkDeviceStatus.Passive && input.SnmpClaveAutenticacion is not null)
             return CommandResult.Invalid("Un equipo pasivo (patch panel) no tiene SNMP.");
+        if (device.Status == NetworkDeviceStatus.Passive && FortiGateRules.NormalizeUrl(input.ApiUrl) is not null)
+            return CommandResult.Invalid("Un equipo pasivo (patch panel) no tiene API.");
         if (await ValidateCollectorAsync(input.RecolectorId, input.SucursalId, device.Status != NetworkDeviceStatus.Passive, ct) is { } badCollector)
             return badCollector;
 
@@ -241,6 +290,7 @@ public sealed class NetworkCommands(
         device.Firmware = Clean(input.Firmware);
         device.CollectorAgentId = input.RecolectorId;
         ApplySnmp(device, input);
+        ApplyApi(device, input);
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync("dispositivo.editar", "dispositivos_red", id.ToString(), before, DeviceSnapshot(device), ct);
@@ -317,6 +367,26 @@ public sealed class NetworkCommands(
         return ok ? null : CommandResult.Invalid("El recolector debe ser un equipo con agente de la misma sucursal.");
     }
 
+    /// <summary>"Sondear ahora" (red.editar): el recolector consulta el dispositivo sin esperar su intervalo.</summary>
+    public async Task<CommandResult> PollNowAsync(int id, CancellationToken ct)
+    {
+        var device = await (await queries.VisibleDevicesAsync(ct)).AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (device is null)
+            return CommandResult.NotFound();
+        if (device.Status == NetworkDeviceStatus.Passive)
+            return CommandResult.Invalid("Un equipo pasivo no se consulta por SNMP.");
+        if (device.CollectorAgentId is not int agentId || device.ManagementIp is null || device.SnmpUser is null || device.SnmpEncryptedCredential is null)
+            return CommandResult.Invalid("Para sondearlo necesita IP de gestión, usuario y claves SNMP, y un recolector.");
+        var agent = await db.Agents.AsNoTracking().Where(a => a.Id == agentId)
+            .Select(a => new { a.Version, Name = db.Machines.Where(m => m.Id == a.MachineId).Select(m => m.Name).FirstOrDefault() })
+            .FirstOrDefaultAsync(ct);
+        if (!await collectors.PollNowAsync(user.CompanyId, agentId, id, SnmpRules.SupportsPollNow(agent?.Version), ct))
+            return CommandResult.Conflict(agent?.Name is { } name
+                ? $"El recolector {name} no está conectado; se sondeará cuando vuelva."
+                : "El recolector no está conectado; se sondeará cuando vuelva.");
+        return CommandResult.Ok(id);
+    }
+
     /// <summary>
     /// Marca como recolector a todo agente con dispositivos asignados (y desmarca al que se quedó sin ninguno) y le
     /// manda su lista nueva si está conectado.
@@ -348,6 +418,86 @@ public sealed class NetworkCommands(
         }
     }
 
+    /// <summary>
+    /// API REST (decisión 76): sin dirección se quita todo; con dirección, un token nuevo reemplaza al guardado y sin
+    /// token se conserva. Un cambio de dirección borra el estado de la última lectura.
+    /// </summary>
+    private void ApplyApi(NetworkDevice device, DeviceInput input)
+    {
+        var url = FortiGateRules.NormalizeUrl(input.ApiUrl);
+        if (url is null)
+        {
+            device.ApiUrl = null;
+            device.ApiEncryptedToken = null;
+            device.ApiLastOkAt = null;
+            device.ApiLastError = null;
+            return;
+        }
+        if (url != device.ApiUrl)
+        {
+            device.ApiLastOkAt = null;
+            device.ApiLastError = null;
+        }
+        device.ApiUrl = url;
+        device.ApiAcceptSelfSigned = input.ApiAceptarCertificado;
+        if (Clean(input.ApiToken) is { } token)
+        {
+            device.ApiEncryptedToken = Encoding.UTF8.GetBytes(protector.Protect(token));
+            device.ApiLastOkAt = null;
+            device.ApiLastError = null;
+        }
+    }
+
+    /// <summary>
+    /// "Probar API" (red.editar): el recolector consulta system/status del FortiGate con la dirección y el token del
+    /// formulario (sin token, el guardado) y devuelve qué respondió. Si se probó lo guardado, queda como estado.
+    /// El token nunca se devuelve ni se audita.
+    /// </summary>
+    public async Task<(CommandResult? Error, ApiTestResult? Result)> TestApiAsync(int id, ApiTestInput input, CancellationToken ct)
+    {
+        var device = await (await queries.VisibleDevicesAsync(ct)).FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (device is null)
+            return (CommandResult.NotFound(), null);
+        var url = FortiGateRules.NormalizeUrl(input.ApiUrl) ?? device.ApiUrl ?? FortiGateRules.SuggestedUrl(device.ManagementIp);
+        if (url is null)
+            return (CommandResult.Invalid("Indique la dirección de la API (https://IP:puerto)."), null);
+        var typed = Clean(input.ApiToken);
+        var token = typed ?? (device.ApiEncryptedToken is null ? null : protector.Unprotect(Encoding.UTF8.GetString(device.ApiEncryptedToken)));
+        if (token is null)
+            return (CommandResult.Invalid("Pegue el token del usuario API del FortiGate."), null);
+        if (device.CollectorAgentId is not int agentId)
+            return (CommandResult.Invalid("Asigne un recolector: la prueba la hace el equipo con agente que llega al FortiGate."), null);
+
+        var agent = await db.Agents.AsNoTracking().Where(a => a.Id == agentId)
+            .Select(a => new { a.Version, a.TokenHash, Name = db.Machines.Where(m => m.Id == a.MachineId).Select(m => m.Name).FirstOrDefault() })
+            .FirstOrDefaultAsync(ct);
+        if (agent is null)
+            return (CommandResult.Invalid("El recolector ya no existe."), null);
+        if (!FortiGateRules.SupportsApi(agent.Version))
+            return (CommandResult.Conflict(
+                $"El agente de {agent.Name ?? "el recolector"} es la versión {agent.Version ?? "?"}; la API necesita la {FortiGateRules.ApiVersion} o superior. Actualícelo."), null);
+
+        var sealedToken = SnmpCredentialSeal.Seal(agent.TokenHash, JsonSerializer.Serialize(new { token }));
+        var result = await apiTester.TestAsync(user.CompanyId, agentId, url, sealedToken, input.ApiAceptarCertificado, ct);
+        if (result is null)
+            return (CommandResult.Conflict(agent.Name is { } name
+                ? $"El recolector {name} no está conectado o no respondió a tiempo."
+                : "El recolector no está conectado o no respondió a tiempo."), null);
+
+        if (typed is null && url == device.ApiUrl)
+        {
+            if (result.Ok)
+            {
+                device.ApiLastOkAt = DateTime.UtcNow;
+                device.ApiLastError = null;
+            }
+            else
+                device.ApiLastError = result.Error is { Length: > 300 } e ? e[..300] : result.Error;
+            await db.SaveChangesAsync(ct);
+        }
+        return (null, result);
+    }
+
     /// <summary>Lo que se audita del dispositivo: nunca las claves SNMP, solo si hay credencial.</summary>
     private static object DeviceSnapshot(NetworkDevice d) => new
     {
@@ -361,6 +511,8 @@ public sealed class NetworkCommands(
         snmpUsuario = d.SnmpUser,
         snmpCredencial = d.SnmpEncryptedCredential is not null,
         recolectorId = d.CollectorAgentId,
+        apiUrl = d.ApiUrl,
+        apiToken = d.ApiEncryptedToken is not null,
     };
 
     // ------------------------------------------------------------------ puertos

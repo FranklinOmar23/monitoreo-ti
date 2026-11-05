@@ -38,7 +38,7 @@ export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps)
       />
 
       {branches.isPending ? (
-        <Loading />
+        <Loading variant="cards" />
       ) : branches.isError ? (
         <ErrorState error={branches.error} onRetry={() => void branches.refetch()} />
       ) : branches.data.length === 0 ? (

@@ -65,7 +65,8 @@ public sealed class SnmpCollectors(
                 logger.LogWarning("Dispositivo {DeviceId}: no se pudieron abrir sus claves SNMP; no se consulta.", d.Id);
                 continue;
             }
-            list.Add(new CollectorDevice(d.Id, d.Name, d.ManagementIp!, Text(d.Type), d.SnmpUser!, SnmpCredentialSeal.Seal(hash, secret)));
+            list.Add(new CollectorDevice(d.Id, d.Name, d.ManagementIp!, Text(d.Type), d.SnmpUser!, SnmpCredentialSeal.Seal(hash, secret),
+                Api: SealApi(d, hash)));
         }
 
         // Impresoras (sin agente): v3 o v2c según la impresora; solo se leen sus consumibles.
@@ -86,6 +87,20 @@ public sealed class SnmpCollectors(
                 m.SnmpVersion!, "impresora"));
         }
         return list.Count == 0 ? null : new CollectorConfig(IntervalSeconds, list);
+    }
+
+    /// <summary>El token de la API, sellado para el recolector; null si no tiene o no se pudo abrir.</summary>
+    private CollectorApi? SealApi(NetworkDevice d, string agentTokenHash)
+    {
+        if (d.ApiUrl is null || d.ApiEncryptedToken is null)
+            return null;
+        var token = protector.Unprotect(Encoding.UTF8.GetString(d.ApiEncryptedToken));
+        if (token is null)
+        {
+            logger.LogWarning("Dispositivo {DeviceId}: no se pudo abrir el token de su API; se consulta solo por SNMP.", d.Id);
+            return null;
+        }
+        return new CollectorApi(d.ApiUrl, SnmpCredentialSeal.Seal(agentTokenHash, JsonSerializer.Serialize(new { token })), d.ApiAcceptSelfSigned);
     }
 
     public async Task SaveResultAsync(AgentIdentity identity, SnmpResultadoData data, DateTime sampledAtUtc, CancellationToken cancellationToken)
@@ -113,10 +128,12 @@ public sealed class SnmpCollectors(
         var previousStatus = device.Status;
         if (!data.Ok)
         {
+            var previousError = device.LastError;
             device.LastError = Cut(data.Error ?? "El dispositivo no respondió por SNMP.", 300);
             device.Status = NetworkDeviceStatus.NotResponding;
             await db.SaveChangesAsync(cancellationToken);
-            if (previousStatus != device.Status)
+            // Un equipo recién registrado ya está "sin respuesta": el panel se entera por el error nuevo, no por el estado.
+            if (previousStatus != device.Status || previousError != device.LastError)
                 await notifier.PortStatusChangedAsync(identity.CompanyId, device.BranchId, device.Id, null, Text(device.Status), cancellationToken);
             return;
         }
@@ -192,6 +209,11 @@ public sealed class SnmpCollectors(
 
         await SaveLinksAsync(db, device, neighbors, sampledAtUtc, cancellationToken);
         var moved = await SaveMacTableAsync(db, device, macsByPort, data.Arp ?? [], sampledAtUtc, cancellationToken);
+        // La ARP del equipo (sobre todo la del firewall, que es la puerta de enlace de todas las VLAN) alimenta el
+        // inventario de direcciones IP de las subredes registradas (decisión 72).
+        // Con las interfaces del mismo sondeo se sabe en qué VLAN o interfaz está cada IP.
+        var ifNames = (data.Interfaces ?? []).GroupBy(f => f.Indice).ToDictionary(g => g.Key, g => g.First().Nombre ?? g.First().Alias);
+        await IpInventory.RecordAsync(db, oui, IpInventory.FromArp(data.Arp ?? [], index => ifNames.GetValueOrDefault(index)), null, sampledAtUtc, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         foreach (var (machine, from, to) in moved)

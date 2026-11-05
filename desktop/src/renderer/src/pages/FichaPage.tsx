@@ -9,9 +9,10 @@ import { metricLevel } from '@components/MiniBar';
 import { Sparkline } from '@components/Sparkline';
 import { StatusBadge } from '@components/StatusBadge';
 import { Tabs, type TabItem } from '@components/Tabs';
-import { clock, dateTime, megabytes, timeAgo, typeLabel, usedOfTotal, whole } from '../data/format';
+import { clock, dateTime, megabytes, timeAgo, typeLabel, usedOfTotal, whole, shortDateTime } from '../data/format';
 import { usePanelApi, useRealtime } from '../data/PanelData';
 import { FichaTabs } from './FichaTabs';
+import { serviceFromAlertCode, StartServiceButton } from './remoto/StartServiceButton';
 
 const RANGES: { value: MetricRange; label: string; title: string }[] = [
   { value: '1h', label: '1H', title: 'última hora' },
@@ -70,6 +71,8 @@ interface HealthRow {
   name: string;
   caption: string | null;
   health: Health;
+  /** Texto del estado cuando no es una salud (ej. "Solo inventario" en la tarjeta de video). */
+  stateLabel?: string;
 }
 
 interface MetricCardProps {
@@ -155,7 +158,7 @@ export function FichaPage({
     });
   }, [realtime, machineId, queries]);
 
-  if (detail.isPending) return <Loading />;
+  if (detail.isPending) return <Loading variant="detail" />;
   if (detail.isError)
     return (
       <>
@@ -378,6 +381,7 @@ export function FichaPage({
                 <LineChart
                   threshold={90}
                   xLabels={axisLabels(chartPoints, range)}
+                  pointLabels={chartPoints.map((p) => (range === '7d' ? shortDateTime(p.at) : clock(p.at)))}
                   series={[
                     { name: 'CPU', color: 'cpu', values: chartPoints.map((p) => p.cpu ?? 0), area: true },
                     { name: 'RAM', color: 'ram', values: chartPoints.map((p) => p.ram ?? 0) },
@@ -456,6 +460,9 @@ export function FichaPage({
                           {problem.source ?? (problem.level === 'critico' ? 'Crítico' : 'Advertencia')} · desde{' '}
                           {timeAgo(problem.createdAt)}
                         </span>
+                        {onRunScript && serviceFromAlertCode(problem.code) && (
+                          <StartServiceButton alertId={problem.id} service={serviceFromAlertCode(problem.code)!} />
+                        )}
                       </div>
                     </li>
                   ))}
@@ -494,13 +501,12 @@ export function FichaPage({
                         className="component-state"
                         data-status={row.health === 'desconocido' ? undefined : row.health}
                       >
-                        {
+                        {row.stateLabel ??
                           (row.type === 'antivirus' || row.type === 'firewall'
                             ? SOFTWARE_HEALTH_LABEL
                             : row.type === 'toner'
                               ? SUPPLY_HEALTH_LABEL
-                              : HEALTH_LABEL)[row.health]
-                        }
+                              : HEALTH_LABEL)[row.health]}
                       </span>
                     </li>
                   ))}
@@ -519,19 +525,23 @@ export function FichaPage({
  * lo que está peor primero. La BIOS y la placa base no tienen salud propia y se omiten.
  */
 function componentHealth(machine: MachineDetail, nics: readonly NetworkInterfaceItem[]): HealthRow[] {
+  const live = machine.status === 'desconectado' ? null : machine.metrics;
   const rows: HealthRow[] = machine.components
     .filter((c) => c.type !== 'bios' && c.type !== 'placa_base')
-    .map((c) => ({
-      key: `c${c.id}`,
-      type: c.type,
-      name: COMPONENT_NAMES[c.type] ?? c.type,
-      // Un consumible muestra el porcentaje que le queda; el resto, su detalle (SMART, desgaste…).
-      caption:
-        [c.description, c.type === 'toner' ? (c.capacity ?? c.detail) : (c.detail ?? c.capacity)]
-          .filter(Boolean)
-          .join(' · ') || null,
-      health: c.health,
-    }));
+    .map((c) => {
+      const row: HealthRow = {
+        key: `c${c.id}`,
+        type: c.type,
+        name: COMPONENT_NAMES[c.type] ?? c.type,
+        // Un consumible muestra el porcentaje que le queda; el resto, su detalle (SMART, desgaste…).
+        caption:
+          [c.description, c.type === 'toner' ? (c.capacity ?? c.detail) : (c.detail ?? c.capacity)]
+            .filter(Boolean)
+            .join(' · ') || null,
+        health: c.health,
+      };
+      return c.health === 'desconocido' ? withoutOwnHealth(row, c.description, live) : row;
+    });
 
   const connected = nics.filter((n) => n.ipAddress && n.type !== 'virtual');
   if (nics.length > 0) {
@@ -553,6 +563,39 @@ function componentHealth(machine: MachineDetail, nics: readonly NetworkInterface
   }
 
   return rows.sort((a, b) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health]).slice(0, 8);
+}
+
+/**
+ * Windows no da una "salud" del procesador, la memoria ni la tarjeta de video, y un disco USB no deja leer su SMART:
+ * en vez de "Sin datos" se muestra lo que sí se sabe (el uso en vivo) o que ese componente es solo de inventario.
+ */
+function withoutOwnHealth(row: HealthRow, description: string | null, live: MachineDetail['metrics']): HealthRow {
+  const usage = (value: number | null | undefined, what: string): HealthRow | null =>
+    value === null || value === undefined
+      ? null
+      : {
+          ...row,
+          caption: [description, `${Math.round(value)} % de ${what}`].filter(Boolean).join(' · '),
+          health: metricLevel(value),
+          stateLabel:
+            metricLevel(value) === 'sano' ? 'Normal' : metricLevel(value) === 'advertencia' ? 'Alto' : 'Al límite',
+        };
+  switch (row.type) {
+    case 'cpu':
+      return usage(live?.cpu, 'uso') ?? { ...row, stateLabel: 'Solo inventario' };
+    case 'ram':
+      return usage(live?.ram, 'uso') ?? { ...row, stateLabel: 'Solo inventario' };
+    case 'disco':
+      return {
+        ...row,
+        caption: [description, 'Windows no informa su estado (disco USB o controlador RAID)']
+          .filter(Boolean)
+          .join(' · '),
+        stateLabel: 'Sin SMART',
+      };
+    default:
+      return { ...row, stateLabel: 'Solo inventario' };
+  }
 }
 
 function Breadcrumb({ onBack, branch, name }: { onBack: () => void; branch?: string; name?: string }) {

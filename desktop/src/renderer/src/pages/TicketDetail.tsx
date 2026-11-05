@@ -36,7 +36,7 @@ export function TicketDetailView({ ticketId, canManage, onBack, onOpenEquipo, on
         <strong className="mono">#{ticketId}</strong>
       </nav>
       {query.isPending ? (
-        <Loading />
+        <Loading variant="detail" />
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (

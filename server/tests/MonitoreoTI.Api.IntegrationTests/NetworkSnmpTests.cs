@@ -173,6 +173,21 @@ public sealed class NetworkSnmpTests(TestDatabase database) : IAsyncLifetime
             l.GetProperty("kind").GetString() == "lldp"
             && new[] { l.GetProperty("sourceId").GetInt32(), l.GetProperty("targetId").GetInt32() }.Order().SequenceEqual(new[] { lab.Switch, lab.Core }.Order()));
 
+        // Equipos finales por puerto (decisión 74): la PC con agente y la MAC desconocida; ni las aleatorias ni las de la troncal.
+        var endpoints = topology.GetProperty("endpoints").EnumerateArray().Where(e => e.GetProperty("deviceId").GetInt32() == lab.Switch).ToList();
+        endpoints.Should().HaveCount(2);
+        var pcEndpoint = endpoints.Single(e => e.GetProperty("machineId").ValueKind == JsonValueKind.Number);
+        pcEndpoint.GetProperty("machineId").GetInt32().Should().Be(lab.Pc.MachineId);
+        pcEndpoint.GetProperty("portLabel").GetString().Should().Be("Gi1/0/1");
+        pcEndpoint.GetProperty("vlan").GetInt32().Should().Be(20);
+        pcEndpoint.GetProperty("category").GetString().Should().Be("pc");
+        pcEndpoint.GetProperty("hasAgent").GetBoolean().Should().BeTrue();
+        pcEndpoint.GetProperty("kind").GetString().Should().Be("detectado");
+        var other = endpoints.Single(e => e.GetProperty("machineId").ValueKind == JsonValueKind.Null);
+        other.GetProperty("ip").GetString().Should().Be("10.30.20.50");
+        other.GetProperty("category").GetString().Should().Be("desconocido");
+        topology.GetProperty("macTableReadAt").ValueKind.Should().NotBe(JsonValueKind.Null);
+
         var found = await JsonAsync(await lab.Admin.GetAsync($"/api/v1/red/buscar?q={lab.Pc.Mac}"));
         found.EnumerateArray().First().GetProperty("portLabel").GetString().Should().EndWith("Gi1/0/1");
     }
@@ -206,6 +221,32 @@ public sealed class NetworkSnmpTests(TestDatabase database) : IAsyncLifetime
         var after = await JsonAsync(await lab.Admin.GetAsync($"/api/v1/alertas/{alert.GetProperty("id").GetInt64()}"));
         after.GetProperty("status").GetString().Should().Be("resuelta");
         (await DeviceAsync(lab)).GetProperty("status").GetString().Should().Be("en_linea");
+    }
+
+    [DatabaseFact]
+    public async Task Poll_now_reaches_the_collector_and_older_agents_get_their_list_again()
+    {
+        var lab = await LabAsync();
+        using var socket = lab.Socket;
+        await ReceiveAsync(socket); // bienvenida
+
+        // El recolector de la prueba saludó con la versión 0.1.0: no conoce "sondear_ahora" y recibe su lista otra vez.
+        (await lab.Admin.PostAsync($"/api/v1/red/dispositivos/{lab.Switch}/sondear", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var resent = (await ReceiveAsync(socket))!.Value;
+        resent.GetProperty("tipo").GetString().Should().Be("config_actualizada");
+
+        // Uno actualizado recibe el pedido de ese dispositivo.
+        await _api.ExecuteAsync("UPDATE dbo.agentes SET version = '0.3.4' WHERE id = @id", ("@id", lab.Collector.AgentId));
+        (await lab.Admin.PostAsync($"/api/v1/red/dispositivos/{lab.Switch}/sondear", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var request = (await ReceiveAsync(socket))!.Value;
+        request.GetProperty("tipo").GetString().Should().Be("sondear_ahora");
+        request.GetProperty("datos").GetProperty("dispositivo_id").GetInt32().Should().Be(lab.Switch);
+
+        // Sin datos SNMP no hay qué sondear; con el recolector desconectado, se avisa.
+        (await lab.Admin.PostAsync($"/api/v1/red/dispositivos/{lab.Core}/sondear", null)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "fin", CancellationToken.None);
+        await Task.Delay(300);
+        (await lab.Admin.PostAsync($"/api/v1/red/dispositivos/{lab.Switch}/sondear", null)).StatusCode.Should().Be(HttpStatusCode.Conflict);
     }
 
     [DatabaseFact]

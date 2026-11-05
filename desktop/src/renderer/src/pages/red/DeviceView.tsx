@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeviceDetail, PortItem } from '@monitoreoti/shared';
 import { ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
-import { Icon } from '@components/Icon';
 import { Modal } from '@components/Modal';
 import { StatusBadge } from '@components/StatusBadge';
 import { dateTime, timeAgo } from '../../data/format';
@@ -17,6 +16,7 @@ import {
   PORT_TYPE_LABEL,
   portTone,
 } from './netLabels';
+import { ApiTestButton, apiStatusText, offersApi } from './FortiGateApi';
 import { NetworkHistory } from './NetworkHistory';
 
 interface DeviceViewProps {
@@ -29,7 +29,27 @@ interface DeviceViewProps {
 /** W-46 Detalle de switch (o de cualquier dispositivo) y W-47 panel de puerto. */
 export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceViewProps) {
   const api = usePanelApi();
-  const query = useQuery({ queryKey: ['red', 'dispositivo', deviceId], queryFn: () => api.red.device(deviceId) });
+  // "Sondear ahora": lo que había antes del pedido; mientras no cambie, se vuelve a mirar cada pocos segundos.
+  const [polling, setPolling] = useState<{ polled: string | null; error: string | null } | null>(null);
+  const query = useQuery({
+    queryKey: ['red', 'dispositivo', deviceId],
+    queryFn: () => api.red.device(deviceId),
+    refetchInterval: (q) =>
+      polling && q.state.data?.lastPolledAt === polling.polled && q.state.data?.lastError === polling.error
+        ? 3_000
+        : false,
+  });
+  const pollNow = useMutation({
+    mutationFn: () => api.red.pollDevice(deviceId),
+    onSuccess: () => {
+      setPolling({ polled: query.data?.lastPolledAt ?? null, error: query.data?.lastError ?? null });
+      // Un equipo que sigue sin responder deja el mismo error: a los 45 s se da por terminado.
+      setTimeout(() => setPolling(null), 45_000);
+    },
+  });
+  const waiting =
+    pollNow.isPending ||
+    (polling !== null && query.data?.lastPolledAt === polling.polled && query.data?.lastError === polling.error);
   const [selected, setSelected] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [retiring, setRetiring] = useState(false);
@@ -40,19 +60,23 @@ export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceVi
         <button type="button" className="link-quiet" onClick={onBack}>
           Red
         </button>
+        {query.data?.roomName && (
+          <>
+            <span aria-hidden="true">›</span>
+            <span>{query.data.roomName}</span>
+          </>
+        )}
         {query.data?.rackName && (
           <>
             <span aria-hidden="true">›</span>
-            <span>
-              {query.data.roomName} · {query.data.rackName}
-            </span>
+            <span>{query.data.rackName}</span>
           </>
         )}
         <span aria-hidden="true">›</span>
         <strong className="mono">{query.data?.name ?? `#${deviceId}`}</strong>
       </nav>
       {query.isPending ? (
-        <Loading />
+        <Loading variant="detail" />
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
@@ -62,13 +86,19 @@ export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceVi
             canEdit={canEdit}
             onEdit={() => setEditing(true)}
             onRetire={() => setRetiring(true)}
+            onPollNow={() => pollNow.mutate()}
+            polling={waiting}
           />
-          <div className="ficha-grid">
+          {pollNow.isError && (
+            <p className="auth-error" role="alert">
+              {pollNow.error.message}
+            </p>
+          )}
+          {query.data.lastError && <PollError device={query.data} />}
+          <div className="ficha-grid device-grid">
             <div className="ficha-main">
               <PortGrid device={query.data} selected={selected} onSelect={setSelected} />
-              <Card title="Historial">
-                <NetworkHistory entity="dispositivos_red" entityId={deviceId} />
-              </Card>
+              <NetworkHistory entity="dispositivos_red" entityId={deviceId} cardTitle="Historial" />
             </div>
             <div className="ficha-side">
               {selected !== null && query.data.ports.some((p) => p.id === selected) ? (
@@ -79,7 +109,7 @@ export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceVi
                   onOpenEquipo={onOpenEquipo}
                 />
               ) : (
-                <DeviceInfo device={query.data} />
+                <DeviceInfo device={query.data} canEdit={canEdit} />
               )}
             </div>
           </div>
@@ -96,65 +126,122 @@ function DeviceHeader({
   canEdit,
   onEdit,
   onRetire,
+  onPollNow,
+  polling,
 }: {
   device: DeviceDetail;
   canEdit: boolean;
   onEdit: () => void;
   onRetire: () => void;
+  onPollNow: () => void;
+  polling: boolean;
 }) {
   const connected = device.ports.filter((p) => p.status === 'conectado').length;
   const problems = device.ports.filter((p) => p.status === 'errores' || p.status === 'caido').length;
   return (
-    <div className="ficha-head">
-      <span className="status-orb" data-status={DEVICE_STATUS_TONE[device.status]} aria-hidden="true">
-        <span />
-      </span>
+    <div className="ficha-head device-head">
       <div className="ficha-id">
         <div className="ficha-title">
           <h1 className="mono">{device.name}</h1>
           <StatusBadge status={DEVICE_STATUS_TONE[device.status]} label={DEVICE_STATUS_LABEL[device.status]} />
         </div>
-        <ul className="ficha-meta">
+        <ul className="ficha-meta device-meta">
           <li>
             {DEVICE_TYPE_LABEL[device.type]} · {device.brand} {device.modelName}
           </li>
           <li>
-            <Icon name="pin" size={14} />
             {device.branchName}
-            {device.rackName ? ` · ${device.rackName} U${device.positionU}` : ' · fuera de gabinete'}
+            {device.rackName ? ` · ${device.rackName} · U${device.positionU}` : ' · fuera de gabinete'}
           </li>
-          {device.managementIp && <li className="mono">{device.managementIp}</li>}
+          {device.managementIp && (
+            <li>
+              <strong className="mono">{device.managementIp}</strong>
+            </li>
+          )}
           {device.ports.length > 0 && (
             <li>
-              {connected}/{device.ports.length} puertos en uso{problems > 0 && ` · ${problems} con problemas`}
+              <strong className="mono">
+                {connected}/{device.ports.length}
+              </strong>{' '}
+              puertos en uso
+              {problems > 0 && (
+                <>
+                  {' · '}
+                  <strong className="mono is-late">{problems}</strong> con problemas
+                </>
+              )}
             </li>
           )}
           {device.isActiveDevice && (
             <li>
-              <Icon name="clock" size={14} />
-              {device.lastPolledAt ? `Último sondeo ${timeAgo(device.lastPolledAt)}` : 'Sin sondeo SNMP todavía'}
-              {device.collectorName ? ` · lo consulta ${device.collectorName}` : ' · sin recolector asignado'}
+              {device.collectorName ? (
+                <>
+                  Lo consulta <strong className="mono">{device.collectorName}</strong>
+                </>
+              ) : (
+                'Sin recolector asignado'
+              )}
+              {device.lastPolledAt && !device.lastError && <> · sondeo {timeAgo(device.lastPolledAt)}</>}
             </li>
           )}
         </ul>
-        {device.lastError && (
-          <p className="auth-error device-error" role="alert">
-            Último sondeo fallido: {device.lastError}
-          </p>
-        )}
       </div>
       {canEdit && device.status !== 'baja' && (
         <div className="ficha-actions">
+          {device.isActiveDevice && device.collectorId !== null && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={polling}
+              title="El recolector lo consulta ahora, sin esperar su turno"
+              onClick={onPollNow}
+            >
+              {polling ? 'Sondeando…' : 'Sondear ahora'}
+            </button>
+          )}
           <button type="button" className="btn btn-outline" onClick={onEdit}>
             Editar
           </button>
-          <button type="button" className="btn btn-outline" onClick={onRetire}>
+          <button type="button" className="btn btn-outline btn-danger" onClick={onRetire}>
             Dar de baja
           </button>
         </div>
       )}
     </div>
   );
+}
+
+/** Código corto del fallo, para buscarlo o reportarlo (el texto completo va al lado). */
+export function pollErrorCode(message: string): string {
+  const text = message.toLowerCase();
+  if (text.includes('clave')) return 'ERR_SNMP_CREDENCIAL';
+  if (text.includes('autentic') || text.includes('usuario')) return 'ERR_SNMP_AUTH';
+  if (text.includes('no respondió') || text.includes('tardó') || text.includes('timeout')) return 'ERR_SNMP_TIMEOUT';
+  return 'ERR_SNMP';
+}
+
+/** Franja del último sondeo fallido: qué pasó, su código y desde cuándo no responde. */
+function PollError({ device }: { device: DeviceDetail }) {
+  const message = device.lastError!;
+  return (
+    <div className="poll-error" role="alert">
+      <span>Último sondeo fallido: {message.charAt(0).toLowerCase() + message.slice(1)}</span>
+      <code className="mono">{pollErrorCode(message)}</code>
+      <span className="poll-error-since mono">
+        {device.lastPolledAt ? `sin respuesta desde ${timeAgo(device.lastPolledAt)}` : 'nunca respondió'}
+      </span>
+    </div>
+  );
+}
+
+/** Cuenta de puertos por tipo para la placa ("24 × RJ45 · 4 × SFP+"). */
+function portSummary(ports: PortItem[]): string {
+  const counts = new Map<string, number>();
+  for (const port of ports) {
+    const label = PORT_TYPE_LABEL[port.type].toUpperCase();
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts].map(([label, n]) => `${n} × ${label}`).join(' · ');
 }
 
 function PortGrid({
@@ -166,6 +253,10 @@ function PortGrid({
   selected: number | null;
   onSelect: (id: number) => void;
 }) {
+  // La placa como el equipo real: cobre en dos filas (impares arriba) y los uplinks aparte.
+  const byNumber = [...device.ports].sort((a, b) => a.number - b.number);
+  const copper = byNumber.filter((p) => p.type === 'rj45');
+  const uplinks = byNumber.filter((p) => p.type !== 'rj45');
   if (device.ports.length === 0)
     return (
       <Card title="Puertos">
@@ -185,30 +276,50 @@ function PortGrid({
         </ul>
       }
     >
-      <div className="port-grid" role="list" aria-label={`Puertos de ${device.name}`}>
-        {device.ports.map((port) => (
-          <button
-            key={port.id}
-            type="button"
-            role="listitem"
-            className="port"
-            data-port={portTone(port)}
-            data-kind={port.type === 'rj45' ? 'rj45' : 'sfp'}
-            aria-pressed={selected === port.id}
-            aria-label={`Puerto ${port.name ?? port.number}: ${port.isTrunk ? 'troncal' : PORT_STATUS_LABEL[port.status]}`}
-            title={[port.name ?? port.number, port.machineName ?? port.cableTo].filter(Boolean).join(' · ')}
-            onClick={() => onSelect(port.id)}
-          >
-            <span className="mono">{port.number}</span>
-            {port.cableId !== null && <span className="port-cable" aria-hidden="true" />}
-          </button>
-        ))}
+      <div className="faceplate">
+        <div className="faceplate-head mono" aria-hidden="true">
+          <span>{`${device.brand} ${device.modelName}`.trim().toUpperCase()}</span>
+          <span>{portSummary(device.ports)}</span>
+        </div>
+        <div className="faceplate-ports" role="list" aria-label={`Puertos de ${device.name}`}>
+          {[copper, uplinks].map(
+            (group, i) =>
+              group.length > 0 && (
+                <div key={i} className="port-grid">
+                  {group.map((port) => (
+                    <button
+                      key={port.id}
+                      type="button"
+                      role="listitem"
+                      className="port"
+                      data-port={portTone(port)}
+                      data-kind={port.type === 'rj45' ? 'rj45' : 'sfp'}
+                      aria-pressed={selected === port.id}
+                      aria-label={`Puerto ${port.name ?? port.number}: ${port.isTrunk ? 'troncal' : PORT_STATUS_LABEL[port.status]}`}
+                      title={[port.name ?? port.number, port.machineName ?? port.cableTo].filter(Boolean).join(' · ')}
+                      onClick={() => onSelect(port.id)}
+                    >
+                      <span className="mono">{port.number}</span>
+                      {port.cableId !== null && <span className="port-cable" aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
+              ),
+          )}
+        </div>
       </div>
+      <p className="muted note">
+        Elija un puerto para ver qué tiene conectado.
+        {device.isActiveDevice && !device.lastPolledAt && ' Los estados aparecen cuando el switch responda por SNMP.'}
+      </p>
     </Card>
   );
 }
 
-function DeviceInfo({ device }: { device: DeviceDetail }) {
+/** Datos técnicos que se muestran en mono (se copian tal cual). */
+const MONO_FIELDS = new Set(['IP de gestión', 'Firmware', 'Registrado']);
+
+function DeviceInfo({ device, canEdit }: { device: DeviceDetail; canEdit: boolean }) {
   const rows: [string, string | null][] = [
     ['Tipo', DEVICE_TYPE_LABEL[device.type]],
     ['Modelo', `${device.brand} ${device.modelName}`],
@@ -227,6 +338,9 @@ function DeviceInfo({ device }: { device: DeviceDetail }) {
           : 'Sin configurar'
         : 'No aplica (pasivo)',
     ],
+    ...(device.isActiveDevice && offersApi(device.type, device.apiUrl)
+      ? ([['API REST', apiStatusText(device)]] as [string, string | null][])
+      : []),
     ['Registrado', dateTime(device.createdAt)],
   ];
   return (
@@ -235,11 +349,21 @@ function DeviceInfo({ device }: { device: DeviceDetail }) {
         {rows.map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
-            <dd className={label === 'IP de gestión' ? 'mono' : undefined}>{value ?? '—'}</dd>
+            <dd className={MONO_FIELDS.has(label) ? 'mono strong' : undefined}>{value ?? '—'}</dd>
           </div>
         ))}
       </dl>
-      <p className="muted note">Elija un puerto para ver qué tiene conectado.</p>
+      {device.apiLastError && (
+        <p className="api-test-result is-error" role="alert">
+          {device.apiLastError}
+        </p>
+      )}
+      {canEdit && device.hasApiToken && device.status !== 'baja' && (
+        <ApiTestButton
+          deviceId={device.id}
+          input={{ apiUrl: null, apiToken: null, apiAceptarCertificado: device.apiAcceptSelfSigned ?? true }}
+        />
+      )}
     </Card>
   );
 }

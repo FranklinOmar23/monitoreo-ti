@@ -23,6 +23,16 @@ public static class AlertEndpoints
         manage.MapPost("/{id:long}/resolver", async (long id, AlertActionInput input, IValidator<AlertActionInput> validator, AlertCommands commands, CancellationToken ct) =>
             await ValidateAsync(input, validator, ct) ?? ToResult(await commands.ResolveAsync(id, input, ct)));
 
+        // Iniciar el servicio de una alerta de servicio detenido: es ejecutar un comando en el equipo (scripts.ejecutar).
+        api.MapPost("/alertas/{id:long}/iniciar-servicio", async (long id, AlertCommands commands, MonitoreoTI.Infrastructure.Remote.RemoteAccessGuard guard, CancellationToken ct) =>
+        {
+            // Como cualquier comando: con el módulo remoto y el 2FA confirmado hace poco (decisión 52).
+            if (await guard.CheckAsync(ct) is { } denial)
+                return MonitoreoTI.Api.Remote.RemoteEndpoints.Denied(denial);
+            var (result, batch) = await commands.StartServiceAsync(id, ct);
+            return result.Succeeded ? Results.Ok(new { lote = batch }) : ToResult(result);
+        }).RequireAuthorization(PermissionPolicies.ScriptsRun);
+
         api.MapGet("/reglas-alerta", (AlertQueries q, CancellationToken ct) => q.RulesAsync(ct))
             .RequireAuthorization(PermissionPolicies.AlertsView);
         var rules = api.MapGroup("/reglas-alerta").RequireAuthorization(PermissionPolicies.AlertsManage);

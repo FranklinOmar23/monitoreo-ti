@@ -94,7 +94,7 @@
   height: 56px;
   padding: 0;
   border: 1.5px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   outline: 0;
   background: var(--color-surface);
   color: var(--color-text);
@@ -197,7 +197,7 @@
   bottom: 8px;
   left: -6px;
   width: 3px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--color-primary);
   content: '';
 }
@@ -349,29 +349,28 @@
       transform 0.15s var(--ease-out);
   }
 
-  .btn:not(:disabled):hover {
-    transform: translateY(-1px);
-  }
-
-  .btn-primary:not(:disabled):hover {
-    box-shadow: 0 6px 16px color-mix(in srgb, var(--color-primary) 30%, transparent);
-  }
-
+  /* Diseño técnico: el botón no flota; al presionarlo se hunde un poco. */
   .btn:not(:disabled):active {
-    box-shadow: none;
-    transform: translateY(0) scale(0.97);
+    transform: scale(0.97);
   }
 
   .card,
-  .kpi {
+  .table-card,
+  .kpi,
+  .metric-card {
     transition:
-      box-shadow 0.2s,
+      background-color 0.2s,
       border-color 0.2s;
   }
 
   .card:hover,
-  .kpi:hover {
-    box-shadow: 0 8px 24px rgb(13 27 32 / 9%);
+  .table-card:hover {
+    border-color: var(--color-border-strong);
+  }
+
+  .kpi:hover,
+  .metric-card:hover {
+    background: var(--color-surface-raised);
   }
 
   .nav-item {
@@ -412,19 +411,6 @@
   .rack-usage span {
     transform-origin: left center;
     animation: bar-grow 0.7s var(--ease-out) both;
-  }
-
-  /* Carga: un brillo recorre el marcador. */
-  .skeleton {
-    background: linear-gradient(
-        100deg,
-        transparent 30%,
-        color-mix(in srgb, var(--color-surface) 70%, transparent) 50%,
-        transparent 70%
-      )
-      var(--color-surface-muted);
-    background-size: 200% 100%;
-    animation: shimmer 1.3s linear infinite;
   }
 
   /* Mensajes: el error se sacude, el aviso aparece. */
@@ -625,5 +611,252 @@
 
   to {
     stroke-dashoffset: 0;
+  }
+}
+
+/* ---------- Diseño técnico (decisión 71): carga y más movimiento ---------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* El esqueleto aparece tras un instante (lo que carga rápido no parpadea) y un brillo lo recorre. */
+  .state-loading {
+    animation: fade-in 0.2s 0.12s ease-out both;
+  }
+
+  .skeleton {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-text) 8%, transparent) 50%,
+      transparent 100%
+    );
+    background-repeat: no-repeat;
+    background-size: 50% 100%;
+    animation: sk-sweep 1.5s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  .sk-table-row,
+  .sk-list-row,
+  .sk-kpi,
+  .sk-card {
+    animation: rise-in 0.35s var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+
+  /* Barra superior: un tramo recorre la línea mientras algo carga. */
+  .top-loader::before {
+    right: auto;
+    width: 35%;
+    animation: loader-run 1.1s ease-in-out infinite;
+  }
+
+  /* Gráficas: la línea se dibuja, el área aparece y las columnas crecen desde la base. */
+  .chart-line,
+  .sparkline polyline {
+    stroke-dasharray: 1;
+    animation: line-draw 1s var(--ease-out) both;
+  }
+
+  .chart-area {
+    animation: fade-in 0.8s 0.35s ease-out both;
+  }
+
+  .series-ram .chart-line {
+    animation-delay: 0.12s;
+  }
+
+  .stacked-bar {
+    transform-origin: bottom center;
+    animation: col-grow 0.55s var(--ease-out) both;
+  }
+
+  .stacked-col:nth-child(2) .stacked-bar {
+    animation-delay: 40ms;
+  }
+
+  .stacked-col:nth-child(3) .stacked-bar {
+    animation-delay: 80ms;
+  }
+
+  .stacked-col:nth-child(4) .stacked-bar {
+    animation-delay: 120ms;
+  }
+
+  .stacked-col:nth-child(5) .stacked-bar {
+    animation-delay: 160ms;
+  }
+
+  .stacked-col:nth-child(6) .stacked-bar {
+    animation-delay: 200ms;
+  }
+
+  .stacked-col:nth-child(n + 7) .stacked-bar {
+    animation-delay: 240ms;
+  }
+
+  /* Cifras de los indicadores: suben al aparecer. */
+  .kpi-value strong,
+  .metric-value strong {
+    display: inline-block;
+    animation: number-in 0.45s 0.08s var(--ease-out) both;
+  }
+
+  /* Puertos del switch: se encienden en cascada. */
+  .port {
+    animation: pop-in 0.3s var(--ease-out) both;
+    transition:
+      transform 0.15s var(--ease-out),
+      outline-color 0.15s;
+  }
+
+  .port:nth-child(4n + 2) {
+    animation-delay: 30ms;
+  }
+
+  .port:nth-child(4n + 3) {
+    animation-delay: 60ms;
+  }
+
+  .port:nth-child(4n) {
+    animation-delay: 90ms;
+  }
+
+  .port:hover {
+    transform: translateY(-1px);
+  }
+
+  /* En vivo y notificaciones: un pulso. */
+  .live::before,
+  .status-dot-live,
+  .notif-dot {
+    animation: live-ping 1.8s ease-out infinite;
+  }
+
+  .notif-dot {
+    --ping: var(--st-critico);
+  }
+
+  .nav-badge,
+  .tab-count {
+    animation: pop-in 0.3s var(--ease-spring) both;
+  }
+
+  /* Franjas de error y avisos: bajan desde arriba. */
+  .device-error,
+  .update-banner {
+    animation: drop-in 0.3s var(--ease-out) both;
+  }
+
+  /* Filas de tabla: al pasar el mouse, una barra de acento a la izquierda. */
+  .data-table td {
+    transition:
+      background-color 0.12s,
+      box-shadow 0.15s var(--ease-out);
+  }
+
+  .data-table tbody tr:hover td:first-child {
+    box-shadow: inset 2px 0 0 var(--color-border-strong);
+  }
+
+  .data-table tr.is-selected td:first-child {
+    box-shadow: inset 2px 0 0 var(--color-primary);
+  }
+
+  /* Controles: bordes y fondos cambian con suavidad. */
+  .segmented button,
+  .filter-select,
+  .search,
+  .chip,
+  .icon-button,
+  .field input,
+  .field select,
+  .field textarea,
+  .more-menu button,
+  .profile-menu button {
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      box-shadow 0.15s;
+  }
+
+  .page-header h1,
+  .ficha-title h1 {
+    animation: slide-in-left 0.35s var(--ease-out) both;
+  }
+
+  .status-orb span {
+    animation: pop-in 0.35s var(--ease-spring) both;
+  }
+}
+
+/* Con "reducir animaciones" la barra de carga queda fija y tenue. */
+@media (prefers-reduced-motion: reduce) {
+  .top-loader[data-active] {
+    opacity: 0.6;
+  }
+}
+
+@keyframes sk-sweep {
+  from {
+    background-position: -100% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes loader-run {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@keyframes line-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes col-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes number-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes live-ping {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ping, var(--st-sano)) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
   }
 }

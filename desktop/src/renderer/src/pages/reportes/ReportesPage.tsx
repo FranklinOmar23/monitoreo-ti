@@ -245,7 +245,7 @@ function ReportView({
       {report.period && !validRange ? (
         <p className="auth-error">La fecha inicial debe ser anterior a la final.</p>
       ) : data.isPending ? (
-        <Loading label="Preparando el reporte…" />
+        <Loading variant="table" columns={6} label="Preparando el reporte…" />
       ) : data.isError ? (
         <ErrorState error={data.error} onRetry={() => void data.refetch()} />
       ) : (

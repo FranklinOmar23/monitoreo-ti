@@ -63,7 +63,7 @@ export function UsuariosPage() {
 
       {tab === 'usuarios' &&
         (users.isPending ? (
-          <Loading />
+          <Loading variant="table" columns={6} />
         ) : users.isError ? (
           <ErrorState error={users.error} onRetry={() => void users.refetch()} />
         ) : (

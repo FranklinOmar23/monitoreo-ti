@@ -254,7 +254,8 @@ public static class HealthRules
         if (rules.For("servicio_detenido") is null)
             return;
 
-        foreach (var service in machine.StoppedServices)
+        // Los que Windows detiene solo al terminar (actualizadores, licencias) no son un problema.
+        foreach (var service in machine.StoppedServices.Where(s => !ServiceRepairRules.StopsByItself(s.Name)))
         {
             var name = service.DisplayName ?? service.Name;
             findings.Add(new Finding(

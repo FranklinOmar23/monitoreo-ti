@@ -214,7 +214,8 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
             d.RackId, d.RackId is null ? null : row.Rack, d.RackId is null ? null : row.RoomId, d.RackId is null ? null : row.Room,
             d.RackPositionU, d.HeightUnits, d.ManagementIp, d.Firmware, Text(d.Status), d.LastPolledAt,
             d.SnmpUser, d.SnmpEncryptedCredential is not null, d.QrCode, d.CreatedAt, items,
-            d.CollectorAgentId, row.Collector, d.LastError);
+            d.CollectorAgentId, row.Collector, d.LastError,
+            d.ApiUrl, d.ApiEncryptedToken is not null, d.ApiAcceptSelfSigned, d.ApiLastOkAt, d.ApiLastError);
     }
 
     /// <summary>"SW-ACC-02 Gi1/0/12" para cada puerto visible.</summary>

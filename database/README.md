@@ -5,7 +5,7 @@ SQL Server 2019+. Los scripts son la única fuente del esquema: EF Core se mapea
 | Script | Contenido |
 | --- | --- |
 | `00_create_database.sql` | Crea la base (variable sqlcmd `$(DbName)`), intercalación `Modern_Spanish_CI_AS` |
-| `01_schema.sql` | 49 tablas multiempresa, índices, vista, procedimiento, planes, roles y permisos |
+| `01_schema.sql` | 54 tablas multiempresa, índices, vista, procedimiento, planes, roles y permisos |
 | `02_multitenant.sql` | Row-Level Security: esquema `seguridad`, predicados y política `seguridad.politica_empresa` |
 | `03_seed_dev.sql` | Datos de prueba (solo desarrollo): 2 empresas, sucursales, equipos, data center |
 | `reset-db.ps1` | Borra y recrea una base ejecutando los scripts en orden |

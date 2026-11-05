@@ -11,7 +11,7 @@ describe('color de la empresa (W-40)', () => {
     for (const color of ['#0f766e', '#ffeb3b', '#00ff00', '#1d4ed8', '#000000', '#ffffff', '#e11d48']) {
       const { light, dark } = brandTones(color);
       expect(contrast(light.primary, '#ffffff')).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(dark.primary, '#16262c')).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(dark.primary, '#141a1f')).toBeGreaterThanOrEqual(4.5);
       expect(contrast(light.primary, light.onPrimary)).toBeGreaterThanOrEqual(3);
       expect(contrast(dark.primary, dark.onPrimary)).toBeGreaterThanOrEqual(3);
     }

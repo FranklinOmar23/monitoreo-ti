@@ -14,6 +14,7 @@ import { dateTime, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
 import { useDebounced } from '../data/useDebounced';
 import { ReglasPage } from './ReglasPage';
+import { serviceFromAlertCode, StartServiceButton } from './remoto/StartServiceButton';
 
 const PAGE_SIZE = 50;
 
@@ -40,6 +41,8 @@ export interface AlertTicketLinks {
 
 interface AlertasPageProps {
   canManage: boolean;
+  /** scripts.ejecutar: puede iniciar el servicio de una alerta de servicio detenido. */
+  canRunCommands?: boolean;
   onOpenEquipo: (id: number) => void;
   tickets?: AlertTicketLinks;
   /** Abre directamente una alerta (desde un ticket). */
@@ -47,7 +50,13 @@ interface AlertasPageProps {
 }
 
 /** W-20 Alertas, W-21 detalle y, en su pestaña, W-22/W-23 reglas. */
-export function AlertasPage({ canManage, onOpenEquipo, tickets, initialAlertId = null }: AlertasPageProps) {
+export function AlertasPage({
+  canManage,
+  canRunCommands = false,
+  onOpenEquipo,
+  tickets,
+  initialAlertId = null,
+}: AlertasPageProps) {
   const [tab, setTab] = useState('alertas');
   const [selected, setSelected] = useState<number | null>(initialAlertId);
 
@@ -56,6 +65,7 @@ export function AlertasPage({ canManage, onOpenEquipo, tickets, initialAlertId =
       <AlertDetailView
         alertId={selected}
         canManage={canManage}
+        canRunCommands={canRunCommands}
         tickets={tickets}
         onBack={() => setSelected(null)}
         onOpenEquipo={onOpenEquipo}
@@ -185,7 +195,7 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
       )}
 
       {list.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={7} />
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : (
@@ -296,12 +306,14 @@ function AlertRow({
 function AlertDetailView({
   alertId,
   canManage,
+  canRunCommands,
   tickets,
   onBack,
   onOpenEquipo,
 }: {
   alertId: number;
   canManage: boolean;
+  canRunCommands: boolean;
   tickets?: AlertTicketLinks;
   onBack: () => void;
   onOpenEquipo: (id: number) => void;
@@ -320,13 +332,14 @@ function AlertDetailView({
         <strong className="mono">#{alertId}</strong>
       </nav>
       {query.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={5} />
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
         <AlertDetailBody
           alert={query.data}
           canManage={canManage}
+          canRunCommands={canRunCommands}
           tickets={tickets}
           onAction={setAction}
           onOpenEquipo={onOpenEquipo}
@@ -340,12 +353,14 @@ function AlertDetailView({
 function AlertDetailBody({
   alert,
   canManage,
+  canRunCommands,
   tickets,
   onAction,
   onOpenEquipo,
 }: {
   alert: AlertDetail;
   canManage: boolean;
+  canRunCommands: boolean;
   tickets?: AlertTicketLinks;
   onAction: (action: 'atender' | 'resolver') => void;
   onOpenEquipo: (id: number) => void;
@@ -408,6 +423,9 @@ function AlertDetailBody({
             </div>
           )}
           {alert.source && <span className="problem-origin mono">{alert.source}</span>}
+          {canRunCommands && open && alert.machineId !== null && serviceFromAlertCode(alert.code) && (
+            <StartServiceButton alertId={alert.id} service={serviceFromAlertCode(alert.code)!} />
+          )}
           {alert.automatic && open && (
             <p className="muted note">
               El sistema la cierra solo cuando el problema deja de detectarse. Si la resuelve a mano y el problema

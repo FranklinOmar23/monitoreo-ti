@@ -54,7 +54,9 @@ public sealed record DeviceDetail(
     int? PositionU, int HeightUnits, string? ManagementIp, string? Firmware, string Status, DateTime? LastPolledAt,
     string? SnmpUser, bool HasSnmpCredential, Guid QrCode, DateTime CreatedAt, IReadOnlyList<PortItem> Ports,
     /// <summary>Agente que lo consulta por SNMP y por qué falló el último sondeo (null si respondió).</summary>
-    int? CollectorId = null, string? CollectorName = null, string? LastError = null);
+    int? CollectorId = null, string? CollectorName = null, string? LastError = null,
+    /// <summary>API REST (decisión 76): si tiene token, su dirección, la última lectura buena y el último error.</summary>
+    string? ApiUrl = null, bool HasApiToken = false, bool ApiAcceptSelfSigned = true, DateTime? ApiLastOkAt = null, string? ApiLastError = null);
 
 /// <summary>Un agente que puede consultar por SNMP los equipos de su sucursal (W-49).</summary>
 public sealed record CollectorItem(int AgentId, int MachineId, string MachineName, int BranchId, string? IpAddress, bool Online, DateTime? LastContactAt, int DeviceCount);
@@ -67,7 +69,15 @@ public sealed record DeviceInput(
     string Nombre, int ModeloId, int SucursalId, int? GabineteId, int? PosicionU, string? IpGestion, string? Firmware,
     string? SnmpUsuario, string? SnmpClaveAutenticacion, string? SnmpClavePrivacidad,
     /// <summary>Agente de la misma sucursal que lo consulta por SNMP; null = nadie lo consulta.</summary>
-    int? RecolectorId = null);
+    int? RecolectorId = null,
+    /// <summary>API REST del FortiGate: dirección (vacía = sin API), token (null = se conserva) y si se acepta su certificado propio.</summary>
+    string? ApiUrl = null, string? ApiToken = null, bool ApiAceptarCertificado = true);
+
+/// <summary>"Probar API": la dirección y el token del formulario (sin token, el guardado).</summary>
+public sealed record ApiTestInput(string? ApiUrl, string? ApiToken, bool ApiAceptarCertificado = true);
+
+/// <summary>Lo que respondió el FortiGate a la prueba (system/status), a través del recolector.</summary>
+public sealed record ApiTestResult(bool Ok, string? Error, string? Model, string? Version, string? Hostname, string? Serial, int? Milliseconds);
 
 /// <summary>Mover en el editor de gabinete: otro gabinete, otra U o fuera de gabinete (ambos null).</summary>
 public sealed record DevicePlacementInput(int? GabineteId, int? PosicionU);
@@ -109,12 +119,31 @@ public sealed record NetworkSearchResult(
 public sealed record DifferenceItem(string Kind, string Title, string Detail, int? DeviceId, int? PortId, int? MachineId);
 
 /// <summary>W-51 Mapa de topología: los equipos activos y cómo se conectan (LLDP o cableado documentado).</summary>
-public sealed record TopologyNode(int Id, string Name, string Type, string Status, string BranchName, int Trunks);
+/// <param name="Clients">Access point: cuántas MAC (clientes Wi-Fi) se ven por su puerto en las últimas 24 h.</param>
+public sealed record TopologyNode(
+    int Id, string Name, string Type, string Status, string BranchName, int Trunks,
+    int BranchId = 0, string? ManagementIp = null, string? ModelName = null, int Clients = 0);
+
+/// <summary>
+/// Un equipo final en un puerto de acceso (decisión 74): lo que el switch ve (MAC, IP, VLAN) y lo que Centinela sabe de
+/// él. Kind: detectado (visto en 24 h) o documentado (asignado a mano y sin verse).
+/// </summary>
+/// <param name="Category">pc, servidor, impresora, telefono, camara, access_point, otro o desconocido.</param>
+/// <param name="CategoryInferred">La categoría se dedujo del fabricante de la MAC.</param>
+public sealed record TopologyEndpoint(
+    int DeviceId, int PortId, int PortNumber, string PortLabel, int? Vlan, int? SpeedMbps, string? Mac, string? Ip, string? Vendor,
+    int? MachineId, string? MachineName, string? MachineStatus, bool HasAgent, string Category, bool CategoryInferred, string Kind,
+    DateTime? FirstSeenAt, DateTime? LastSeenAt,
+    /// <summary>Nombre que dio en la red (NetBIOS o DNS) según el inventario de direcciones IP.</summary>
+    string? Hostname = null);
 
 /// <param name="Kind">lldp (lo ve SNMP) o cable (solo documentado).</param>
 public sealed record TopologyLink(int SourceId, int TargetId, string SourcePort, string TargetPort, string Kind);
 
-public sealed record Topology(IReadOnlyList<TopologyNode> Nodes, IReadOnlyList<TopologyLink> Links);
+/// <param name="MacTableReadAt">Último sondeo SNMP bueno de los switches del mapa (cuándo se leyó la tabla MAC).</param>
+public sealed record Topology(
+    IReadOnlyList<TopologyNode> Nodes, IReadOnlyList<TopologyLink> Links,
+    IReadOnlyList<TopologyEndpoint>? Endpoints = null, DateTime? MacTableReadAt = null);
 
 /// <summary>"Conexión de red" de la ficha del equipo: switch, puerto y VLAN donde se vio por última vez.</summary>
 public sealed record MachineNetworkInfo(
@@ -243,6 +272,21 @@ public sealed class DeviceInputValidator : AbstractValidator<DeviceInput>
             .WithMessage("Indique el usuario SNMPv3.");
         RuleFor(x => x).Must(x => (x.SnmpClaveAutenticacion is null) == (x.SnmpClavePrivacidad is null))
             .OverridePropertyName("SnmpClavePrivacidad").WithMessage("SNMPv3 authPriv necesita las dos claves.");
+        RuleFor(x => x.ApiUrl).Must(u => string.IsNullOrWhiteSpace(u) || FortiGateRules.NormalizeUrl(u) is not null)
+            .WithMessage("La dirección de la API debe ser https://IP:puerto.");
+        RuleFor(x => x.ApiToken).Must(t => string.IsNullOrWhiteSpace(t) || FortiGateRules.IsValidToken(t.Trim()))
+            .WithMessage("El token no parece de la API del FortiGate (letras y números, sin espacios).");
+    }
+}
+
+public sealed class ApiTestInputValidator : AbstractValidator<ApiTestInput>
+{
+    public ApiTestInputValidator()
+    {
+        RuleFor(x => x.ApiUrl).Must(u => string.IsNullOrWhiteSpace(u) || FortiGateRules.NormalizeUrl(u) is not null)
+            .WithMessage("La dirección de la API debe ser https://IP:puerto.");
+        RuleFor(x => x.ApiToken).Must(t => string.IsNullOrWhiteSpace(t) || FortiGateRules.IsValidToken(t.Trim()))
+            .WithMessage("El token no parece de la API del FortiGate (letras y números, sin espacios).");
     }
 }
 

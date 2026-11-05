@@ -83,6 +83,11 @@ internal sealed class NetworkDeviceConfiguration : IEntityTypeConfiguration<Netw
         b.Property(x => x.QrCode).HasColumnName("codigo_qr").DefaultNewGuid();
         b.Property(x => x.SnmpUser).HasColumnName("snmp_usuario").HasMaxLength(100);
         b.Property(x => x.SnmpEncryptedCredential).HasColumnName("snmp_credencial_cifrada");
+        b.Property(x => x.ApiUrl).HasColumnName("api_url").HasMaxLength(200);
+        b.Property(x => x.ApiEncryptedToken).HasColumnName("api_token_cifrado");
+        b.Property(x => x.ApiAcceptSelfSigned).HasColumnName("api_aceptar_certificado");
+        b.Property(x => x.ApiLastOkAt).HasColumnName("api_ultimo_ok");
+        b.Property(x => x.ApiLastError).HasColumnName("api_ultimo_error").HasMaxLength(300);
         b.Property(x => x.Firmware).HasColumnName("firmware").HasMaxLength(100);
         b.Property(x => x.Status).HasColumnName("estado");
         b.Property(x => x.LastPolledAt).HasColumnName("ultimo_sondeo");
@@ -275,5 +280,151 @@ internal sealed class MachineNetworkLocationConfiguration : IEntityTypeConfigura
         b.Property(x => x.PortNumber).HasColumnName("puerto_numero");
         b.Property(x => x.PortName).HasColumnName("puerto_nombre");
         b.Property(x => x.LastSeenAt).HasColumnName("ultima_vez");
+    }
+}
+
+internal sealed class SubnetConfiguration : IEntityTypeConfiguration<Subnet>
+{
+    public void Configure(EntityTypeBuilder<Subnet> b)
+    {
+        b.ToTable("subredes");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.BranchId).HasColumnName("sucursal_id");
+        b.Property(x => x.Name).HasColumnName("nombre").HasMaxLength(100);
+        b.Property(x => x.Network).HasColumnName("red").Varchar(15);
+        b.Property(x => x.Prefix).HasColumnName("prefijo");
+        b.Property(x => x.Vlan).HasColumnName("vlan");
+        b.Property(x => x.Gateway).HasColumnName("puerta_enlace").Varchar(15);
+        b.Property(x => x.CollectorAgentId).HasColumnName("recolector_id");
+        b.Property(x => x.ArpDeviceId).HasColumnName("dispositivo_arp_id");
+        b.Property(x => x.SweepHours).HasColumnName("barrido_horas");
+        b.Property(x => x.FreeAfterDays).HasColumnName("dias_libre");
+        b.Property(x => x.LastSweepAt).HasColumnName("ultimo_barrido");
+        b.Property(x => x.SweepRequestedAt).HasColumnName("barrido_pedido");
+        b.Property(x => x.LastError).HasColumnName("ultimo_error").HasMaxLength(300);
+        b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
+        b.HasAlternateKey(x => new { x.CompanyId, x.Id });
+
+        b.HasOne<Branch>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.BranchId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        b.HasOne<Agent>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.CollectorAgentId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+        b.HasOne<NetworkDevice>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.ArpDeviceId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class IpAddressEntryConfiguration : IEntityTypeConfiguration<IpAddressEntry>
+{
+    public void Configure(EntityTypeBuilder<IpAddressEntry> b)
+    {
+        b.ToTable("direcciones_ip");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.SubnetId).HasColumnName("subred_id");
+        b.Property(x => x.Ip).HasColumnName("ip").Varchar(15);
+        b.Property(x => x.MacAddress).HasColumnName("mac").Varchar(17);
+        b.Property(x => x.Vendor).HasColumnName("fabricante").HasMaxLength(150);
+        b.Property(x => x.MachineId).HasColumnName("maquina_id");
+        b.Property(x => x.Source).HasColumnName("origen");
+        b.Property(x => x.FirstSeenAt).HasColumnName("primera_vez").DefaultUtcNow();
+        b.Property(x => x.LastSeenAt).HasColumnName("ultima_vez").DefaultUtcNow();
+        b.Property(x => x.LastPingAt).HasColumnName("ultimo_ping");
+        b.Property(x => x.PreviousMacAddress).HasColumnName("mac_anterior").Varchar(17);
+        b.Property(x => x.MacChangedAt).HasColumnName("cambio_mac");
+        b.Property(x => x.Hostname).HasColumnName("nombre_host").HasMaxLength(255);
+        b.Property(x => x.HostnameSource).HasColumnName("nombre_origen").Varchar(10);
+        b.Property(x => x.Interface).HasColumnName("interfaz").HasMaxLength(64);
+        b.Property(x => x.OperatingSystem).HasColumnName("sistema").HasMaxLength(100);
+        b.Property(x => x.Dhcp).HasColumnName("dhcp");
+        b.Property(x => x.DhcpExpiresAt).HasColumnName("dhcp_vence");
+
+        b.HasOne<Subnet>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.SubnetId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade);
+        // FK simple: ON DELETE SET NULL no puede ser compuesta porque anularía empresa_id.
+        b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+internal sealed class RemoteInstallConfiguration : IEntityTypeConfiguration<RemoteInstall>
+{
+    public void Configure(EntityTypeBuilder<RemoteInstall> b)
+    {
+        b.ToTable("instalaciones_remotas");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.SubnetId).HasColumnName("subred_id");
+        b.Property(x => x.Ip).HasColumnName("ip").Varchar(15);
+        b.Property(x => x.CollectorAgentId).HasColumnName("recolector_id");
+        b.Property(x => x.UserId).HasColumnName("usuario_id");
+        b.Property(x => x.Account).HasColumnName("cuenta").HasMaxLength(150);
+        b.Property(x => x.EnrollmentTokenId).HasColumnName("token_id");
+        b.Property(x => x.Status).HasColumnName("estado").Varchar(12);
+        b.Property(x => x.Detail).HasColumnName("detalle").HasMaxLength(400);
+        b.Property(x => x.OperatingSystem).HasColumnName("sistema").HasMaxLength(100);
+        b.Property(x => x.MachineId).HasColumnName("maquina_id");
+        b.Property(x => x.CreatedAt).HasColumnName("creado");
+        b.Property(x => x.UpdatedAt).HasColumnName("actualizado");
+
+        b.HasOne<Subnet>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.SubnetId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+internal sealed class IpReservationConfiguration : IEntityTypeConfiguration<IpReservation>
+{
+    public void Configure(EntityTypeBuilder<IpReservation> b)
+    {
+        b.ToTable("reservas_ip");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.SubnetId).HasColumnName("subred_id");
+        b.Property(x => x.From).HasColumnName("desde").Varchar(15);
+        b.Property(x => x.To).HasColumnName("hasta").Varchar(15);
+        b.Property(x => x.Reason).HasColumnName("motivo").HasMaxLength(150);
+        b.Property(x => x.Origin).HasColumnName("origen").Varchar(10);
+        b.Property(x => x.CreatedAt).HasColumnName("creado").DefaultUtcNow();
+
+        b.HasOne<Subnet>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.SubnetId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+internal sealed class IpHistoryEntryConfiguration : IEntityTypeConfiguration<IpHistoryEntry>
+{
+    public void Configure(EntityTypeBuilder<IpHistoryEntry> b)
+    {
+        b.ToTable("historial_ip");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.SubnetId).HasColumnName("subred_id");
+        b.Property(x => x.Ip).HasColumnName("ip").Varchar(15);
+        b.Property(x => x.MacAddress).HasColumnName("mac").Varchar(17);
+        b.Property(x => x.Vendor).HasColumnName("fabricante").HasMaxLength(150);
+        b.Property(x => x.MachineId).HasColumnName("maquina_id");
+        b.Property(x => x.MachineName).HasColumnName("maquina_nombre").HasMaxLength(100);
+        b.Property(x => x.Source).HasColumnName("origen");
+        b.Property(x => x.From).HasColumnName("desde");
+        b.Property(x => x.To).HasColumnName("hasta");
+
+        b.HasOne<Subnet>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.SubnetId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade);
+        // FK simple: ON DELETE SET NULL no puede ser compuesta porque anularía empresa_id.
+        b.HasOne<Machine>().WithMany().HasForeignKey(x => x.MachineId).OnDelete(DeleteBehavior.SetNull);
     }
 }

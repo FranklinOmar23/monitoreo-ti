@@ -97,12 +97,19 @@ public sealed record RuleItem(
     decimal? Critical,
     int DurationMinutes,
     bool IsActive,
-    IReadOnlyList<RuleOverride> Overrides);
+    IReadOnlyList<RuleOverride> Overrides,
+    /// <summary>Servicio detenido: Centinela intenta iniciarlo solo (decisión 73).</summary>
+    bool AutoRepair = false,
+    /// <summary>Esta métrica admite reparación automática (hoy, solo servicio detenido).</summary>
+    bool CanAutoRepair = false);
 
-public sealed record RuleOverride(int Id, int BranchId, string BranchName, decimal? Warning, decimal? Critical, int DurationMinutes, bool IsActive);
+public sealed record RuleOverride(
+    int Id, int BranchId, string BranchName, decimal? Warning, decimal? Critical, int DurationMinutes, bool IsActive, bool AutoRepair = false);
 
 /// <summary>Crea o cambia la regla de una métrica para toda la empresa (SucursalId null) o para una sucursal.</summary>
-public sealed record RuleInput(string Metrica, int? SucursalId, decimal? UmbralAdvertencia, decimal? UmbralCritico, int DuracionMin, bool Activa);
+/// <param name="RepararAuto">Solo servicio detenido; null = no se cambia.</param>
+public sealed record RuleInput(
+    string Metrica, int? SucursalId, decimal? UmbralAdvertencia, decimal? UmbralCritico, int DuracionMin, bool Activa, bool? RepararAuto = null);
 
 public sealed class RuleInputValidator : AbstractValidator<RuleInput>
 {

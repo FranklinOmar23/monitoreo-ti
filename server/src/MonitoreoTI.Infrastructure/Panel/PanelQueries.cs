@@ -257,7 +257,7 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
 
         var problems = await db.Alerts.AsNoTracking().Where(a => a.MachineId == id && a.Status != AlertStatus.Resolved)
             .OrderByDescending(a => a.Level).ThenByDescending(a => a.CreatedAt)
-            .Select(a => new { a.Id, a.Level, a.Message, a.Detail, a.Advice, a.Source, a.CreatedAt })
+            .Select(a => new { a.Id, a.Level, a.Message, a.Detail, a.Advice, a.Source, a.CreatedAt, a.Code })
             .ToListAsync(ct);
 
         var volumes = await db.Volumes.AsNoTracking().Where(v => v.MachineId == id)
@@ -275,7 +275,7 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             m.DepartmentId, machine.Department, m.LastReportAt, m.CreatedAt, machine.AgentVersion, machine.HasAgent,
             m.Status == MachineStatus.Disconnected ? null : metric,
             components.Select(c => new ComponentItem(c.Id, c.Type, c.Description, c.Capacity, Text(c.HealthStatus), c.Detail, c.UpdatedAt)).ToList(),
-            problems.Select(p => new OpenProblem(p.Id, Text(p.Level), p.Message, p.Detail, p.Advice, p.Source, p.CreatedAt)).ToList(),
+            problems.Select(p => new OpenProblem(p.Id, Text(p.Level), p.Message, p.Detail, p.Advice, p.Source, p.CreatedAt, p.Code)).ToList(),
             errors,
             m.RamTotalMb,
             m.ProcessCount,

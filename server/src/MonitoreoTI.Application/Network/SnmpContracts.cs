@@ -11,7 +11,9 @@ namespace MonitoreoTI.Application.Network;
 /// sellada para ese agente (ver <see cref="SnmpCredentialSeal"/>): claves v3 {auth, priv} o comunidad v2c {community}.
 /// </summary>
 public sealed record CollectorDevice(
-    int Id, string Nombre, string Ip, string Tipo, string Usuario, string Credencial, string Version = "v3", string Origen = "dispositivo");
+    int Id, string Nombre, string Ip, string Tipo, string Usuario, string Credencial, string Version = "v3", string Origen = "dispositivo",
+    /// <summary>API REST del FortiGate (decisión 76), si tiene token: el recolector la lee después de cada sondeo.</summary>
+    CollectorApi? Api = null);
 
 public sealed record CollectorConfig(int IntervaloSegundos, IReadOnlyList<CollectorDevice> Dispositivos);
 
@@ -48,7 +50,8 @@ public sealed record SnmpInterfazData(
 
 public sealed record SnmpMacData(int IfIndex, string Mac, int? Vlan);
 
-public sealed record SnmpArpData(string Mac, string Ip);
+/// <param name="IfIndex">Interfaz del equipo donde está esa entrada de la ARP (agente 0.3.5 en adelante).</param>
+public sealed record SnmpArpData(string Mac, string Ip, int? IfIndex = null);
 
 public sealed record SnmpVecinoData(int PuertoLocal, string? Sistema, string? Puerto);
 
@@ -65,6 +68,13 @@ public interface ISnmpCollectors
 public interface ICollectorConfigPublisher
 {
     Task ConfigChangedAsync(int companyId, IEnumerable<int> agentIds, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// "Sondear ahora": el recolector consulta ese dispositivo enseguida. Los agentes anteriores a
+    /// <see cref="SnmpRules.PollNowVersion"/> no conocen el mensaje: se les reenvía la lista y sondean en unos segundos.
+    /// false si el recolector no está conectado.
+    /// </summary>
+    Task<bool> PollNowAsync(int companyId, int agentId, int deviceId, bool agentSupportsPollNow, CancellationToken cancellationToken);
 }
 
 /// <summary>

@@ -57,7 +57,7 @@ export function DevicesList({ canEdit, onOpenDevice }: { canEdit: boolean; onOpe
         )}
       </div>
       {list.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={7} />
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : (
@@ -169,7 +169,7 @@ export function OutletsList({ canEdit }: { canEdit: boolean }) {
         </p>
       )}
       {list.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={6} />
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : (
@@ -254,7 +254,7 @@ export function CatalogList({ canEdit }: { canEdit: boolean }) {
         </div>
       )}
       {models.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={6} />
       ) : models.isError ? (
         <ErrorState error={models.error} onRetry={() => void models.refetch()} />
       ) : (

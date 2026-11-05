@@ -47,7 +47,7 @@ function TabState({
   empty: string;
   children: () => React.ReactNode;
 }) {
-  if (query.isPending) return <Loading />;
+  if (query.isPending) return <Loading variant="table" rows={6} columns={4} />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   if (query.data.length === 0) return <EmptyState title={empty} />;
   return <>{children()}</>;
@@ -463,7 +463,7 @@ function InfoTab({ machine }: { machine: MachineDetail }) {
       </Card>
       <Card title="Etiqueta QR">
         {qr.isPending ? (
-          <Loading />
+          <Loading variant="table" rows={6} columns={4} />
         ) : qr.isError ? (
           <ErrorState error={qr.error} />
         ) : (

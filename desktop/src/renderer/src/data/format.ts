@@ -69,6 +69,13 @@ export function dateTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString('es-DO', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/** Día, mes y hora local corta para bitácoras: "03/11 09:12". */
+export function shortDateTime(iso: string): string {
+  const d = new Date(iso);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 /** Hora local "09:15" para el eje de las gráficas. */
 export function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: false });

@@ -79,6 +79,12 @@ function TokenList() {
     onSuccess: () => void queries.invalidateQueries({ queryKey: ['instaladores'] }),
   });
   const [deleting, setDeleting] = useState<InstallerToken | null>(null);
+  const [shown, setShown] = useState<CreatedInstallerToken | null>(null);
+  // "Ver comando": el servidor lo descifra y deja en la auditoría quién lo miró.
+  const reveal = useMutation({
+    mutationFn: (id: number) => api.installerCommand(id),
+    onSuccess: (token) => setShown(token),
+  });
 
   if (tokens.isPending) return <Loading />;
   if (tokens.isError) return <ErrorState error={tokens.error} onRetry={() => void tokens.refetch()} />;
@@ -91,6 +97,11 @@ function TokenList() {
 
   return (
     <div className="table-card">
+      {reveal.isError && (
+        <p className="auth-error" role="alert">
+          {reveal.error.message}
+        </p>
+      )}
       <table className="data-table">
         <thead>
           <tr>
@@ -126,6 +137,16 @@ function TokenList() {
                 <span className="row-sub"> {timeAgo(token.createdAt)}</span>
               </td>
               <td className="row-actions">
+                {token.canShowCommand && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    disabled={reveal.isPending}
+                    onClick={() => reveal.mutate(token.id)}
+                  >
+                    Ver comando
+                  </button>
+                )}
                 {token.state === 'activo' && (
                   <button
                     type="button"
@@ -145,6 +166,7 @@ function TokenList() {
         </tbody>
       </table>
       {deleting && <DeleteTokenDialog token={deleting} onClose={() => setDeleting(null)} />}
+      {shown && <CreatedToken token={shown} again onClose={() => setShown(null)} />}
     </div>
   );
 }
@@ -201,7 +223,7 @@ function PendingList({ query }: { query: UseQueryResult<PendingAgent[]> }) {
     },
   });
 
-  if (query.isPending) return <Loading />;
+  if (query.isPending) return <Loading variant="table" columns={5} />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   if (query.data.length === 0)
     return (
@@ -366,7 +388,15 @@ function TokenForm({ onClose, onCreated }: { onClose: () => void; onCreated: (to
   );
 }
 
-function CreatedToken({ token, onClose }: { token: CreatedInstallerToken; onClose: () => void }) {
+function CreatedToken({
+  token,
+  again,
+  onClose,
+}: {
+  token: CreatedInstallerToken;
+  again?: boolean;
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState<string | null>(null);
   // El portapapeles pasa por el proceso principal: el panel niega los permisos web, incluido el de portapapeles.
   const copy = (label: string, text: string) => {
@@ -379,7 +409,7 @@ function CreatedToken({ token, onClose }: { token: CreatedInstallerToken; onClos
 
   return (
     <Modal
-      title="Token creado"
+      title={again ? 'Comando de instalación' : 'Token creado'}
       onClose={onClose}
       wide
       footer={
@@ -389,7 +419,8 @@ function CreatedToken({ token, onClose }: { token: CreatedInstallerToken; onClos
       }
     >
       <p className="auth-info">
-        Copie el token ahora: por seguridad no se vuelve a mostrar. Vence el {dateTime(token.vence)}.
+        Vence el {dateTime(token.vence)}. Mientras siga activo puede volver a verlo con "Ver comando" en la lista (queda
+        registrado quién lo mira).
       </p>
       <div className="secret-box">
         <span className="eyebrow">Token</span>

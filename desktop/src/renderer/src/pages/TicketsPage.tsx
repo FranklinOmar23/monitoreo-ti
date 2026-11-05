@@ -211,7 +211,7 @@ function TicketBrowser({
       )}
 
       {list.isPending ? (
-        <Loading />
+        <Loading variant="table" columns={7} />
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : view === 'tablero' ? (

@@ -9,6 +9,27 @@ import { FilePanel } from './FilePanel';
 import { browserSocket, connectRelay, type RelaySocketFactory } from './RemoteSession';
 import { loadWindowTicket } from './windowTicket';
 
+/** La barra se esconde tras este tiempo sin el mouse encima (y al empezar, tras un poco más). */
+const TOOLBAR_HIDE_MS = 1500;
+const TOOLBAR_FIRST_HIDE_MS = 3000;
+const PINNED_KEY = 'centinela.escritorio.barraFija';
+
+function readPinned(): boolean {
+  try {
+    return localStorage.getItem(PINNED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function savePinned(value: boolean): void {
+  try {
+    localStorage.setItem(PINNED_KEY, value ? '1' : '0');
+  } catch {
+    // Sin almacenamiento local la preferencia dura solo esta sesión.
+  }
+}
+
 type Phase =
   | { kind: 'cargando' }
   | { kind: 'conectando' }
@@ -73,6 +94,33 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
   const [remoteClipboard, setRemoteClipboard] = useState('');
   const [textToSend, setTextToSend] = useState('');
   const [size, setSize] = useState('—');
+  // Barra que se oculta sola (se recuerda si el técnico la prefiere fija).
+  const [pinned, setPinned] = useState(() => readPinned());
+  const [revealed, setRevealed] = useState(true);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToolbar = () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    setRevealed(true);
+  };
+  const hideSoon = (ms = TOOLBAR_HIDE_MS) => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setRevealed(false), ms);
+  };
+  const togglePinned = () => {
+    const next = !pinned;
+    setPinned(next);
+    savePinned(next);
+    if (!next) hideSoon();
+  };
+  // Al empezar a ver la pantalla, la barra se muestra un momento y se esconde (si no está fija).
+  useEffect(() => {
+    if (!streaming || pinned) return;
+    hideTimer.current = setTimeout(() => setRevealed(false), TOOLBAR_FIRST_HIDE_MS);
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [streaming, pinned]);
+  const toolbarHidden = !pinned && !revealed && menu === null;
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<WebSocket | null>(null);
   const canvasEl = useRef<HTMLCanvasElement | null>(null);
@@ -327,8 +375,36 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
             </div>
           )}
 
+          {streaming && !pinned && (
+            <>
+              {/* Llevar el mouse al borde de arriba la muestra. */}
+              <div className="desktop-toolbar-edge" aria-hidden="true" onPointerEnter={showToolbar} />
+              <button
+                type="button"
+                className="desktop-toolbar-handle"
+                data-hidden={toolbarHidden || undefined}
+                aria-label="Mostrar la barra de controles"
+                tabIndex={toolbarHidden ? 0 : -1}
+                onClick={showToolbar}
+                onPointerEnter={showToolbar}
+              >
+                <Icon name="chevronDown" size={14} />
+                <span className="mono">{launch?.machineName}</span>
+              </button>
+            </>
+          )}
+
           {streaming && (
-            <div className="desktop-toolbar" role="toolbar" aria-label="Controles del escritorio remoto">
+            <div
+              className="desktop-toolbar"
+              role="toolbar"
+              aria-label="Controles del escritorio remoto"
+              data-hidden={toolbarHidden || undefined}
+              onPointerEnter={showToolbar}
+              onPointerLeave={() => !pinned && hideSoon()}
+              onFocus={showToolbar}
+              onBlur={() => !pinned && hideSoon()}
+            >
               <div className="toolbar-id">
                 <strong>{launch?.machineName}</strong>
                 <span className="mono">{clock(elapsed)}</span>
@@ -616,6 +692,16 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
                   <Icon name="eye" size={15} /> Cambiar a solo ver
                 </button>
               </Menu>
+              <button
+                type="button"
+                className="tool-button"
+                aria-pressed={pinned}
+                title={pinned ? 'Barra fija: clic para que se oculte sola' : 'Se oculta sola: clic para dejarla fija'}
+                onClick={togglePinned}
+              >
+                <Icon name="pin" size={16} />
+                <span>{pinned ? 'Fija' : 'Auto'}</span>
+              </button>
               <button type="button" className="toolbar-end" onClick={finish}>
                 <Icon name="hangUp" size={16} /> Terminar
               </button>

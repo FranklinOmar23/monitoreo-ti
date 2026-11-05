@@ -57,6 +57,7 @@ public static class PanelWriteEndpoints
         var installers = api.MapGroup("/instaladores").RequireAuthorization(PermissionPolicies.InstallersGenerate);
         installers.MapGet("/", (PanelCommands commands, CancellationToken ct) => commands.EnrollmentTokensAsync(ct));
         installers.MapPost("/", CreateTokenAsync);
+        installers.MapGet("/{id:int}/comando", RevealTokenAsync);
         installers.MapPost("/{id:int}/revocar", async (int id, PanelCommands commands, CancellationToken ct) =>
             ToResult(await commands.RevokeEnrollmentTokenAsync(id, ct)));
         installers.MapDelete("/{id:int}", async (int id, PanelCommands commands, CancellationToken ct) =>
@@ -84,19 +85,28 @@ public static class PanelWriteEndpoints
             return invalid;
 
         var (result, token) = await commands.CreateEnrollmentTokenAsync(input, ct);
-        if (!result.Succeeded)
-            return ToResult(result);
+        return result.Succeeded ? Results.Ok(TokenResponse(token!, configuration, http)) : ToResult(result);
+    }
 
+    /// <summary>"Ver comando" de un token activo (decisión 73).</summary>
+    private static async Task<IResult> RevealTokenAsync(int id, PanelCommands commands, IConfiguration configuration, HttpContext http, CancellationToken ct)
+    {
+        var (result, token) = await commands.RevealEnrollmentTokenAsync(id, ct);
+        return result.Succeeded ? Results.Ok(TokenResponse(token!, configuration, http)) : ToResult(result);
+    }
+
+    private static object TokenResponse(CreatedEnrollmentToken token, IConfiguration configuration, HttpContext http)
+    {
         // URL con la que los agentes llegan al servidor (detrás de un proxy puede diferir de la de esta petición).
         var serverUrl = configuration["Instaladores:UrlServidor"] ?? $"{http.Request.Scheme}://{http.Request.Host}";
-        return Results.Ok(new
+        return new
         {
-            id = token!.Id,
+            id = token.Id,
             token = token.Token,
             vence = token.ExpiresAt,
             urlServidor = serverUrl,
             comando = $"{InstallerFileName} /S /SERVER={serverUrl} /TOKEN={token.Token}",
-        });
+        };
     }
 
     /// <summary>El instalador (.exe) lo genera la compilación del agente; el servidor solo lo entrega.</summary>

@@ -43,6 +43,19 @@ public static class AgentGatewayExtensions
         services.AddSingleton<ISnmpCollectors, SnmpCollectors>();
         services.AddSingleton<IAgentMessageHandler, SnmpResultHandler>();
         services.AddSingleton<ICollectorConfigPublisher, CollectorConfigPublisher>();
+        // Inventario de direcciones IP (decisión 72).
+        services.AddSingleton<IIpSweeps, IpSweeps>();
+        services.AddSingleton<IIpSweepDispatcher, IpSweepDispatcher>();
+        services.AddSingleton<IAgentMessageHandler, IpSweepResultHandler>();
+        services.AddHostedService<IpSweepScheduler>();
+        services.AddSingleton<FortiGateApiTester>();
+        services.AddSingleton<IFortiGateApiTester>(sp => sp.GetRequiredService<FortiGateApiTester>());
+        services.AddSingleton<IAgentMessageHandler, ApiTestResultHandler>();
+        services.AddSingleton<IFortiGateData, FortiGateData>();
+        services.AddSingleton<IAgentMessageHandler, FortiGateDataHandler>();
+        services.AddSingleton<IRemoteInstallDispatcher, RemoteInstallDispatcher>();
+        services.AddSingleton<IRemoteInstallStatus, RemoteInstallStatus>();
+        services.AddSingleton<IAgentMessageHandler, RemoteInstallStatusHandler>();
         services.AddSingleton<NetworkAlertEngine>();
         services.AddSingleton<AlertMailer>();
 

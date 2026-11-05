@@ -21,6 +21,7 @@ export const AGENT_MESSAGE_TYPES = [
   'salud_discos',
   'resultado_comando',
   'snmp_resultado',
+  'barrido_ip_resultado',
   'sesion_lista',
   'error_agente',
 ] as const;
@@ -35,6 +36,8 @@ export const SERVER_MESSAGE_TYPES = [
   'actualizar_agente',
   'solicitar_inventario',
   'config_actualizada',
+  'barrido_ip',
+  'sondear_ahora',
 ] as const;
 export type ServerMessageType = (typeof SERVER_MESSAGE_TYPES)[number];
 

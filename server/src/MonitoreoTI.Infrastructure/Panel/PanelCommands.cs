@@ -278,6 +278,8 @@ public sealed class PanelCommands(
             BranchId = input.SucursalId,
             Name = Clean(input.Nombre),
             TokenHash = hash,
+            // Cifrado por la aplicación para volver a mostrar el comando; en la base no queda en claro.
+            EncryptedToken = Encoding.UTF8.GetBytes(protector.Protect(token)),
             ExpiresAt = Now.AddDays(input.DiasVigencia),
             MaxUses = input.UsosMax,
             RequiresApproval = input.RequiereAprobacion,
@@ -286,7 +288,7 @@ public sealed class PanelCommands(
         db.EnrollmentTokens.Add(entity);
         await db.SaveChangesAsync(ct);
 
-        // El token en claro no se guarda ni se audita: solo se muestra una vez al crearlo.
+        // El token en claro no se guarda ni se audita: va cifrado y solo se muestra a quien puede generar instaladores.
         await audit.RecordAsync("instalador.crear", "tokens_registro", entity.Id.ToString(), null, new
         {
             sucursalId = entity.BranchId,
@@ -349,13 +351,39 @@ public sealed class PanelCommands(
             })
             .ToListAsync(ct);
 
-        return rows.Select(r => new EnrollmentTokenItem(
-            r.t.Id, r.t.Name, r.t.BranchId, r.Branch ?? "—", r.t.ExpiresAt, r.t.MaxUses, r.t.Uses, r.t.RequiresApproval,
-            r.t.RevokedAt, r.t.CreatedAt, r.CreatedBy,
-            r.t.RevokedAt is not null ? "revocado"
-                : r.t.ExpiresAt <= now ? "vencido"
-                : r.t.MaxUses is int max && r.t.Uses >= max ? "agotado"
-                : "activo")).ToList();
+        return rows.Select(r =>
+        {
+            var state = TokenState(r.t, now);
+            return new EnrollmentTokenItem(
+                r.t.Id, r.t.Name, r.t.BranchId, r.Branch ?? "—", r.t.ExpiresAt, r.t.MaxUses, r.t.Uses, r.t.RequiresApproval,
+                r.t.RevokedAt, r.t.CreatedAt, r.CreatedBy, state, state == "activo" && r.t.EncryptedToken is not null);
+        }).ToList();
+    }
+
+    private static string TokenState(EnrollmentToken t, DateTime now) =>
+        t.RevokedAt is not null ? "revocado"
+            : t.ExpiresAt <= now ? "vencido"
+            : t.MaxUses is int max && t.Uses >= max ? "agotado"
+            : "activo";
+
+    /// <summary>
+    /// Volver a ver el token de instalación (decisión 73): solo si sigue activo y se guardó cifrado. Queda en la
+    /// auditoría quién lo miró (sin el token).
+    /// </summary>
+    public async Task<(CommandResult Result, CreatedEnrollmentToken? Token)> RevealEnrollmentTokenAsync(int id, CancellationToken ct)
+    {
+        var allowed = await user.AllowedBranchIdsAsync(ct);
+        var entity = await db.EnrollmentTokens.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (entity is null || (allowed is not null && !allowed.Contains(entity.BranchId)))
+            return (CommandResult.NotFound(), null);
+        var state = TokenState(entity, Now);
+        if (state != "activo")
+            return (CommandResult.Conflict($"El token está {state}: genere uno nuevo."), null);
+        if (entity.EncryptedToken is null || protector.Unprotect(Encoding.UTF8.GetString(entity.EncryptedToken)) is not { } token)
+            return (CommandResult.Conflict("Este token se creó antes de poder verse de nuevo: genere uno nuevo."), null);
+
+        await audit.RecordAsync("instalador.ver_token", "tokens_registro", id.ToString(), null, new { nombre = entity.Name }, ct);
+        return (CommandResult.Ok(id), new CreatedEnrollmentToken(id, token, entity.ExpiresAt));
     }
 
     public async Task<IReadOnlyList<PendingAgentItem>> PendingAgentsAsync(CancellationToken ct)

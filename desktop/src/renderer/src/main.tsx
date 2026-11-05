@@ -2,6 +2,7 @@ import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
+import './tecnico.css';
 import './animations.css';
 import { startDeepLinks } from './data/deepLinks';
 import { applyBrandColor, cachedAppearance } from './theme/brand';

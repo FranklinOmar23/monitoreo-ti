@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RackDevice, RackItem, RoomItem } from '@monitoreoti/shared';
+import type { RackDevice, RackItem, RoomItem, TopologyEndpoint } from '@monitoreoti/shared';
 import { fakeNetworkApi, fakePanelApi, renderWithPanel } from '../../test/fakes';
 import { RedPage } from './RedPage';
 import { deviceBoxes, layoutRoom, planRows, U_METERS, worstStatus } from './scene3d';
@@ -114,7 +114,7 @@ describe('topología (W-51)', () => {
     expect(level).toEqual({ 'SW-CORE-01': 0, 'SW-ACC-01': 1, 'SW-ACC-02': 1, 'AP-SUELTO': 2 });
   });
 
-  it('un clic en un equipo del mapa lo abre', async () => {
+  it('un clic muestra el detalle y el doble clic abre el equipo', async () => {
     renderWithPanel(
       <RedPage canEdit={false} onOpenEquipo={vi.fn()} initialTab="topologia" />,
       fakePanelApi({
@@ -129,8 +129,87 @@ describe('topología (W-51)', () => {
       }),
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'SW-CORE-01: En línea' }));
+    const node = await screen.findByRole('button', { name: 'SW-CORE-01: En línea' });
+    fireEvent.click(node);
+    expect(screen.getByRole('button', { name: 'Abrir dispositivo' })).toBeTruthy();
+    fireEvent.doubleClick(node);
     // Abre la vista del dispositivo (mientras carga, la ruta muestra su número).
     expect(await screen.findByText('#2')).toBeTruthy();
+  });
+
+  it('cuelga los equipos de cada puerto bajo su switch, con filtros y detalle', async () => {
+    const onOpenEquipo = vi.fn();
+    const endpoint = (portNumber: number, overrides: Partial<TopologyEndpoint>): TopologyEndpoint => ({
+      deviceId: 2,
+      portId: 100 + portNumber,
+      portNumber,
+      portLabel: `p${portNumber}`,
+      vlan: 10,
+      speedMbps: 1000,
+      mac: `00:11:22:33:44:${String(portNumber).padStart(2, '0')}`,
+      ip: `192.168.3.${portNumber}`,
+      vendor: null,
+      machineId: null,
+      machineName: null,
+      machineStatus: null,
+      hasAgent: false,
+      category: 'desconocido',
+      categoryInferred: false,
+      kind: 'detectado',
+      firstSeenAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      ...overrides,
+    });
+    renderWithPanel(
+      <RedPage canEdit={false} onOpenEquipo={onOpenEquipo} initialTab="topologia" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          topology: () =>
+            Promise.resolve({
+              nodes: [
+                {
+                  id: 2,
+                  name: 'SW-SD-01',
+                  type: 'switch',
+                  status: 'en_linea',
+                  branchName: 'SD',
+                  trunks: 1,
+                  branchId: 1,
+                },
+              ],
+              links: [],
+              macTableReadAt: new Date().toISOString(),
+              endpoints: [
+                endpoint(4, {
+                  machineId: 42,
+                  machineName: 'PC-042076',
+                  category: 'pc',
+                  hasAgent: true,
+                  machineStatus: 'sano',
+                }),
+                endpoint(12, { vlan: 30, vendor: 'Yealink', category: 'telefono', categoryInferred: true }),
+              ],
+            }),
+          path: () => Promise.resolve([]),
+        }),
+      }),
+    );
+
+    expect(await screen.findByRole('button', { name: /PC-042076, PC, puerto p4, VLAN 10/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Yealink, Teléfono IP, puerto p12, VLAN 30/ }));
+    expect(await screen.findByText('Teléfono IP · deducido por el fabricante de la MAC')).toBeTruthy();
+
+    // Filtro de VLAN: solo queda el teléfono.
+    fireEvent.change(screen.getByLabelText('VLAN:'), { target: { value: '30' } });
+    expect(screen.queryByRole('button', { name: /PC-042076, PC/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText('VLAN:'), { target: { value: '' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /PC-042076, PC/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Abrir ficha' }));
+    expect(onOpenEquipo).toHaveBeenCalledWith(42);
+
+    // Solo red: desaparecen los equipos finales.
+    fireEvent.click(screen.getByRole('button', { name: 'Solo red' }));
+    expect(screen.queryByRole('button', { name: /PC-042076, PC/ })).toBeNull();
   });
 });

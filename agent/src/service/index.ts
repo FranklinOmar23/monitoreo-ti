@@ -38,6 +38,7 @@ import { GatewayClient } from './gateway-client';
 import { readMachineIdentity } from './machine-info';
 import { Outbox } from './outbox';
 import { AgentRuntime, type Log } from './runtime';
+import { hostIpSweep } from './ipsweep';
 import { hostSnmpQuery } from './snmp';
 
 const log: Log = (level, message, extra = {}) => {
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
     },
     // El anfitrión C# (que lanza este proceso) hace las consultas SNMP; en desarrollo sin él, el sondeo informa el error.
     snmp: { credential: credential.credential, query: hostSnmpQuery(process.env['MONITOREOTI_HOST_EXE']) },
+    ipSweep: hostIpSweep(process.env['MONITOREOTI_HOST_EXE']),
     sessions: new RemoteSessions({
       serverUrl: config.serverUrl,
       handlers: {

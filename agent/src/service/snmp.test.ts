@@ -46,6 +46,38 @@ describe('recolector SNMP', () => {
     expect(JSON.stringify(sent[0])).not.toContain('clave-');
   });
 
+  it('sondea un dispositivo al pedirlo el panel, sin esperar su turno', async () => {
+    const sent: Envelope[] = [];
+    const query = vi.fn(() => Promise.resolve({ ok: true }));
+    const poller = new SnmpPoller({ credential: CREDENTIAL, query, submit: (e) => sent.push(e), log: vi.fn() });
+    poller.configure({ intervalSeconds: 300, devices: [device] });
+
+    expect(poller.pollById(99)).toBe(false);
+    expect(poller.pollById(12)).toBe(true);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.datos).toMatchObject({ dispositivoId: 12, ok: true });
+    poller.stop();
+  });
+
+  it('lee la ARP de un dispositivo asignado para el barrido de IP', async () => {
+    const requests: SnmpQueryRequest[] = [];
+    const poller = new SnmpPoller({
+      credential: CREDENTIAL,
+      query: (request) => {
+        requests.push(request);
+        return Promise.resolve({ ok: true, arp: [{ ip: '10.0.0.5', mac: 'AA:BB:CC:00:00:05' }] });
+      },
+      submit: vi.fn(),
+      log: vi.fn(),
+    });
+    poller.configure({ intervalSeconds: 300, devices: [device] });
+
+    await expect(poller.arpOf(12)).resolves.toEqual([{ ip: '10.0.0.5', mac: 'AA:BB:CC:00:00:05' }]);
+    await expect(poller.arpOf(99)).resolves.toBeNull();
+    expect(requests[0]).toMatchObject({ ip: '10.10.0.2', consultas: ['arp'], claveAutenticacion: 'clave-auth-1' });
+    poller.stop();
+  });
+
   it('una impresora v2c se consulta con su comunidad, solo por sus consumibles', async () => {
     const printerSealed = 'pL6nOaxFcMLi6ZftkJgpdD2OJVJBxuxYCFID7JpofMveeMStoJdkiksiMgSt4wCLCjLGH4k8HXMNEaxhgDE=';
     const requests: SnmpQueryRequest[] = [];

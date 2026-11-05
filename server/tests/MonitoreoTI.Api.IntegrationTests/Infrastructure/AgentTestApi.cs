@@ -190,6 +190,10 @@ public sealed class AgentTestApi : IAsyncDisposable
             DELETE FROM dbo.auditoria WHERE accion LIKE 'agente.%' AND detalle LIKE '%"mac":"02:%';
             DELETE a FROM dbo.auditoria a JOIN dbo.maquinas m ON a.entidad = 'maquinas' AND a.entidad_id = CAST(m.id AS VARCHAR(20)) WHERE m.mac LIKE '02:%' OR m.nombre LIKE 'PRUEBA-%';
             DELETE FROM dbo.reglas_alerta WHERE sucursal_id IS NOT NULL;
+            DELETE FROM dbo.tokens_registro WHERE nombre = N'Volver a ver';
+            DELETE FROM dbo.subredes WHERE nombre LIKE N'Red 10.%'
+                OR recolector_id IN (SELECT a.id FROM dbo.agentes a JOIN dbo.maquinas m ON m.id = a.maquina_id WHERE m.mac LIKE '02:%')
+                OR dispositivo_arp_id IN (SELECT id FROM dbo.dispositivos_red WHERE nombre LIKE 'PRUEBA-%');
             DELETE c FROM dbo.cableado c JOIN dbo.puertos p ON p.id IN (c.puerto_a_id, c.puerto_b_id)
                 JOIN dbo.dispositivos_red d ON d.id = p.dispositivo_id WHERE d.nombre LIKE 'PRUEBA-%';
             DELETE c FROM dbo.cableado c JOIN dbo.puntos_red r ON r.id = c.punto_red_id WHERE r.codigo LIKE 'PRUEBA-%';

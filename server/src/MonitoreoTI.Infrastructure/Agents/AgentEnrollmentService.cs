@@ -85,6 +85,14 @@ public sealed class AgentEnrollmentService(MonitoreoDbContext db, TenantContext 
 
             await db.SaveChangesAsync(cancellationToken);
 
+            // Instalación remota (decisión 77): el equipo que llega con el token de esa instalación la da por terminada.
+            await db.RemoteInstalls.Where(r => r.EnrollmentTokenId == token.Id)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(r => r.Status, "registrado")
+                    .SetProperty(r => r.MachineId, machine.Id)
+                    .SetProperty(r => r.Detail, (string?)null)
+                    .SetProperty(r => r.UpdatedAt, DateTime.UtcNow), cancellationToken);
+
             db.AuditLogs.Add(new AuditLog
             {
                 Action = isReinstall ? "agente.reinstalacion" : "agente.registro",

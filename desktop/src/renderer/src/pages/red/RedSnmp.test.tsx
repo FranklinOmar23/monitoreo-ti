@@ -214,7 +214,9 @@ describe('Recolector SNMP y correlación (Fase 4.2 y 4.3)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'SW-ACC-02' }));
     expect((await screen.findByRole('alert')).textContent).toContain('usuario desconocido');
-    expect(screen.getByText(/lo consulta CONTA-01/)).toBeTruthy();
+    expect(screen.getByText('CONTA-01').closest('li')?.textContent).toContain('Lo consulta CONTA-01');
+    // El usuario SNMP rechazado se muestra con su código.
+    expect(screen.getByText('ERR_SNMP_AUTH')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('listitem', { name: 'Puerto Gi1/0/5: Libre' }));
     fireEvent.click(screen.getByRole('button', { name: 'Asignar a mano' }));
@@ -225,6 +227,63 @@ describe('Recolector SNMP y correlación (Fase 4.2 y 4.3)', () => {
     fireEvent.submit(dialog.querySelector('form')!);
 
     await waitFor(() => expect(assignPort).toHaveBeenCalledWith(105, { maquinaId: 3, troncal: null }));
+  });
+
+  it('"Sondear ahora" pide el sondeo al recolector y espera el resultado', async () => {
+    const pollDevice = vi.fn(() => Promise.resolve({ id: 10 }));
+    renderWithPanel(
+      <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="dispositivos" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          devices: () => Promise.resolve(summary.attention),
+          device: () => Promise.resolve(device),
+          pollDevice,
+        }),
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'SW-ACC-02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sondear ahora' }));
+    await waitFor(() => expect(pollDevice).toHaveBeenCalledWith(10));
+    // Mientras no cambie el resultado del sondeo, el botón espera.
+    expect(await screen.findByRole('button', { name: 'Sondeando…' })).toBeTruthy();
+  });
+
+  it('si el recolector no está conectado lo dice', async () => {
+    const pollDevice = vi.fn(() =>
+      Promise.reject(new Error('El recolector CONTA-01 no está conectado; se sondeará cuando vuelva.')),
+    );
+    renderWithPanel(
+      <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="dispositivos" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          devices: () => Promise.resolve(summary.attention),
+          device: () => Promise.resolve({ ...device, lastError: null }),
+          pollDevice,
+        }),
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'SW-ACC-02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sondear ahora' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('no está conectado');
+    expect(screen.getByRole('button', { name: 'Sondear ahora' })).toBeTruthy();
+  });
+
+  it('sin permiso de edición no hay botón para sondear', async () => {
+    renderWithPanel(
+      <RedPage canEdit={false} onOpenEquipo={vi.fn()} initialTab="dispositivos" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          devices: () => Promise.resolve(summary.attention),
+          device: () => Promise.resolve(device),
+        }),
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'SW-ACC-02' }));
+    await screen.findByRole('heading', { name: 'SW-ACC-02' });
+    expect(screen.queryByRole('button', { name: 'Sondear ahora' })).toBeNull();
   });
 
   it('la ficha muestra el switch, el puerto y la VLAN del equipo', async () => {

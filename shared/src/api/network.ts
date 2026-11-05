@@ -145,6 +145,30 @@ export interface DeviceDetail {
   collectorName: string | null;
   /** Por qué falló el último sondeo SNMP (null si respondió). */
   lastError: string | null;
+  /** API REST del FortiGate (opcional): dirección, si hay token guardado y cómo fue la última lectura. */
+  apiUrl?: string | null;
+  hasApiToken?: boolean;
+  apiAcceptSelfSigned?: boolean;
+  apiLastOkAt?: string | null;
+  apiLastError?: string | null;
+}
+
+/** "Probar API": la dirección y el token del formulario; sin token se prueba el guardado. */
+export interface ApiTestInput {
+  apiUrl: string | null;
+  apiToken: string | null;
+  apiAceptarCertificado: boolean;
+}
+
+/** Lo que respondió el FortiGate (system/status) a través del recolector. */
+export interface ApiTestResult {
+  ok: boolean;
+  error: string | null;
+  model: string | null;
+  version: string | null;
+  hostname: string | null;
+  serial: string | null;
+  milliseconds: number | null;
 }
 
 /** Un equipo con agente que puede consultar por SNMP los equipos de su sucursal. */
@@ -232,6 +256,40 @@ export interface TopologyNode {
   status: DeviceStatus;
   branchName: string;
   trunks: number;
+  branchId?: number;
+  managementIp?: string | null;
+  modelName?: string | null;
+  /** Access point: MAC (clientes Wi-Fi) vistas por su puerto en 24 h. */
+  clients?: number;
+}
+
+export type EndpointCategory =
+  'pc' | 'servidor' | 'impresora' | 'telefono' | 'camara' | 'access_point' | 'otro' | 'desconocido';
+
+/** Un equipo final en un puerto de acceso (decisión 74). */
+export interface TopologyEndpoint {
+  deviceId: number;
+  portId: number;
+  portNumber: number;
+  portLabel: string;
+  vlan: number | null;
+  speedMbps: number | null;
+  mac: string | null;
+  ip: string | null;
+  vendor: string | null;
+  machineId: number | null;
+  machineName: string | null;
+  machineStatus: string | null;
+  hasAgent: boolean;
+  category: EndpointCategory;
+  /** Deducida del fabricante de la MAC. */
+  categoryInferred: boolean;
+  /** detectado: visto en 24 h; documentado: asignado a mano y sin verse. */
+  kind: 'detectado' | 'documentado';
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  /** Nombre que dio en la red (NetBIOS o DNS). */
+  hostname?: string | null;
 }
 
 export interface TopologyLink {
@@ -246,6 +304,9 @@ export interface TopologyLink {
 export interface Topology {
   nodes: TopologyNode[];
   links: TopologyLink[];
+  endpoints?: TopologyEndpoint[];
+  /** Último sondeo SNMP bueno de los equipos del mapa. */
+  macTableReadAt?: string | null;
 }
 
 /** "Conexión de red" de la ficha del equipo. */
@@ -345,6 +406,10 @@ export interface DeviceInput {
   snmpClavePrivacidad?: string | null;
   /** Agente de la misma sucursal que lo consulta por SNMP. */
   recolectorId?: number | null;
+  /** API REST del FortiGate: vacía la quita; el token null conserva el guardado. */
+  apiUrl?: string | null;
+  apiToken?: string | null;
+  apiAceptarCertificado?: boolean;
 }
 
 export interface PortInput {
@@ -457,6 +522,123 @@ export const IMPORT_COLUMNS: Record<ImportType, string[]> = {
   ],
 };
 
+// ------------------------------------------------------------------ direcciones IP (decisión 72)
+
+/** en_uso: visto en 24 h y se sabe qué equipo es; sin_identificar: visto pero desconocido; reciente: visto en los días de la subred. */
+export type IpState = 'en_uso' | 'sin_identificar' | 'reciente' | 'reservada' | 'libre';
+
+export interface SubnetItem {
+  id: number;
+  name: string;
+  branchId: number;
+  branchName: string;
+  /** "192.168.3.0/24". */
+  cidr: string;
+  vlan: number | null;
+  gateway: string | null;
+  collectorId: number | null;
+  collectorName: string | null;
+  collectorOnline: boolean;
+  /** Su agente sabe barrer con ping (0.3.4 o posterior); si no, la subred se llena con la ARP. */
+  collectorCanSweep: boolean;
+  arpDeviceId: number | null;
+  arpDeviceName: string | null;
+  /** 0 = solo a mano. */
+  sweepHours: number;
+  freeAfterDays: number;
+  lastSweepAt: string | null;
+  /** Barrido pedido que aún no vuelve. */
+  sweepRequestedAt: string | null;
+  lastError: string | null;
+  total: number;
+  /** En uso (conocidas y sin identificar). */
+  used: number;
+  unidentified: number;
+  recent: number;
+  reserved: number;
+  free: number;
+}
+
+export interface IpItem {
+  ip: string;
+  state: IpState;
+  mac: string | null;
+  vendor: string | null;
+  machineId: number | null;
+  machineName: string | null;
+  /** agente: la IP la reporta el equipo; mac: la MAC de la ARP es de un equipo conocido. */
+  machineSource: 'agente' | 'mac' | null;
+  /** Switch y puerto donde se ve su MAC. */
+  port: string | null;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  lastPingAt: string | null;
+  reservation: string | null;
+  isGateway: boolean;
+  /** Cambió de MAC en los últimos 7 días: equipo reemplazado o IP duplicada. */
+  macChanged: boolean;
+  previousMac: string | null;
+  /** Nombre que dio el equipo en la red: NetBIOS (Windows) o DNS inverso. */
+  hostname?: string | null;
+  hostnameSource?: 'netbios' | 'dns' | 'fortigate' | null;
+  /** Interfaz o VLAN del firewall donde se vio en la ARP. */
+  interface?: string | null;
+  /** Según la API del FortiGate: sistema operativo y si la IP es del DHCP (hasta cuándo) o fija. */
+  operatingSystem?: string | null;
+  assignment?: 'dhcp' | 'fija' | null;
+  dhcpExpiresAt?: string | null;
+}
+
+/** Un período del historial de una IP: quién la tuvo, desde cuándo y hasta cuándo. */
+export interface IpHistoryItem {
+  mac: string | null;
+  vendor: string | null;
+  machineId: number | null;
+  machineName: string | null;
+  source: 'arp' | 'ping' | 'agente';
+  from: string;
+  to: string;
+  /** Todavía la tiene. */
+  current: boolean;
+}
+
+export interface IpReservationItem {
+  id: number;
+  from: string;
+  to: string;
+  reason: string;
+  count: number;
+  /** manual o fortigate (del DHCP del FortiGate: se sincroniza sola y no se borra aquí). */
+  origin?: 'manual' | 'fortigate';
+}
+
+export interface SubnetDetail {
+  subnet: SubnetItem;
+  addresses: IpItem[];
+  reservations: IpReservationItem[];
+  /** La primera dirección libre de verdad. */
+  suggested: string | null;
+}
+
+export interface SubnetInput {
+  nombre: string;
+  sucursalId: number;
+  /** "192.168.3.0/24" (de /22 a /30). */
+  red: string;
+  vlan: number | null;
+  puertaEnlace: string | null;
+  recolectorId: number | null;
+  dispositivoArpId: number | null;
+  barridoHoras: number;
+  diasLibre: number;
+}
+
+export interface IpReservationInput {
+  desde: string;
+  hasta: string;
+  motivo: string;
+}
+
 type Id = { id: number };
 
 export interface NetworkApi {
@@ -477,6 +659,10 @@ export interface NetworkApi {
   saveDevice(id: number | null, input: DeviceInput): Promise<Id>;
   placeDevice(id: number, rackId: number | null, positionU: number | null): Promise<Id>;
   retireDevice(id: number): Promise<Id>;
+  /** "Sondear ahora": el recolector lo consulta enseguida; 409 si no está conectado. */
+  pollDevice(id: number): Promise<Id>;
+  /** "Probar API": el recolector consulta el FortiGate con esa dirección y token; 409 si no está conectado. */
+  testDeviceApi(id: number, input: ApiTestInput): Promise<ApiTestResult>;
   savePort(id: number, input: PortInput): Promise<Id>;
   saveOutlet(id: number | null, input: OutletInput): Promise<Id>;
   deleteOutlet(id: number): Promise<Id>;
@@ -492,6 +678,16 @@ export interface NetworkApi {
   assignPort(id: number, input: PortAssignmentInput): Promise<Id>;
   previewImport(type: ImportType, content: string): Promise<ImportResult>;
   runImport(type: ImportType, content: string): Promise<ImportResult>;
+  subnets(branchId?: number | null): Promise<SubnetItem[]>;
+  subnet(id: number): Promise<SubnetDetail>;
+  saveSubnet(id: number | null, input: SubnetInput): Promise<Id>;
+  deleteSubnet(id: number): Promise<Id>;
+  addReservation(subnetId: number, input: IpReservationInput): Promise<Id>;
+  deleteReservation(subnetId: number, id: number): Promise<Id>;
+  /** Quién tuvo esa IP en los últimos días (1 a 90). */
+  ipHistory(subnetId: number, ip: string, days: number): Promise<IpHistoryItem[]>;
+  /** "Escanear ahora": 409 si el recolector no está conectado. */
+  sweepSubnet(id: number): Promise<Id>;
 }
 
 export function createNetworkApi(
@@ -520,6 +716,8 @@ export function createNetworkApi(
     placeDevice: (id, rackId, positionU) =>
       send('PUT', `/red/dispositivos/${id}/ubicacion`, { gabineteId: rackId, posicionU: positionU }),
     retireDevice: (id) => send('POST', `/red/dispositivos/${id}/baja`),
+    pollDevice: (id) => send('POST', `/red/dispositivos/${id}/sondear`),
+    testDeviceApi: (id, input) => send('POST', `/red/dispositivos/${id}/probar-api`, input),
     savePort: (id, input) => send('PUT', `/red/puertos/${id}`, input),
     saveOutlet: (id, input) => save('/red/rosetas', id, input),
     deleteOutlet: (id) => send('DELETE', `/red/rosetas/${id}`),
@@ -535,5 +733,13 @@ export function createNetworkApi(
     assignPort: (id, input) => send('PUT', `/red/puertos/${id}/asignacion`, input),
     previewImport: (tipo, contenido) => send('POST', '/red/importar/vista-previa', { tipo, contenido }),
     runImport: (tipo, contenido) => send('POST', '/red/importar', { tipo, contenido }),
+    subnets: (branchId) => get('/red/subredes', { sucursal: branchId }),
+    subnet: (id) => get(`/red/subredes/${id}`),
+    saveSubnet: (id, input) => save('/red/subredes', id, input),
+    deleteSubnet: (id) => send('DELETE', `/red/subredes/${id}`),
+    addReservation: (subnetId, input) => send('POST', `/red/subredes/${subnetId}/reservas`, input),
+    deleteReservation: (subnetId, id) => send('DELETE', `/red/subredes/${subnetId}/reservas/${id}`),
+    sweepSubnet: (id) => send('POST', `/red/subredes/${id}/escanear`),
+    ipHistory: (subnetId, ip, days) => get(`/red/subredes/${subnetId}/historial`, { ip, dias: days }),
   };
 }

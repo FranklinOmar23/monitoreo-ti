@@ -22,6 +22,7 @@ import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/configuracion/ConfiguracionPage';
 import { ReportesPage } from './pages/reportes/ReportesPage';
 import { useDeepLink } from './data/deepLinks';
+import { TopLoader } from './TopLoader';
 import { UpdateBanner } from './UpdateBanner';
 import { applyBrandColor, cacheAppearance } from './theme/brand';
 import { InstaladoresPage } from './pages/InstaladoresPage';
@@ -35,18 +36,18 @@ import { SucursalesPage } from './pages/SucursalesPage';
 import { UsuariosPage } from './pages/usuarios/UsuariosPage';
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { id: 'equipos', label: 'Equipos', icon: 'monitor' },
-  { id: 'sucursales', label: 'Sucursales', icon: 'building' },
-  { id: 'alertas', label: 'Alertas', icon: 'bell' },
-  { id: 'tickets', label: 'Tickets', icon: 'ticket' },
-  { id: 'calendario', label: 'Mantenimiento', icon: 'calendar' },
-  { id: 'remoto', label: 'Acceso remoto', icon: 'remote' },
-  { id: 'red', label: 'Red', icon: 'network' },
-  { id: 'reportes', label: 'Reportes', icon: 'chart' },
-  { id: 'instaladores', label: 'Instaladores', icon: 'download' },
-  { id: 'usuarios', label: 'Usuarios', icon: 'users' },
-  { id: 'configuracion', label: 'Configuración', icon: 'gear' },
+  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', section: 'Monitoreo' },
+  { id: 'equipos', label: 'Equipos', icon: 'monitor', section: 'Monitoreo' },
+  { id: 'sucursales', label: 'Sucursales', icon: 'building', section: 'Monitoreo' },
+  { id: 'alertas', label: 'Alertas', icon: 'bell', section: 'Monitoreo' },
+  { id: 'tickets', label: 'Tickets', icon: 'ticket', section: 'Monitoreo' },
+  { id: 'calendario', label: 'Mantenimiento', icon: 'calendar', section: 'Monitoreo' },
+  { id: 'remoto', label: 'Acceso remoto', icon: 'remote', section: 'Infraestructura' },
+  { id: 'red', label: 'Red', icon: 'network', section: 'Infraestructura' },
+  { id: 'reportes', label: 'Reportes', icon: 'chart', section: 'Infraestructura' },
+  { id: 'instaladores', label: 'Instaladores', icon: 'download', section: 'Infraestructura' },
+  { id: 'usuarios', label: 'Usuarios', icon: 'users', section: 'Administración' },
+  { id: 'configuracion', label: 'Configuración', icon: 'gear', section: 'Administración' },
 ];
 
 export function App() {
@@ -421,6 +422,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
           onOpenNotification={openAlert}
           onSeeAllNotifications={() => navigate('alertas')}
         />
+        <TopLoader />
         <UpdateBanner />
         <main className="content">
           {page === 'dashboard' && <DashboardPage onOpenEquipo={openEquipo} onNavigate={navigate} />}
@@ -482,6 +484,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
             <AlertasPage
               key={alertId ?? 'lista'}
               canManage={can('alertas.gestionar')}
+              canRunCommands={can('scripts.ejecutar')}
               onOpenEquipo={openEquipo}
               initialAlertId={alertId}
               tickets={
