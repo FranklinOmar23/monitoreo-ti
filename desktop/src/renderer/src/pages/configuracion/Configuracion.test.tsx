@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CompanySettings } from '@monitoreoti/shared';
 import { fakePanelApi, fakeSettingsApi, renderWithPanel } from '../../test/fakes';
@@ -76,23 +76,33 @@ describe('Configuración (W-40)', () => {
     expect(setLogo).not.toHaveBeenCalled();
   });
 
-  it('un departamento con equipos no se puede eliminar', async () => {
+  it('los departamentos se consultan agrupados por sucursal (se administran en Sucursales)', async () => {
+    const dep = (id: number, name: string, branchName: string, machineCount: number) => ({
+      id,
+      name,
+      machineCount,
+      branchId: branchName === 'Santiago' ? 2 : 1,
+      branchName,
+      responsibleId: null,
+      responsibleName: id === 1 ? 'Ana Martínez' : null,
+    });
     renderWithPanel(
       <ConfiguracionPage initialTab="departamentos" />,
       fakePanelApi({
         configuracion: fakeSettingsApi({
           departments: () =>
             Promise.resolve([
-              { id: 1, name: 'Contabilidad', machineCount: 3 },
-              { id: 2, name: 'Archivo', machineCount: 0 },
+              dep(1, 'Contabilidad', 'Santo Domingo', 3),
+              dep(2, 'Contabilidad', 'Santiago', 1),
+              dep(3, 'Caja', 'Santiago', 0),
             ]),
         }),
       }),
     );
-    const row = (await screen.findByText('Contabilidad')).closest('tr')!;
-    expect((within(row).getByRole('button', { name: 'Eliminar' }) as HTMLButtonElement).disabled).toBe(true);
-    const empty = screen.getByText('Archivo').closest('tr')!;
-    expect((within(empty).getByRole('button', { name: 'Eliminar' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(await screen.findByText('Ana Martínez')).toBeTruthy();
+    expect(screen.getAllByText('Contabilidad')).toHaveLength(2);
+    expect(screen.getByText(/Se crean, renombran y eliminan en/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Eliminar' })).toBeNull();
   });
 
   it('los ajustes de seguridad se guardan al marcarlos', async () => {

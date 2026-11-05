@@ -179,6 +179,8 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         }
         if (filter.BranchId is int branchId)
             query = query.Where(m => m.BranchId == branchId);
+        if (filter.DepartmentId is int departmentId)
+            query = query.Where(m => m.DepartmentId == departmentId);
         if (TryParseText<MachineType>(filter.Type, out var type))
             query = query.Where(m => m.Type == type);
         if (!string.IsNullOrWhiteSpace(filter.OperatingSystem))

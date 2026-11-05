@@ -56,7 +56,10 @@ public sealed class AgentEnrollmentService(MonitoreoDbContext db, TenantContext 
 
             machine.MacAddress = mac;
 
-            // El token de la sucursal es la autoridad: una reinstalación puede mover el equipo de sucursal.
+            // El token de la sucursal es la autoridad: una reinstalación puede mover el equipo de sucursal; entonces pierde
+            // el departamento, que era de la otra sucursal (decisión 79).
+            if (machine.Id != 0 && machine.BranchId != token.BranchId)
+                machine.DepartmentId = null;
             machine.BranchId = token.BranchId;
             machine.Name = request.Hostname.Trim();
             machine.Type = ParseType(request.MachineType);

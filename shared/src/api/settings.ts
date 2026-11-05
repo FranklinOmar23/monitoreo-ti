@@ -32,10 +32,20 @@ export interface Appearance {
   logo: string | null;
 }
 
+/** Departamento de una sucursal (decisión 79). */
 export interface DepartmentItem {
   id: number;
   name: string;
   machineCount: number;
+  branchId: number;
+  branchName: string;
+  responsibleId: number | null;
+  responsibleName: string | null;
+}
+
+export interface DepartmentInput {
+  nombre: string;
+  responsableId: number | null;
 }
 
 export interface SecuritySettings {
@@ -58,9 +68,8 @@ export interface SettingsApi {
   /** El logo en base64 (sin el prefijo data:). */
   setLogo(base64: string): Promise<{ id: number }>;
   removeLogo(): Promise<{ id: number }>;
+  /** Todos los departamentos, con su sucursal (se administran en cada sucursal). */
   departments(): Promise<DepartmentItem[]>;
-  saveDepartment(id: number | null, nombre: string): Promise<{ id: number }>;
-  deleteDepartment(id: number): Promise<{ id: number }>;
   security(): Promise<SecuritySettings>;
   saveSecurity(input: SecuritySettings): Promise<SecuritySettings>;
   email(): Promise<EmailStatus>;
@@ -80,11 +89,6 @@ export function createSettingsApi(
     setLogo: (datos) => send('PUT', '/configuracion/apariencia/logo', { datos }),
     removeLogo: () => send('DELETE', '/configuracion/apariencia/logo'),
     departments: () => get('/configuracion/departamentos'),
-    saveDepartment: (id, nombre) =>
-      id === null
-        ? send('POST', '/configuracion/departamentos', { nombre })
-        : send('PUT', `/configuracion/departamentos/${id}`, { nombre }),
-    deleteDepartment: (id) => send('DELETE', `/configuracion/departamentos/${id}`),
     security: () => get('/configuracion/seguridad'),
     saveSecurity: (input) => send('PUT', '/configuracion/seguridad', input),
     email: () => get('/configuracion/correo'),

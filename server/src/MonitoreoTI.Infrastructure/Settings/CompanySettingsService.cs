@@ -152,56 +152,6 @@ public sealed class CompanySettingsService(MonitoreoDbContext db, ICurrentUser u
     private static object? Describe(byte[]? logo, string? type) =>
         logo is null ? null : new { tipo = type, kb = (logo.Length + 1023) / 1024 };
 
-    // ---------------------------------------------------------------- departamentos
-
-    public async Task<IReadOnlyList<DepartmentItem>> DepartmentsAsync(CancellationToken ct) =>
-        await db.Departments.AsNoTracking()
-            .OrderBy(d => d.Name)
-            .Select(d => new DepartmentItem(d.Id, d.Name, db.Machines.Count(m => m.DepartmentId == d.Id && m.Status != MachineStatus.Retired)))
-            .ToListAsync(ct);
-
-    public async Task<CommandResult> SaveDepartmentAsync(int? id, DepartmentInput input, CancellationToken ct)
-    {
-        var name = input.Nombre.Trim();
-        if (await db.Departments.AnyAsync(d => d.Id != id && d.Name == name, ct))
-            return CommandResult.Conflict("Ya hay un departamento con ese nombre.");
-
-        Department? department;
-        string? before = null;
-        if (id is null)
-        {
-            department = new Department { Name = name };
-            db.Departments.Add(department);
-        }
-        else
-        {
-            department = await db.Departments.FirstOrDefaultAsync(d => d.Id == id, ct);
-            if (department is null)
-                return CommandResult.NotFound();
-            before = department.Name;
-            department.Name = name;
-        }
-        await db.SaveChangesAsync(ct);
-        await audit.RecordAsync(id is null ? "departamento.crear" : "departamento.editar", "departamentos", department.Id.ToString(),
-            before is null ? null : new { nombre = before }, new { nombre = name }, ct);
-        return CommandResult.Ok(department.Id);
-    }
-
-    public async Task<CommandResult> DeleteDepartmentAsync(int id, CancellationToken ct)
-    {
-        var department = await db.Departments.FirstOrDefaultAsync(d => d.Id == id, ct);
-        if (department is null)
-            return CommandResult.NotFound();
-        // También los dados de baja: la ficha guarda a qué departamento pertenecían.
-        var machines = await db.Machines.CountAsync(m => m.DepartmentId == id, ct);
-        if (machines > 0)
-            return CommandResult.Conflict($"El departamento tiene {machines} {(machines == 1 ? "equipo" : "equipos")}. Páselos a otro antes de eliminarlo.");
-        db.Departments.Remove(department);
-        await db.SaveChangesAsync(ct);
-        await audit.RecordAsync("departamento.eliminar", "departamentos", id.ToString(), new { nombre = department.Name }, null, ct);
-        return CommandResult.Ok(id);
-    }
-
     // ---------------------------------------------------------------- seguridad
 
     public async Task<SecuritySettings> SecurityAsync(CancellationToken ct)

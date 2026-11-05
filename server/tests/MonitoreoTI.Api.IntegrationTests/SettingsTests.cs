@@ -103,36 +103,67 @@ public sealed class SettingsTests(TestDatabase database) : IAsyncLifetime
         }
     }
 
+    /// <summary>Departamentos por sucursal (decisión 79): se crean en la sucursal, el nombre se repite entre sucursales.</summary>
     [DatabaseFact]
-    public async Task A_department_with_machines_cannot_be_deleted()
+    public async Task Departments_belong_to_a_branch_and_one_with_machines_cannot_be_deleted()
     {
         var admin = await AdminAsync();
         var name = $"Prueba {Guid.NewGuid():N}"[..20];
-        var created = await admin.PostAsJsonAsync("/api/v1/configuracion/departamentos", new { nombre = name });
+        var machine = (int)(await _api.ScalarAsync(
+            "SELECT TOP 1 m.id FROM dbo.maquinas m JOIN dbo.empresas e ON e.id = m.empresa_id WHERE e.nombre = @e ORDER BY m.id", ("@e", Company)))!;
+        var branch = (int)(await _api.ScalarAsync("SELECT sucursal_id FROM dbo.maquinas WHERE id = @m", ("@m", machine)))!;
+        var other = (int)(await _api.ScalarAsync(
+            "SELECT TOP 1 s.id FROM dbo.sucursales s JOIN dbo.empresas e ON e.id = s.empresa_id WHERE e.nombre = @e AND s.id <> @b ORDER BY s.id",
+            ("@e", Company), ("@b", branch)))!;
+
+        var created = await admin.PostAsJsonAsync($"/api/v1/sucursales/{branch}/departamentos", new { nombre = name });
         created.StatusCode.Should().Be(HttpStatusCode.Created);
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
-        (await admin.PostAsJsonAsync("/api/v1/configuracion/departamentos", new { nombre = name })).StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await admin.PostAsJsonAsync($"/api/v1/sucursales/{branch}/departamentos", new { nombre = name })).StatusCode.Should().Be(HttpStatusCode.Conflict);
+        // El mismo nombre en otra sucursal es otro departamento.
+        var twin = await admin.PostAsJsonAsync($"/api/v1/sucursales/{other}/departamentos", new { nombre = name });
+        twin.StatusCode.Should().Be(HttpStatusCode.Created);
+        var twinId = (await twin.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        // Responsable: solo un usuario de la empresa.
+        (await admin.PutAsJsonAsync($"/api/v1/sucursales/{branch}/departamentos/{id}", new { nombre = name, responsableId = 987654 }))
+            .StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        // No se cambia un departamento por la ruta de otra sucursal.
+        (await admin.PutAsJsonAsync($"/api/v1/sucursales/{other}/departamentos/{id}", new { nombre = name })).StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        var machine = (int)(await _api.ScalarAsync(
-            "SELECT TOP 1 m.id FROM dbo.maquinas m JOIN dbo.empresas e ON e.id = m.empresa_id WHERE e.nombre = @e", ("@e", Company)))!;
+        // El formulario del equipo solo ofrece los de su sucursal.
+        var forBranch = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/departamentos?sucursal={branch}");
+        forBranch.EnumerateArray().Select(d => d.GetProperty("id").GetInt32()).Should().Contain(id).And.NotContain(twinId);
+
         var previous = await _api.ScalarAsync("SELECT departamento_id FROM dbo.maquinas WHERE id = @m", ("@m", machine));
         await _api.ExecuteAsync("UPDATE dbo.maquinas SET departamento_id = @d WHERE id = @m", ("@d", id), ("@m", machine));
         try
         {
-            var list = await admin.GetFromJsonAsync<JsonElement>("/api/v1/configuracion/departamentos");
+            var list = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/sucursales/{branch}/departamentos");
             list.EnumerateArray().Single(d => d.GetProperty("id").GetInt32() == id).GetProperty("machineCount").GetInt32().Should().Be(1);
-            var refused = await admin.DeleteAsync($"/api/v1/configuracion/departamentos/{id}");
+            var machines = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/maquinas?departamento={id}");
+            machines.GetProperty("page").GetProperty("total").GetInt32().Should().Be(1);
+            var refused = await admin.DeleteAsync($"/api/v1/sucursales/{branch}/departamentos/{id}");
             refused.StatusCode.Should().Be(HttpStatusCode.Conflict);
             (await refused.Content.ReadAsStringAsync()).Should().Contain("1 equipo");
+
+            // La base no deja un equipo en un departamento de otra sucursal.
+            var crossed = async () => await _api.ExecuteAsync("UPDATE dbo.maquinas SET departamento_id = @d WHERE id = @m", ("@d", twinId), ("@m", machine));
+            await crossed.Should().ThrowAsync<Microsoft.Data.SqlClient.SqlException>();
         }
         finally
         {
             await _api.ExecuteAsync("UPDATE dbo.maquinas SET departamento_id = @d WHERE id = @m", ("@d", previous ?? DBNull.Value), ("@m", machine));
         }
 
-        (await admin.PutAsJsonAsync($"/api/v1/configuracion/departamentos/{id}", new { nombre = name + "B" })).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await admin.DeleteAsync($"/api/v1/configuracion/departamentos/{id}")).StatusCode.Should().Be(HttpStatusCode.OK);
-        ((string?)await AuditAsync("departamento.eliminar")).Should().Contain(name + "B");
+        // Configuración los muestra todos, con su sucursal.
+        var all = await admin.GetFromJsonAsync<JsonElement>("/api/v1/configuracion/departamentos");
+        all.EnumerateArray().Where(d => d.GetProperty("name").GetString() == name).Select(d => d.GetProperty("branchId").GetInt32())
+            .Should().BeEquivalentTo([branch, other]);
+
+        (await admin.PutAsJsonAsync($"/api/v1/sucursales/{branch}/departamentos/{id}", new { nombre = name + "B" })).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await admin.DeleteAsync($"/api/v1/sucursales/{branch}/departamentos/{id}")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await admin.DeleteAsync($"/api/v1/sucursales/{other}/departamentos/{twinId}")).StatusCode.Should().Be(HttpStatusCode.OK);
+        ((string?)await AuditAsync("departamento.eliminar")).Should().Contain(name);
     }
 
     [DatabaseFact]

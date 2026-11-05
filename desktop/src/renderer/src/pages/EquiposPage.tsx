@@ -30,6 +30,8 @@ interface EquiposPageProps {
   onRunScript?: (machines: { id: number; name: string }[]) => void;
   /** Abre la lista ya filtrada por una sucursal (desde la pantalla de Sucursales). */
   initialBranchId?: number | null;
+  /** Y por un departamento de esa sucursal (desde la tarjeta Departamentos). */
+  initialDepartmentId?: number | null;
 }
 
 /** W-05 Lista de equipos. */
@@ -41,9 +43,11 @@ export function EquiposPage({
   onPrintQr,
   onRunScript,
   initialBranchId,
+  initialDepartmentId,
 }: EquiposPageProps) {
   const api = usePanelApi();
   const [sucursal, setSucursal] = useState(initialBranchId ? String(initialBranchId) : '');
+  const [departamento, setDepartamento] = useState(initialDepartmentId ? String(initialDepartmentId) : '');
   const [tipo, setTipo] = useState('');
   const [estado, setEstado] = useState('');
   const [sistema, setSistema] = useState('');
@@ -51,7 +55,14 @@ export function EquiposPage({
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const search = useDebounced(query.trim());
 
-  const filters = { q: search, sucursal: sucursal ? Number(sucursal) : null, tipo, estado, so: sistema };
+  const filters = {
+    q: search,
+    sucursal: sucursal ? Number(sucursal) : null,
+    departamento: departamento ? Number(departamento) : null,
+    tipo,
+    estado,
+    so: sistema,
+  };
   // Un filtro nuevo vuelve a la primera página.
   const filterKey = JSON.stringify(filters);
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);
@@ -67,6 +78,12 @@ export function EquiposPage({
     refetchInterval: 60_000,
   });
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
+  // Los departamentos son de cada sucursal: el filtro aparece al elegir una.
+  const departments = useQuery({
+    queryKey: ['departamentos', sucursal],
+    queryFn: () => api.departments(Number(sucursal)),
+    enabled: !!sucursal,
+  });
 
   const items = list.data?.page.items ?? [];
   const toggle = (id: number) =>
@@ -125,8 +142,20 @@ export function EquiposPage({
           value={sucursal}
           options={(branches.data ?? []).map((b) => ({ value: String(b.id), label: b.name }))}
           allLabel="Todas"
-          onChange={setSucursal}
+          onChange={(value) => {
+            setSucursal(value);
+            setDepartamento('');
+          }}
         />
+        {sucursal && (departments.data?.length ?? 0) > 0 && (
+          <FilterSelect
+            label="Departamento"
+            value={departamento}
+            options={(departments.data ?? []).map((d) => ({ value: String(d.id), label: d.nombre }))}
+            allLabel="Todos"
+            onChange={setDepartamento}
+          />
+        )}
         <FilterSelect
           label="Tipo"
           value={tipo}

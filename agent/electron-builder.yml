@@ -21,6 +21,9 @@ asar: false
 extraResources:
   - from: build/host/MonitoreoTI.AgentHost.exe
     to: host/MonitoreoTI.AgentHost.exe
+  # Agente clásico (Windows 7): lo copia el recolector al instalar a distancia (decisión 78).
+  - from: build/clasico/MonitoreoTI.AgenteClasico.exe
+    to: host/MonitoreoTI.AgenteClasico.exe
 
 win:
   target:

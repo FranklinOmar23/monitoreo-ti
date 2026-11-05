@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -23,6 +25,11 @@ public static class RemoteInstaller
     private const string RemoteFolder = @"Temp\Centinela";
     private const string SetupName = "MonitoreoTI-Agente-Setup.exe";
     private const string CaName = "MonitoreoTI-CA.pem";
+
+    /// <summary>Agente clásico (decisión 78): viaja junto a este anfitrión en el instalador del agente.</summary>
+    public const string ClassicName = "MonitoreoTI.AgenteClasico.exe";
+
+    private static string ClassicPath => Path.Combine(AppContext.BaseDirectory, ClassicName);
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -54,7 +61,32 @@ public static class RemoteInstaller
             return 2;
         }
 
+        // Toda autenticación de red (archivos y servicios) va con la cuenta del dominio, como "runas /netonly": el
+        // recolector corre como SYSTEM y, sin esto, Windows usa la cuenta de máquina, que no es administradora del equipo.
+        // Localmente sigue siendo SYSTEM (lee el instalador de su carpeta). LogonUser no valida la clave: eso lo hace la
+        // conexión a ADMIN$ y da el error claro.
+        var (domain, user) = SplitAccount(request.Usuario);
+        if (!Native.LogonUser(user, domain, request.Clave, Native.LogonNewCredentials, Native.ProviderWinNt50, out var token))
+        {
+            Step("error", $"No se pudo usar la cuenta: {new Win32Exception(Marshal.GetLastWin32Error()).Message}", fin: true);
+            return 1;
+        }
+        using (token)
+            return await WindowsIdentity.RunImpersonatedAsync(token, () => InstallAsync(request, Step));
+    }
+
+    /// <summary>"DOMINIO\\usuario" → (DOMINIO, usuario); "usuario@dominio" va entero con dominio null.</summary>
+    public static (string? Domain, string User) SplitAccount(string account)
+    {
+        var slash = account.IndexOf('\\');
+        return slash > 0 ? (account[..slash], account[(slash + 1)..]) : (null, account);
+    }
+
+    private static async Task<int> InstallAsync(InstallRequest request, Action<string, string?, string?, bool> step)
+    {
+        void Step(string estado, string? detalle = null, string? sistema = null, bool fin = false) => step(estado, detalle, sistema, fin);
         var share = $@"\\{request.Ip}\ADMIN$";
+        var ipc = $@"\\{request.Ip}\IPC$";
         var connected = false;
         string? sistema = null;
         try
@@ -75,13 +107,25 @@ public static class RemoteInstaller
             }
             connected = true;
 
-            var (os, supported, reason) = Describe(share);
+            // El administrador de servicios remoto va por \\IP\IPC$. Sin conectarlo con la cuenta, Windows usa la del
+            // recolector (corre como SYSTEM: la cuenta de máquina), que no es administradora del equipo destino.
+            Native.WNetCancelConnection2(ipc, 0, true);
+            var ipcResource = new Native.NetResource { Type = Native.ResourceTypeAny, RemoteName = ipc };
+            code = Native.WNetAddConnection2(ref ipcResource, request.Clave, request.Usuario, Native.ConnectTemporary);
+            if (code != 0)
+            {
+                Step("error", "IPC$: " + ConnectionError(code), fin: true);
+                return 1;
+            }
+
+            var (os, kind, reason) = Describe(share, File.Exists(ClassicPath));
             sistema = os;
-            if (!supported)
+            if (kind is null)
             {
                 Step("omitido", reason, sistema, fin: true);
                 return 0;
             }
+            var classic = kind == AgentKind.Classic;
             if (ServiceExists(request.Ip, Installation.ServiceName))
             {
                 Step("omitido", "Ya tiene el agente instalado.", sistema, fin: true);
@@ -91,12 +135,13 @@ public static class RemoteInstaller
             Step("copiando", null, sistema);
             var folder = Path.Combine(share, RemoteFolder);
             Directory.CreateDirectory(folder);
-            File.Copy(request.Instalador, Path.Combine(folder, SetupName), overwrite: true);
+            var setupName = classic ? ClassicName : SetupName;
+            File.Copy(classic ? ClassicPath : request.Instalador, Path.Combine(folder, setupName), overwrite: true);
             if (!string.IsNullOrEmpty(request.Ca) && File.Exists(request.Ca))
                 File.Copy(request.Ca, Path.Combine(folder, CaName), overwrite: true);
 
             Step("instalando", null, sistema);
-            LaunchAsSystem(request.Ip, CommandLine(request.Servidor, request.Token));
+            LaunchAsSystem(request.Ip, classic ? ClassicCommandLine(request.Servidor, request.Token) : CommandLine(request.Servidor, request.Token));
 
             var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(Math.Clamp(request.EsperaMinutos ?? 10, 2, 30));
             var started = DateTime.UtcNow;
@@ -105,13 +150,17 @@ public static class RemoteInstaller
                 await Task.Delay(TimeSpan.FromSeconds(5));
                 if (ServiceExists(request.Ip, Installation.ServiceName))
                 {
-                    Step("instalado", "El servicio del agente quedó instalado; falta que se registre en el servidor.", sistema, fin: true);
+                    Step("instalado", classic
+                        ? "Se instaló el agente clásico (Windows 7); falta que se conecte al servidor."
+                        : "El servicio del agente quedó instalado; falta que se registre en el servidor.", sistema, fin: true);
                     return 0;
                 }
                 // El instalador en curso tiene el archivo abierto: si se puede borrar, ya terminó (sin el servicio).
-                if (DateTime.UtcNow - started > TimeSpan.FromSeconds(40) && TryDelete(Path.Combine(folder, SetupName)))
+                if (DateTime.UtcNow - started > TimeSpan.FromSeconds(classic ? 20 : 40) && TryDelete(Path.Combine(folder, setupName)))
                 {
-                    Step("error", "El instalador terminó pero el servicio del agente no quedó instalado. Revise el registro en C:\\ProgramData\\MonitoreoTI\\Agent de ese equipo.", sistema, fin: true);
+                    Step("error", classic
+                        ? ClassicFailure(share)
+                        : "El instalador terminó pero el servicio del agente no quedó instalado. Revise el registro en C:\\ProgramData\\MonitoreoTI\\Agent de ese equipo.", sistema, fin: true);
                     return 1;
                 }
             }
@@ -135,9 +184,26 @@ public static class RemoteInstaller
                     Thread.Sleep(5000);
                 }
                 Native.WNetCancelConnection2(share, 0, true);
+                Native.WNetCancelConnection2(ipc, 0, true);
             }
         }
     }
+
+    private static Win32Exception ScmFailure(string what)
+    {
+        var code = Marshal.GetLastWin32Error();
+        return new Win32Exception(code, ServiceManagerError(code, what));
+    }
+
+    /// <summary>Error del administrador de servicios remoto con el código de Windows y qué revisar.</summary>
+    public static string ServiceManagerError(int code, string what) => code switch
+    {
+        5 => $"{what}: acceso denegado (5). La cuenta no es administradora de ese equipo o UAC bloquea la administración remota.",
+        1722 or 1753 or 1727 => $"{what}: el equipo no responde por RPC ({code}). Revise en su firewall «Administración remota de servicios».",
+        1060 => $"{what}: el servicio no existe (1060).",
+        1073 => $"{what}: ya existe un servicio con ese nombre (1073).",
+        _ => $"{what}: {new Win32Exception(code).Message} ({code}).",
+    };
 
     /// <summary>Solo letras, números y lo que trae una URL o un token: nada que el intérprete de comandos interprete.</summary>
     public static bool SafeArgument(string value) =>
@@ -149,6 +215,27 @@ public static class RemoteInstaller
     /// </summary>
     public static string CommandLine(string server, string token) =>
         $"%SystemRoot%\\System32\\cmd.exe /c start \"\" \"%SystemRoot%\\{RemoteFolder}\\{SetupName}\" /S /SERVER={server} /TOKEN={token}";
+
+    /// <summary>El agente clásico es su propio instalador: se registra con el token y crea el servicio.</summary>
+    public static string ClassicCommandLine(string server, string token) =>
+        $"%SystemRoot%\\System32\\cmd.exe /c start \"\" \"%SystemRoot%\\{RemoteFolder}\\{ClassicName}\" instalar /SERVER={server} /TOKEN={token}";
+
+    /// <summary>La última línea con error del registro del agente clásico en el equipo (dice por qué no se instaló).</summary>
+    private static string ClassicFailure(string share)
+    {
+        // ADMIN$ es C:\Windows y no deja subir de carpeta: el registro se lee por C$.
+        var log = Path.Combine(share.Replace("ADMIN$", "C$"), "ProgramData", "MonitoreoTI", "Agent", "agente-clasico.log");
+        try
+        {
+            var last = File.Exists(log) ? File.ReadLines(log).LastOrDefault(l => l.Contains(" ERR ")) : null;
+            if (last is not null)
+                return $"El agente clásico no se instaló: {last[(last.IndexOf(" ERR ", StringComparison.Ordinal) + 5)..]}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+        return "El agente clásico no se instaló. Revise C:\\ProgramData\\MonitoreoTI\\Agent\\agente-clasico.log en ese equipo.";
+    }
 
     public static string ConnectionError(int code) => code switch
     {
@@ -164,8 +251,18 @@ public static class RemoteInstaller
         _ => $"No se pudo conectar a ADMIN$: {new Win32Exception(code).Message} ({code}).",
     };
 
-    /// <summary>Nombre del sistema según la versión de su kernel32.dll; el agente necesita Windows 10 u 11 de 64 bits.</summary>
-    public static (string Name, bool Supported, string? Reason) DescribeVersion(int major, int minor, int build, bool is64)
+    public enum AgentKind
+    {
+        Modern,
+        Classic,
+    }
+
+    /// <summary>
+    /// Qué agente le corresponde según la versión de su kernel32.dll: el normal en Windows 10/11 de 64 bits; el clásico
+    /// en Windows 7 SP1, 8, 8.1 o de 32 bits (si viene con este anfitrión y el equipo tiene .NET Framework 4.5.2).
+    /// null con el motivo si ninguno sirve.
+    /// </summary>
+    public static (string Name, AgentKind? Kind, string? Reason) DescribeVersion(int major, int minor, int build, bool is64, bool hasClassic = false, bool? dotNet452 = null)
     {
         var name = (major, minor) switch
         {
@@ -178,20 +275,42 @@ public static class RemoteInstaller
             _ => $"Windows {major}.{minor}",
         };
         var full = $"{name} ({major}.{minor}.{build}) {(is64 ? "64" : "32")} bits";
-        if (major < 10)
-            return (full, false, $"{name}: el agente actual necesita Windows 10 o superior.");
-        if (!is64)
-            return (full, false, "Windows de 32 bits: el agente es de 64 bits.");
-        return (full, true, null);
+        if (major >= 10 && is64)
+            return (full, AgentKind.Modern, null);
+        var why = major < 10 ? $"{name}: el agente normal necesita Windows 10 o superior" : "Windows de 32 bits: el agente normal es de 64 bits";
+        if (major < 6 || (major == 6 && minor < 1) || (major == 6 && minor == 1 && build < 7601))
+            return (full, null, $"{name}: ni el agente clásico funciona (necesita Windows 7 SP1 o superior).");
+        if (!hasClassic)
+            return (full, null, $"{why}, y el recolector no tiene el agente clásico (actualícelo a la 0.3.8).");
+        if (dotNet452 == false)
+            return (full, null, $"{name}: el agente clásico necesita .NET Framework 4.5.2 o superior (instálelo con Windows Update).");
+        return (full, AgentKind.Classic, null);
     }
 
-    private static (string Name, bool Supported, string? Reason) Describe(string share)
+    private static (string Name, AgentKind? Kind, string? Reason) Describe(string share, bool hasClassic)
     {
         var kernel = Path.Combine(share, "System32", "kernel32.dll");
         if (!File.Exists(kernel))
-            return ("Desconocido", false, "No se pudo leer la versión de Windows del equipo.");
+            return ("Desconocido", null, "No se pudo leer la versión de Windows del equipo.");
         var info = FileVersionInfo.GetVersionInfo(kernel);
-        return DescribeVersion(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, Directory.Exists(Path.Combine(share, "SysWOW64")));
+        return DescribeVersion(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart,
+            Directory.Exists(Path.Combine(share, "SysWOW64")), hasClassic, HasDotNet452(share));
+    }
+
+    /// <summary>
+    /// .NET Framework 4.5.2 o superior: su clr.dll es 4.0.30319.34209 o más (desde 4.6 la versión del archivo empieza en
+    /// 4.6/4.7/4.8).
+    /// </summary>
+    public static bool HasDotNet452(int major, int minor, int build, int revision) =>
+        major > 4 || (major == 4 && (minor > 0 || (build == 30319 && revision >= 34209) || build > 30319));
+
+    private static bool HasDotNet452(string share)
+    {
+        var clr = Path.Combine(share, "Microsoft.NET", "Framework", "v4.0.30319", "clr.dll");
+        if (!File.Exists(clr))
+            return false;
+        var v = FileVersionInfo.GetVersionInfo(clr);
+        return HasDotNet452(v.FileMajorPart, v.FileMinorPart, v.FileBuildPart, v.FilePrivatePart);
     }
 
     private static async Task<bool> PortOpenAsync(string ip, int port, TimeSpan timeout)
@@ -213,7 +332,7 @@ public static class RemoteInstaller
     {
         var manager = Native.OpenSCManager($@"\\{ip}", null, Native.ScManagerConnect);
         if (manager == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "No se pudo abrir el administrador de servicios del equipo");
+            throw ScmFailure("No se pudo abrir el administrador de servicios del equipo");
         try
         {
             var service = Native.OpenService(manager, name, Native.ServiceQueryStatus);
@@ -232,7 +351,7 @@ public static class RemoteInstaller
     {
         var manager = Native.OpenSCManager($@"\\{ip}", null, Native.ScManagerConnect | Native.ScManagerCreateService);
         if (manager == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "No se pudo abrir el administrador de servicios del equipo");
+            throw ScmFailure("No se pudo abrir el administrador de servicios del equipo");
         try
         {
             DeleteService(ip, TempServiceName);
@@ -240,7 +359,7 @@ public static class RemoteInstaller
                 Native.ServiceWin32OwnProcess, Native.ServiceDemandStart, Native.ServiceErrorIgnore, commandLine,
                 null, IntPtr.Zero, null, null, null);
             if (service == IntPtr.Zero)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "No se pudo crear el servicio temporal de instalación");
+                throw ScmFailure("No se pudo crear el servicio temporal de instalación");
             try
             {
                 // cmd no responde como servicio: Windows informa 1053 o 1067, pero el instalador ya quedó corriendo.
@@ -248,7 +367,7 @@ public static class RemoteInstaller
                 {
                     var error = Marshal.GetLastWin32Error();
                     if (error is not (1053 or 1067))
-                        throw new Win32Exception(error, "No se pudo iniciar el instalador");
+                        throw new Win32Exception(error, ServiceManagerError(error, "No se pudo iniciar el instalador"));
                 }
             }
             finally
@@ -305,6 +424,7 @@ public static class RemoteInstaller
 
     private static class Native
     {
+        public const int ResourceTypeAny = 0;
         public const int ResourceTypeDisk = 1;
         public const int ConnectTemporary = 4;
         public const uint ScManagerConnect = 0x0001;
@@ -328,6 +448,12 @@ public static class RemoteInstaller
             public string? Comment;
             public string? Provider;
         }
+
+        public const int LogonNewCredentials = 9;
+        public const int ProviderWinNt50 = 3;
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "LogonUserW")]
+        public static extern bool LogonUser(string user, string? domain, string password, int logonType, int provider, out SafeAccessTokenHandle token);
 
         [DllImport("mpr.dll", CharSet = CharSet.Unicode, EntryPoint = "WNetAddConnection2W")]
         public static extern int WNetAddConnection2(ref NetResource resource, string password, string username, int flags);

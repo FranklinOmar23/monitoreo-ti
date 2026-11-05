@@ -8,6 +8,7 @@
     "agent"
   ],
   "scripts": {
+    "dev:api": "dotnet watch --project server/src/MonitoreoTI.Api --launch-profile http --no-hot-reload",
     "dev:desktop": "npm run dev -w @monitoreoti/desktop",
     "dev:agent": "npm run dev -w @monitoreoti/agent",
     "start:mobile": "npm run start -w @monitoreoti/mobile",

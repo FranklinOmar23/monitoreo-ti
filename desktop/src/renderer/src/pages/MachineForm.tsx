@@ -19,7 +19,6 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
   const api = usePanelApi();
   const queries = useQueryClient();
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
-  const departments = useQuery({ queryKey: ['departamentos'], queryFn: () => api.departments() });
 
   const [form, setForm] = useState({
     nombre: machine?.name ?? '',
@@ -49,6 +48,12 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
     queryKey: ['red', 'recolectores', form.sucursalId],
     queryFn: () => api.red.collectors(Number(form.sucursalId)),
     enabled: snmp && form.sucursalId !== '',
+  });
+  // Solo los departamentos de la sucursal elegida (decisión 79).
+  const departments = useQuery({
+    queryKey: ['departamentos', form.sucursalId],
+    queryFn: () => api.departments(Number(form.sucursalId)),
+    enabled: !!form.sucursalId,
   });
   const set = (key: keyof typeof form) => (event: { target: { value: string } }) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -130,7 +135,12 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
         </label>
         <label className="field">
           <span>Sucursal *</span>
-          <select required value={form.sucursalId} onChange={set('sucursalId')}>
+          <select
+            required
+            value={form.sucursalId}
+            // Otra sucursal tiene otros departamentos: el elegido se limpia.
+            onChange={(event) => setForm({ ...form, sucursalId: event.target.value, departamentoId: '' })}
+          >
             <option value="">Elija la sucursal</option>
             {(branches.data ?? []).map((branch) => (
               <option key={branch.id} value={branch.id}>
@@ -141,8 +151,8 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
         </label>
         <label className="field">
           <span>Departamento</span>
-          <select value={form.departamentoId} onChange={set('departamentoId')}>
-            <option value="">Sin departamento</option>
+          <select value={form.departamentoId} onChange={set('departamentoId')} disabled={!form.sucursalId}>
+            <option value="">{form.sucursalId ? 'Sin departamento' : 'Elija primero la sucursal'}</option>
             {(departments.data ?? []).map((d) => (
               <option key={d.id} value={d.id}>
                 {d.nombre}

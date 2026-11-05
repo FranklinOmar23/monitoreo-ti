@@ -18,7 +18,7 @@ export interface ServiceConfig {
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-export const AGENT_VERSION = '0.3.6';
+export const AGENT_VERSION = '0.3.12';
 
 /** Lo que deja el instalador en config.json. */
 export interface ConfigFile {

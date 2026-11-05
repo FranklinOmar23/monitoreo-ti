@@ -57,8 +57,9 @@ public static class PanelEndpoints
         string? estado = null,
         string? so = null,
         int pagina = 1,
-        int tamano = 50) =>
-        queries.MachinesAsync(new MachineFilter(search, sucursal, tipo, estado, so, pagina, tamano), ct);
+        int tamano = 50,
+        int? departamento = null) =>
+        queries.MachinesAsync(new MachineFilter(search, sucursal, tipo, estado, so, pagina, tamano, departamento), ct);
 
     private static async Task<IResult> MetricsAsync(int id, PanelQueries q, CancellationToken ct, string rango = "24h")
     {

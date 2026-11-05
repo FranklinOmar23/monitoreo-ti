@@ -589,6 +589,30 @@ export interface IpItem {
   dhcpExpiresAt?: string | null;
 }
 
+/** "Instalar agente" (decisión 77): IP de la subred y cuenta del dominio; la clave no se guarda. */
+export interface RemoteInstallInput {
+  ips: string[];
+  cuenta: string;
+  clave: string;
+}
+
+export type RemoteInstallStatus =
+  'pendiente' | 'conectando' | 'copiando' | 'instalando' | 'instalado' | 'registrado' | 'error' | 'omitido';
+
+export interface RemoteInstallItem {
+  id: number;
+  ip: string;
+  status: RemoteInstallStatus;
+  detail: string | null;
+  operatingSystem: string | null;
+  account: string;
+  userName: string | null;
+  machineId: number | null;
+  machineName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Un período del historial de una IP: quién la tuvo, desde cuándo y hasta cuándo. */
 export interface IpHistoryItem {
   mac: string | null;
@@ -688,6 +712,10 @@ export interface NetworkApi {
   ipHistory(subnetId: number, ip: string, days: number): Promise<IpHistoryItem[]>;
   /** "Escanear ahora": 409 si el recolector no está conectado. */
   sweepSubnet(id: number): Promise<Id>;
+  /** Instala el agente en esas IP con el recolector de la subred; 403 con código 2fa_requerido sin 2FA reciente. */
+  installAgents(subnetId: number, input: RemoteInstallInput): Promise<Id>;
+  /** Instalaciones de las últimas 24 h de la subred. */
+  remoteInstalls(subnetId: number): Promise<RemoteInstallItem[]>;
 }
 
 export function createNetworkApi(
@@ -740,6 +768,8 @@ export function createNetworkApi(
     addReservation: (subnetId, input) => send('POST', `/red/subredes/${subnetId}/reservas`, input),
     deleteReservation: (subnetId, id) => send('DELETE', `/red/subredes/${subnetId}/reservas/${id}`),
     sweepSubnet: (id) => send('POST', `/red/subredes/${id}/escanear`),
+    installAgents: (subnetId, input) => send('POST', `/red/subredes/${subnetId}/instalar-agente`, input),
+    remoteInstalls: (subnetId) => get(`/red/subredes/${subnetId}/instalaciones`),
     ipHistory: (subnetId, ip, days) => get(`/red/subredes/${subnetId}/historial`, { ip, dias: days }),
   };
 }

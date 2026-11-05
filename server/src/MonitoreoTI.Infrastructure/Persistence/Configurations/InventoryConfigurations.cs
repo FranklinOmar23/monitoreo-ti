@@ -51,9 +51,15 @@ internal sealed class DepartmentConfiguration : IEntityTypeConfiguration<Departm
         b.ToTable("departamentos");
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.BranchId).HasColumnName("sucursal_id");
         b.Property(x => x.Name).HasColumnName("nombre").HasMaxLength(100);
+        b.Property(x => x.ResponsibleUserId).HasColumnName("responsable_id");
 
         b.HasAlternateKey(x => new { x.CompanyId, x.Id });
+        b.HasOne<Branch>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.BranchId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }
 

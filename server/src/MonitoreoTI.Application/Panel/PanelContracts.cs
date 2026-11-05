@@ -57,7 +57,8 @@ public sealed record MachineFilter(
     string? Status = null,
     string? OperatingSystem = null,
     int Page = 1,
-    int PageSize = 50);
+    int PageSize = 50,
+    int? DepartmentId = null);
 
 public sealed record LatestMetrics(DateTime At, decimal? Cpu, decimal? Ram, decimal? Disk, decimal? Temperature);
 

@@ -41,13 +41,8 @@ public static class SettingsEndpoints
         config.MapDelete("/apariencia/logo", async (CompanySettingsService s, CancellationToken ct) =>
             ToResult(await s.RemoveLogoAsync(ct)));
 
-        config.MapGet("/departamentos", (CompanySettingsService s, CancellationToken ct) => s.DepartmentsAsync(ct));
-        config.MapPost("/departamentos", async (DepartmentInput input, IValidator<DepartmentInput> v, CompanySettingsService s, CancellationToken ct) =>
-            await ValidateAsync(input, v, ct) ?? ToResult(await s.SaveDepartmentAsync(null, input, ct), created: true));
-        config.MapPut("/departamentos/{id:int}", async (int id, DepartmentInput input, IValidator<DepartmentInput> v, CompanySettingsService s, CancellationToken ct) =>
-            await ValidateAsync(input, v, ct) ?? ToResult(await s.SaveDepartmentAsync(id, input, ct)));
-        config.MapDelete("/departamentos/{id:int}", async (int id, CompanySettingsService s, CancellationToken ct) =>
-            ToResult(await s.DeleteDepartmentAsync(id, ct)));
+        // Departamentos (decisión 79): aquí solo se consultan todos; se crean y cambian en cada sucursal.
+        config.MapGet("/departamentos", (MonitoreoTI.Infrastructure.Panel.Departments d, CancellationToken ct) => d.ListAsync(null, ct));
 
         config.MapGet("/seguridad", (CompanySettingsService s, CancellationToken ct) => s.SecurityAsync(ct));
         config.MapPut("/seguridad", (SecuritySettings input, CompanySettingsService s, CancellationToken ct) => s.SetSecurityAsync(input, ct));

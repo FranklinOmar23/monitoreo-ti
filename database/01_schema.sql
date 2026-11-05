@@ -245,12 +245,18 @@ CREATE TABLE dbo.usuario_sucursal (
 );
 GO
 
+-- Departamentos de cada sucursal (decisión 79): el nombre se repite entre sucursales, no dentro de una.
 CREATE TABLE dbo.departamentos (
     id              INT IDENTITY(1,1) PRIMARY KEY,
     empresa_id      INT NOT NULL REFERENCES dbo.empresas(id),
+    sucursal_id     INT NOT NULL,
     nombre          NVARCHAR(100) NOT NULL,
-    CONSTRAINT UQ_departamentos_empresa_nombre UNIQUE (empresa_id, nombre),
-    CONSTRAINT UQ_departamentos_empresa_id UNIQUE (empresa_id, id)
+    responsable_id  INT NULL REFERENCES dbo.usuarios(id),
+    CONSTRAINT UQ_departamentos_sucursal_nombre UNIQUE (empresa_id, sucursal_id, nombre),
+    CONSTRAINT UQ_departamentos_empresa_id UNIQUE (empresa_id, id),
+    CONSTRAINT UQ_departamentos_sucursal_id UNIQUE (empresa_id, sucursal_id, id),
+    CONSTRAINT FK_departamentos_sucursal FOREIGN KEY (empresa_id, sucursal_id)
+        REFERENCES dbo.sucursales(empresa_id, id)
 );
 GO
 
@@ -289,7 +295,10 @@ CREATE TABLE dbo.maquinas (
     CONSTRAINT FK_maquinas_sucursal FOREIGN KEY (empresa_id, sucursal_id)
         REFERENCES dbo.sucursales(empresa_id, id),
     CONSTRAINT FK_maquinas_departamento FOREIGN KEY (empresa_id, departamento_id)
-        REFERENCES dbo.departamentos(empresa_id, id)
+        REFERENCES dbo.departamentos(empresa_id, id),
+    -- El departamento es de la misma sucursal que el equipo.
+    CONSTRAINT FK_maquinas_departamento_sucursal FOREIGN KEY (empresa_id, sucursal_id, departamento_id)
+        REFERENCES dbo.departamentos(empresa_id, sucursal_id, id)
 );
 GO
 

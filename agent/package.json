@@ -1,6 +1,6 @@
 {
   "name": "@monitoreoti/agent",
-  "version": "0.3.6",
+  "version": "0.3.12",
   "private": true,
   "description": "Agente MonitoreoTI: servicio de Windows (modo servicio) e interfaz en la sesión del usuario (modo UI)",
   "main": "out/main/index.js",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "build:host": "dotnet publish host/MonitoreoTI.AgentHost -c Release -o build/host",
-    "installer": "npm run build && npm run build:host && electron-builder --win nsis --x64"
+    "build:clasico": "dotnet build clasico/MonitoreoTI.AgenteClasico -c Release -o build/clasico",
+    "installer": "npm run build && npm run build:host && npm run build:clasico && electron-builder --win nsis --x64"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

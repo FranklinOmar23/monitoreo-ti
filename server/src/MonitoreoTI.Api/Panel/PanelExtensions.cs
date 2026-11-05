@@ -45,6 +45,7 @@ public static class PanelExtensions
         services.AddScoped<NetworkInsights>();
         services.AddScoped<IpAddresses>();
         services.AddScoped<RemoteInstalls>();
+        services.AddScoped<MonitoreoTI.Infrastructure.Panel.Departments>();
         services.AddSingleton<IValidator<SubnetInput>, SubnetInputValidator>();
         services.AddSingleton<IValidator<IpReservationInput>, IpReservationInputValidator>();
         services.AddScoped<Maintenances>();

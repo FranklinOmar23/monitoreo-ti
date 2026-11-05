@@ -7,7 +7,7 @@ import { createHttp, type FetchLike } from './http';
 import { createNetworkApi, type MachineNetworkInfo, type NetworkApi } from './network';
 import { createRemoteApi, type RemoteApi } from './remote';
 import { createReportsApi, type ReportsApi } from './reports';
-import { createSettingsApi, type SettingsApi } from './settings';
+import { createSettingsApi, type DepartmentInput, type DepartmentItem, type SettingsApi } from './settings';
 import { createUsersApi, type UsersApi } from './users';
 
 export interface StatusCounts {
@@ -77,6 +77,7 @@ export interface MachineFilter {
   so?: string;
   pagina?: number;
   tamano?: number;
+  departamento?: number | null;
 }
 
 export interface MachineDetail {
@@ -331,6 +332,10 @@ export interface QrLabel {
 export interface Option {
   id: number;
   nombre: string;
+}
+
+export interface DepartmentOption extends Option {
+  sucursalId: number;
 }
 
 export interface InstallerToken {
@@ -617,7 +622,12 @@ export interface PanelApi {
   qrLabels(ids: number[]): Promise<QrLabel[]>;
   /** Qué es un código QR (enlaces monitoreoti://q/{codigo}); 404 si no existe o el usuario no lo ve. */
   resolveQr(code: string): Promise<QrTarget>;
-  departments(): Promise<Option[]>;
+  /** Para el equipo: los departamentos de esa sucursal (sin sucursal, todos). */
+  departments(branchId?: number | null): Promise<DepartmentOption[]>;
+  /** Departamentos de una sucursal, con equipos y responsable (decisión 79). */
+  branchDepartments(branchId: number): Promise<DepartmentItem[]>;
+  saveDepartment(branchId: number, id: number | null, input: DepartmentInput): Promise<{ id: number }>;
+  deleteDepartment(branchId: number, id: number): Promise<{ id: number }>;
   companyUsers(): Promise<Option[]>;
   createBranch(input: BranchInput): Promise<{ id: number }>;
   updateBranch(id: number, input: BranchInput): Promise<{ id: number }>;
@@ -698,7 +708,13 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     retireMachine: (id) => send('POST', `/maquinas/${id}/baja`),
     qrLabels: (ids) => get('/maquinas/qr', { ids: ids.join(',') }),
     resolveQr: (code) => get(`/qr/${encodeURIComponent(code)}`),
-    departments: () => get('/departamentos'),
+    departments: (branchId) => get('/departamentos', { sucursal: branchId ?? undefined }),
+    branchDepartments: (branchId) => get(`/sucursales/${branchId}/departamentos`),
+    saveDepartment: (branchId, id, input) =>
+      id === null
+        ? send('POST', `/sucursales/${branchId}/departamentos`, input)
+        : send('PUT', `/sucursales/${branchId}/departamentos/${id}`, input),
+    deleteDepartment: (branchId, id) => send('DELETE', `/sucursales/${branchId}/departamentos/${id}`),
     companyUsers: () => get('/usuarios/empresa'),
     createBranch: (input) => send('POST', '/sucursales', input),
     updateBranch: (id, input) => send('PUT', `/sucursales/${id}`, input),

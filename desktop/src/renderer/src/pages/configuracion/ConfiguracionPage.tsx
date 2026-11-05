@@ -4,7 +4,6 @@ import type { CompanySettings, DepartmentItem, PlanUsage, SecuritySettings } fro
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
 import { Icon } from '@components/Icon';
-import { Modal } from '@components/Modal';
 import { PageHeader } from '@components/PageHeader';
 import { Tabs } from '@components/Tabs';
 import { usePanelApi } from '../../data/PanelData';
@@ -359,148 +358,55 @@ function ColorForm({ current, onSaved }: { current: string | null; onSaved: () =
 
 // ---------------------------------------------------------------- departamentos
 
+/** Todos los departamentos, por sucursal (decisión 79). Se crean y cambian en Sucursales. */
 function DepartmentsTab() {
   const api = usePanelApi();
-  const queries = useQueryClient();
   const list = useQuery({
     queryKey: ['configuracion', 'departamentos'],
     queryFn: () => api.configuracion.departments(),
-  });
-  const [editing, setEditing] = useState<DepartmentItem | 'new' | null>(null);
-  const refresh = () => {
-    void queries.invalidateQueries({ queryKey: ['configuracion', 'departamentos'] });
-    // El formulario del equipo los lista.
-    void queries.invalidateQueries({ queryKey: ['departamentos'] });
-  };
-  const remove = useMutation({
-    mutationFn: (id: number) => api.configuracion.deleteDepartment(id),
-    onSuccess: refresh,
   });
 
   if (list.isPending) return <Loading />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
 
+  const byBranch = new Map<string, DepartmentItem[]>();
+  for (const d of list.data) byBranch.set(d.branchName, [...(byBranch.get(d.branchName) ?? []), d]);
+
   return (
-    <Card
-      title="Departamentos"
-      aside={
-        <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
-          <Icon name="plus" size={16} /> Nuevo departamento
-        </button>
-      }
-    >
+    <Card title="Departamentos">
       <p className="muted">
-        Sirven para ordenar los equipos (Contabilidad, Caja, Recursos Humanos…) y filtrarlos en la lista.
+        Cada sucursal tiene sus departamentos (Contabilidad, Caja, Recursos Humanos…). Se crean, renombran y eliminan en{' '}
+        <strong>Sucursales</strong>, dentro de cada una.
       </p>
-      {remove.isError && (
-        <p className="auth-error" role="alert">
-          {remove.error.message}
-        </p>
-      )}
       {list.data.length === 0 ? (
         <EmptyState title="Todavía no hay departamentos" />
       ) : (
         <table className="data-table">
           <thead>
             <tr>
-              <th>Nombre</th>
+              <th>Sucursal</th>
+              <th>Departamento</th>
+              <th>Responsable</th>
               <th>Equipos</th>
-              <th aria-label="Acciones" />
             </tr>
           </thead>
           <tbody>
-            {list.data.map((d) => (
-              <tr key={d.id}>
-                <td>{d.name}</td>
-                <td className="mono">{d.machineCount}</td>
-                <td className="row-actions">
-                  <button type="button" className="btn btn-outline" onClick={() => setEditing(d)}>
-                    Renombrar
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    disabled={remove.isPending || d.machineCount > 0}
-                    title={
-                      d.machineCount > 0 ? 'Tiene equipos: páselos a otro departamento antes de eliminarlo' : undefined
-                    }
-                    onClick={() => {
-                      if (window.confirm(`¿Eliminar el departamento ${d.name}?`)) remove.mutate(d.id);
-                    }}
-                  >
-                    Eliminar
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {[...byBranch.entries()]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .flatMap(([branch, departments]) =>
+                departments.map((d, i) => (
+                  <tr key={d.id}>
+                    <td>{i === 0 ? branch : ''}</td>
+                    <td>{d.name}</td>
+                    <td>{d.responsibleName ?? '—'}</td>
+                    <td className="mono">{d.machineCount}</td>
+                  </tr>
+                )),
+              )}
           </tbody>
         </table>
       )}
-      {editing && (
-        <DepartmentForm
-          department={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            refresh();
-            setEditing(null);
-          }}
-        />
-      )}
     </Card>
-  );
-}
-
-function DepartmentForm({
-  department,
-  onClose,
-  onSaved,
-}: {
-  department: DepartmentItem | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const api = usePanelApi();
-  const [name, setName] = useState(department?.name ?? '');
-  const save = useMutation({
-    mutationFn: () => api.configuracion.saveDepartment(department?.id ?? null, name.trim()),
-    onSuccess: onSaved,
-  });
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    save.mutate();
-  };
-  return (
-    <Modal
-      title={department ? `Renombrar ${department.name}` : 'Nuevo departamento'}
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="btn btn-outline" onClick={onClose}>
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            form="department-form"
-            className="btn btn-primary"
-            disabled={save.isPending || !name.trim()}
-          >
-            {save.isPending ? 'Guardando…' : 'Guardar'}
-          </button>
-        </>
-      }
-    >
-      <form id="department-form" className="form-grid" onSubmit={submit}>
-        {save.isError && (
-          <p className="auth-error form-span" role="alert">
-            {save.error.message}
-          </p>
-        )}
-        <label className="field form-span">
-          <span>Nombre *</span>
-          <input required autoFocus maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-      </form>
-    </Modal>
   );
 }
 

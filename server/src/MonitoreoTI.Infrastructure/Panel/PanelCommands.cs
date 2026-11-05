@@ -99,8 +99,9 @@ public sealed class PanelCommands(
     {
         if (!await CanUseBranchAsync(input.SucursalId, ct))
             return CommandResult.Invalid("La sucursal no existe o no tiene acceso a ella.");
-        if (input.DepartamentoId is int departmentId && !await db.Departments.AnyAsync(d => d.Id == departmentId, ct))
-            return CommandResult.Invalid("El departamento no existe.");
+        if (input.DepartamentoId is int departmentId
+            && !await db.Departments.AnyAsync(d => d.Id == departmentId && d.BranchId == input.SucursalId, ct))
+            return CommandResult.Invalid("El departamento no es de la sucursal elegida.");
         return null;
     }
 
@@ -427,8 +428,13 @@ public sealed class PanelCommands(
 
     // ------------------------------------------------------------------ catálogos para formularios
 
-    public async Task<IReadOnlyList<object>> DepartmentsAsync(CancellationToken ct) =>
-        await db.Departments.AsNoTracking().OrderBy(d => d.Name).Select(d => (object)new { id = d.Id, nombre = d.Name }).ToListAsync(ct);
+    /// <summary>Para elegir el departamento de un equipo: los de esa sucursal (o todos, con su sucursal).</summary>
+    public async Task<IReadOnlyList<object>> DepartmentsAsync(int? branchId, CancellationToken ct) =>
+        await db.Departments.AsNoTracking()
+            .Where(d => branchId == null || d.BranchId == branchId)
+            .OrderBy(d => d.Name)
+            .Select(d => (object)new { id = d.Id, nombre = d.Name, sucursalId = d.BranchId })
+            .ToListAsync(ct);
 
     /// <summary>Usuarios activos de la empresa (para elegir el responsable de una sucursal).</summary>
     public async Task<IReadOnlyList<object>> CompanyUsersAsync(CancellationToken ct)

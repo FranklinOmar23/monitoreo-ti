@@ -8,6 +8,7 @@ import { KpiCard } from '@components/KpiCard';
 import { dateTime, shortDateTime, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
 import { BranchSelect, FormModal, numberOrNull, textOrNull, useNetworkSave } from './NetworkForms';
+import { canInstallOn, InstallAgentDialog, looksLikeWindows, RemoteInstallsCard } from './RemoteInstall';
 
 const HOSTNAME_SOURCE: Record<'netbios' | 'dns' | 'fortigate', string> = {
   netbios: 'lo dio el equipo',
@@ -149,6 +150,7 @@ function SubnetView({
   const [hidden, setHidden] = useState<ReadonlySet<IpState>>(new Set());
   const [reserving, setReserving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [installing, setInstalling] = useState<string[] | null>(null);
   const detail = useQuery({
     queryKey: ['red', 'subredes', subnetId],
     queryFn: () => api.red.subnet(subnetId),
@@ -248,6 +250,21 @@ function SubnetView({
               onClick={() => sweep.mutate()}
             >
               {sweeping ? 'Escaneando…' : 'Escanear ahora'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={subnet.collectorId === null}
+              title={
+                subnet.collectorId === null
+                  ? 'Asigne un recolector a la subred'
+                  : 'Instala el agente en los equipos sin identificar que parecen Windows'
+              }
+              onClick={() =>
+                setInstalling(data!.addresses.filter((a) => canInstallOn(a) && looksLikeWindows(a)).map((a) => a.ip))
+              }
+            >
+              Instalar agente…
             </button>
             <button type="button" className="btn btn-outline" onClick={() => onEdit(subnet)}>
               Editar
@@ -353,12 +370,21 @@ function SubnetView({
           aside={selected && <span className="eyebrow mono">{selected.ip}</span>}
         >
           {selected ? (
-            <IpDetail key={selected.ip} ip={selected} subnet={subnet} onOpenEquipo={onOpenEquipo} />
+            <IpDetail
+              key={selected.ip}
+              ip={selected}
+              subnet={subnet}
+              onOpenEquipo={onOpenEquipo}
+              onInstall={canEdit && subnet.collectorId !== null ? () => setInstalling([selected.ip]) : undefined}
+            />
           ) : (
             <EmptyState title="Elija una dirección del mapa." />
           )}
         </Card>
       </div>
+
+      <RemoteInstallsCard subnetId={subnetId} onOpenEquipo={onOpenEquipo} />
+      {installing && <InstallAgentDialog subnet={subnet} ips={installing} onClose={() => setInstalling(null)} />}
 
       <Card
         title="Reservas"
@@ -482,10 +508,12 @@ function IpDetail({
   ip,
   subnet,
   onOpenEquipo,
+  onInstall,
 }: {
   ip: IpItem;
   subnet: SubnetItem;
   onOpenEquipo: (id: number) => void;
+  onInstall?: () => void;
 }) {
   const note =
     ip.state === 'libre'
@@ -559,6 +587,12 @@ function IpDetail({
             </div>
           ))}
       </dl>
+      {/* Con agente también se ofrece: si el servicio no quedó instalado (o se borró), se reinstala; si está, se omite. */}
+      {onInstall && !ip.isGateway && (canInstallOn(ip) || ip.machineSource === 'agente') && (
+        <button type="button" className="btn btn-outline btn-sm ip-install" onClick={onInstall}>
+          {ip.machineSource === 'agente' ? 'Reinstalar agente' : 'Instalar agente'}
+        </button>
+      )}
       <IpHistory subnetId={subnet.id} ip={ip.ip} onOpenEquipo={onOpenEquipo} />
     </div>
   );

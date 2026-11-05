@@ -38,6 +38,7 @@ export function FormModal({
   onClose,
   onSubmit,
   wide,
+  submitLabel,
   children,
 }: {
   id: string;
@@ -47,6 +48,8 @@ export function FormModal({
   onClose: () => void;
   onSubmit: () => void;
   wide?: boolean;
+  /** Texto del botón (por defecto "Guardar"). */
+  submitLabel?: string;
   children: ReactNode;
 }) {
   const submit = (event: FormEvent) => {
@@ -64,7 +67,7 @@ export function FormModal({
             Cancelar
           </button>
           <button type="submit" form={id} className="btn btn-primary" disabled={pending}>
-            {pending ? 'Guardando…' : 'Guardar'}
+            {pending ? (submitLabel ? 'Enviando…' : 'Guardando…') : (submitLabel ?? 'Guardar')}
           </button>
         </>
       }

@@ -33,6 +33,7 @@ import { terminalHandlerFactory } from './terminal';
 import { filesHandlerFactory } from './files';
 import { desktopHandlerFactory } from './desktop';
 import { AgentUpdater, UPDATE_EXIT_CODE } from './updater';
+import { hostRemoteInstall, RemoteInstaller } from './remote-install';
 import { createEnvelope } from '@monitoreoti/shared';
 import { GatewayClient } from './gateway-client';
 import { readMachineIdentity } from './machine-info';
@@ -140,6 +141,16 @@ async function main(): Promise<void> {
         log('info', 'El agente termina para instalar la actualización');
         process.exit(UPDATE_EXIT_CODE);
       },
+    }),
+    // Instala el agente en otros equipos de su red con la cuenta del dominio que manda el servidor (decisión 77).
+    remoteInstaller: new RemoteInstaller({
+      serverUrl: config.serverUrl,
+      credential: credential.credential,
+      dataDir: config.dataDir,
+      caFile: process.env['NODE_EXTRA_CA_CERTS'],
+      install: hostRemoteInstall(process.env['MONITOREOTI_HOST_EXE']),
+      submit: (envelope) => state.runtime?.submitMessage(envelope),
+      log,
     }),
     // Solo ejecuta lo firmado con la llave de su empresa (sección 8.1).
     executor: (submit) =>

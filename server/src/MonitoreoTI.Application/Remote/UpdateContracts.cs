@@ -32,7 +32,13 @@ public static class VersionRules
         return 0;
     }
 
-    public static bool IsOlder(string? installed, string available) => Compare(installed, available) < 0;
+    /// <summary>
+    /// El agente clásico de Windows 7 (decisión 78) se identifica con "-clasico" y nunca recibe el instalador del agente
+    /// normal: no corre en su sistema.
+    /// </summary>
+    public static bool IsClassic(string? version) => version?.Contains("-clasico", StringComparison.OrdinalIgnoreCase) == true;
+
+    public static bool IsOlder(string? installed, string available) => !IsClassic(installed) && Compare(installed, available) < 0;
 
     private static int[] Parts(string? version) =>
         (version ?? "").Split('-', '+')[0].Split('.').Select(p => int.TryParse(p, out var n) ? n : 0).ToArray();

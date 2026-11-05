@@ -217,6 +217,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
   const [equipoId, setEquipoId] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [branchFilter, setBranchFilter] = useState<number | null>(null);
+  const [departmentFilter, setDepartmentFilter] = useState<number | null>(null);
   const [qrIds, setQrIds] = useState<number[]>([]);
   const [form, setForm] = useState<{ kind: 'nuevo' } | { kind: 'editar' | 'baja'; machine: MachineDetail } | null>(
     null,
@@ -316,6 +317,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
     setPage(id);
     setEquipoId(null);
     setBranchFilter(null);
+    setDepartmentFilter(null);
     setTicketId(null);
     setAlertId(null);
     setBatchId(null);
@@ -456,11 +458,12 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
               />
             ) : (
               <EquiposPage
-                key={branchFilter ?? 'todas'}
+                key={`${branchFilter ?? 'todas'}-${departmentFilter ?? 'todos'}`}
                 query={query}
                 onQueryChange={changeQuery}
                 onOpenEquipo={openEquipo}
                 initialBranchId={branchFilter}
+                initialDepartmentId={departmentFilter}
                 onAddMachine={can('equipos.editar') ? () => setForm({ kind: 'nuevo' }) : undefined}
                 onPrintQr={(ids) => {
                   setQrIds(ids);
@@ -473,10 +476,11 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
           {page === 'sucursales' && (
             <SucursalesPage
               canEdit={can('sucursales.editar')}
-              onOpenMachines={(branchId) => {
+              onOpenMachines={(branchId, departmentId) => {
                 setPage('equipos');
                 setEquipoId(null);
                 setBranchFilter(branchId);
+                setDepartmentFilter(departmentId ?? null);
               }}
             />
           )}

@@ -13,6 +13,7 @@ import { Sender } from './sender';
 import type { CommandExecutor } from './executor';
 import type { RemoteSessions } from './remote-sessions';
 import type { AgentUpdater } from './updater';
+import type { RemoteInstaller } from './remote-install';
 import { IpSweeper, type HostSweep } from './ipsweep';
 import { fortiHttpGet, testFortiApi, type FortiHttp } from './fortigate';
 import { openApiToken, parseCollectorConfig, SnmpPoller, type SnmpQuery } from './snmp';
@@ -74,6 +75,8 @@ export interface RuntimeOptions {
   sessions?: RemoteSessions;
   /** Actualización automática (Fase 6.6). */
   updater?: AgentUpdater;
+  /** Instalación remota del agente en otros equipos (decisión 77). */
+  remoteInstaller?: RemoteInstaller;
   /** La bienvenida trae la llave de la empresa: se guarda si el agente aún no la tenía. */
   onCompanyKey?: (publicKey: string) => void;
   log: Log;
@@ -198,6 +201,8 @@ export class AgentRuntime {
       void this.guarded(() => this.testApi(message.datos), 'prueba de API');
     } else if (message.tipo === 'barrido_ip' && this.ipSweeper) {
       void this.guarded(() => this.ipSweeper!.handle(message.datos), 'barrido de IP');
+    } else if (message.tipo === 'instalar_agente' && this.options.remoteInstaller) {
+      void this.guarded(() => this.options.remoteInstaller!.handle(message.datos), 'instalación remota');
     } else if (message.tipo === 'actualizar_agente') {
       if (this.options.updater) void this.guarded(() => this.options.updater!.handle(message.datos), 'actualización');
     } else if (message.tipo === 'abrir_sesion_remota') {

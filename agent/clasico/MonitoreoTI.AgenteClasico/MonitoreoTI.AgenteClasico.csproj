@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Agente clásico (decisión 78): para Windows 7 SP1 y equipos de 32 bits, donde no corren Electron ni .NET 8.
+    Un solo .exe para .NET Framework 4.5.2 (viene con las actualizaciones de Windows 7), sin librerías externas:
+    es a la vez el servicio de Windows y su instalador ("instalar /SERVER= /TOKEN=").
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net452</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>8.0</LangVersion>
+    <AssemblyName>MonitoreoTI.AgenteClasico</AssemblyName>
+    <RootNamespace>MonitoreoTI.AgenteClasico</RootNamespace>
+    <Version>0.1.0</Version>
+    <InformationalVersion>0.1.0-clasico</InformationalVersion>
+    <Product>MonitoreoTI Agente clásico</Product>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Management" />
+    <Reference Include="System.ServiceProcess" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+</Project>

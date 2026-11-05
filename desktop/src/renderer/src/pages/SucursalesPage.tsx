@@ -7,11 +7,13 @@ import { Icon } from '@components/Icon';
 import { Modal } from '@components/Modal';
 import { PageHeader } from '@components/PageHeader';
 import { usePanelApi } from '../data/PanelData';
+import { BranchDepartments } from './BranchDepartments';
 import { StatusBar, worst } from './DashboardPage';
 
 interface SucursalesPageProps {
   canEdit: boolean;
-  onOpenMachines: (branchId: number) => void;
+  /** Abre Equipos filtrado por la sucursal (y por un departamento suyo). */
+  onOpenMachines: (branchId: number, departmentId?: number) => void;
 }
 
 /** W-15 Sucursales (lista), W-16 detalle y W-17 formulario. */
@@ -49,7 +51,9 @@ export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps)
           canEdit={canEdit}
           onBack={() => setSelected(null)}
           onEdit={() => setEditing(detail)}
-          onOpenMachines={() => onOpenMachines(detail.id)}
+          onOpenMachines={(departmentId) =>
+            departmentId === undefined ? onOpenMachines(detail.id) : onOpenMachines(detail.id, departmentId)
+          }
         />
       ) : (
         <div className="branch-grid">
@@ -96,7 +100,7 @@ function BranchDetail({
   canEdit: boolean;
   onBack: () => void;
   onEdit: () => void;
-  onOpenMachines: () => void;
+  onOpenMachines: (departmentId?: number) => void;
 }) {
   const { counts } = branch;
   return (
@@ -154,11 +158,12 @@ function BranchDetail({
             </li>
           </ul>
           <StatusBar counts={counts} label={`Estado de ${branch.name}`} />
-          <button type="button" className="btn btn-primary branch-machines" onClick={onOpenMachines}>
+          <button type="button" className="btn btn-primary branch-machines" onClick={() => onOpenMachines()}>
             <Icon name="monitor" size={16} /> Ver sus {counts.total} equipos
           </button>
         </Card>
       </div>
+      <BranchDepartments branch={branch} canEdit={canEdit} onOpenMachines={(id) => onOpenMachines(id)} />
     </>
   );
 }

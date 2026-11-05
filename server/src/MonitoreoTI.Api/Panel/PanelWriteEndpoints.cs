@@ -1,4 +1,5 @@
 using FluentValidation;
+using MonitoreoTI.Application.Settings;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Infrastructure.Panel;
 
@@ -41,7 +42,10 @@ public static class PanelWriteEndpoints
             return Results.Ok(labels);
         }).RequireAuthorization(PermissionPolicies.MachinesView);
 
-        api.MapGet("/departamentos", (PanelCommands commands, CancellationToken ct) => commands.DepartmentsAsync(ct))
+        // Para el formulario del equipo: los departamentos de la sucursal elegida.
+        api.MapGet("/departamentos", (PanelCommands commands, CancellationToken ct, int? sucursal) => commands.DepartmentsAsync(sucursal, ct))
+            .RequireAuthorization(PermissionPolicies.MachinesView);
+        api.MapGet("/sucursales/{id:int}/departamentos", (int id, Departments departments, CancellationToken ct) => departments.ListAsync(id, ct))
             .RequireAuthorization(PermissionPolicies.MachinesView);
 
         // ---------------------------------------------------------------- sucursales
@@ -50,6 +54,12 @@ public static class PanelWriteEndpoints
             await ValidateAsync(input, validator, ct) ?? ToResult(await commands.CreateBranchAsync(input, ct), created: true));
         branches.MapPut("/{id:int}", async (int id, BranchInput input, IValidator<BranchInput> validator, PanelCommands commands, CancellationToken ct) =>
             await ValidateAsync(input, validator, ct) ?? ToResult(await commands.UpdateBranchAsync(id, input, ct)));
+        branches.MapPost("/{id:int}/departamentos", async (int id, DepartmentInput input, IValidator<DepartmentInput> v, Departments d, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await d.SaveAsync(id, null, input, ct), created: true));
+        branches.MapPut("/{id:int}/departamentos/{departamento:int}", async (int id, int departamento, DepartmentInput input, IValidator<DepartmentInput> v, Departments d, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await d.SaveAsync(id, departamento, input, ct)));
+        branches.MapDelete("/{id:int}/departamentos/{departamento:int}", async (int id, int departamento, Departments d, CancellationToken ct) =>
+            ToResult(await d.DeleteAsync(id, departamento, ct)));
         api.MapGet("/usuarios/empresa", (PanelCommands commands, CancellationToken ct) => commands.CompanyUsersAsync(ct))
             .RequireAuthorization(PermissionPolicies.BranchesEdit);
 

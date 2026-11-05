@@ -98,10 +98,11 @@ INSERT INTO dbo.usuario_sucursal (empresa_id, usuario_id, sucursal_id) VALUES
     (@caribe, @tecnico, @sd),
     (@caribe, @tecnico, @santiago);
 
-INSERT INTO dbo.departamentos (empresa_id, nombre) VALUES
-    (@caribe, N'Contabilidad'), (@caribe, N'Caja'), (@caribe, N'Recursos Humanos'),
-    (@caribe, N'Ventas'), (@caribe, N'TI'), (@caribe, N'Recepción'),
-    (@rafael, N'Contabilidad');
+INSERT INTO dbo.departamentos (empresa_id, sucursal_id, nombre) VALUES
+    (@caribe, @sd, N'Contabilidad'), (@caribe, @sd, N'Recursos Humanos'), (@caribe, @sd, N'TI'), (@caribe, @sd, N'Recepción'),
+    (@caribe, @santiago, N'Contabilidad'), (@caribe, @santiago, N'Caja'),
+    (@caribe, @romana, N'Ventas'),
+    (@rafael, @sd_rafael, N'Contabilidad');
 
 /* ---------------------------------------------------------------------
    Máquinas
@@ -120,7 +121,7 @@ FROM (VALUES
     (@caribe, @sd,        N'Recepción',        N'IMP-RECEPCION', 'impresora',   N'HP',    N'LaserJet M507',   N'HPM507-0001', NULL,                              '10.10.30.20', '3C:52:82:A1:30:20', N'Recepción',     '2022-11-11', '2024-11-11', 'sano'),
     (@rafael, @sd_rafael, N'Contabilidad',     N'CONTA-03',      'computadora', N'HP',    N'EliteDesk 800 G6',N'HP800-R003',  N'Windows 11 Pro 23H2',            '192.168.1.33','5C:60:BA:00:00:33', N'Laura Féliz',   '2023-09-09', '2026-09-09', 'sano')
 ) AS x (empresa_id, sucursal_id, departamento, nombre, tipo, marca, modelo, serie, so, ip, mac, responsable, compra, garantia, estado)
-LEFT JOIN dbo.departamentos d ON d.empresa_id = x.empresa_id AND d.nombre = x.departamento;
+LEFT JOIN dbo.departamentos d ON d.empresa_id = x.empresa_id AND d.sucursal_id = x.sucursal_id AND d.nombre = x.departamento;
 
 DECLARE @conta    INT = (SELECT id FROM dbo.maquinas WHERE empresa_id = @caribe AND nombre = N'CONTA-03');
 DECLARE @caja     INT = (SELECT id FROM dbo.maquinas WHERE empresa_id = @caribe AND nombre = N'CAJA-01');

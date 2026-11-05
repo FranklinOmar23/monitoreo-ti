@@ -55,14 +55,20 @@ public sealed record LogoInput(string Datos);
 
 // ------------------------------------------------------------------ departamentos
 
-public sealed record DepartmentItem(int Id, string Name, int MachineCount);
+/// <summary>Departamento de una sucursal (decisión 79) con sus equipos activos y su responsable.</summary>
+public sealed record DepartmentItem(
+    int Id, string Name, int MachineCount, int BranchId, string BranchName, int? ResponsibleId, string? ResponsibleName);
 
-public sealed record DepartmentInput(string Nombre);
+/// <summary>La sucursal va en la ruta (/sucursales/{id}/departamentos).</summary>
+public sealed record DepartmentInput(string Nombre, int? ResponsableId = null);
 
 public sealed class DepartmentInputValidator : AbstractValidator<DepartmentInput>
 {
-    public DepartmentInputValidator() =>
+    public DepartmentInputValidator()
+    {
         RuleFor(x => x.Nombre).NotEmpty().WithMessage("Escriba el nombre del departamento.").MaximumLength(100);
+        RuleFor(x => x.ResponsableId).GreaterThan(0).When(x => x.ResponsableId is not null);
+    }
 }
 
 // ------------------------------------------------------------------ seguridad y correo
