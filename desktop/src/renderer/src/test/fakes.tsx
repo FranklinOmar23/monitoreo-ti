@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { render } from '@testing-library/react';
 import type {
   ReportsApi,
+  BackupsApi,
+  Page,
   AlertList,
   AlertListItem,
   AuthApi,
@@ -52,8 +54,38 @@ export function machine(overrides: Partial<MachineListItem> = {}): MachineListIt
   };
 }
 
+/** Una página de listado como la devuelve el servidor (decisión 83). */
+export function pageOf<T>(items: T[], total = items.length, page = 1, limit = 10): Page<T> {
+  return { data: items, isThereNextPage: page * limit < total, page, limit, total, totalPages: Math.ceil(total / limit) };
+}
+
+/** Las pantallas paginadas leen la versión "Page" de una lista completa: la página pedida de esa lista. */
+export function pageFrom<T>(load: () => Promise<T[]>) {
+  // Sirve para (params) y para (id, params): toma el último argumento que sea un objeto.
+  return (...args: unknown[]) => {
+    const params = ([...args].reverse().find((a) => typeof a === 'object' && a !== null) ?? {}) as {
+      page?: number;
+      limit?: number;
+      q?: string;
+    };
+    return load().then((loaded) => {
+      // Como el servidor: q busca en todos los textos de la fila.
+      const q = params.q?.toLowerCase();
+      const all = q
+        ? loaded.filter((row) => Object.values(row as object).some((v) => typeof v === 'string' && v.toLowerCase().includes(q)))
+        : loaded;
+      const page = params.page ?? 1;
+      const limit = params.limit ?? 10;
+      return { data: pageOf(all.slice((page - 1) * limit, page * limit), all.length, page, limit) };
+    });
+  };
+}
+
+/** Una respuesta paginada fija para las pruebas. */
+export const paged = <T,>(items: T[]) => () => Promise.resolve({ data: pageOf(items) });
+
 export const machineList = (items: MachineListItem[]): MachineList => ({
-  page: { items, total: items.length, page: 1, pageSize: 50 },
+  data: pageOf(items),
   counts: counts(),
   operatingSystems: ['Windows 11 Pro'],
 });
@@ -144,7 +176,7 @@ export function alertItem(overrides: Partial<AlertListItem> = {}): AlertListItem
 export function alertList(items: AlertListItem[]): AlertList {
   const open = items.filter((a) => a.status !== 'resuelta');
   return {
-    page: { items, total: items.length, page: 1, pageSize: 50 },
+    data: pageOf(items),
     counts: {
       open: open.length,
       new: open.filter((a) => a.status === 'nueva').length,
@@ -180,7 +212,7 @@ export function ticketList(items: TicketListItem[]): TicketList {
   const of = (s: TicketListItem['status']) => items.filter((t) => t.status === s).length;
   const active = items.filter((t) => t.status !== 'resuelto' && t.status !== 'cerrado');
   return {
-    page: { items, total: items.length, page: 1, pageSize: 300 },
+    data: pageOf(items, items.length, 1, 100),
     counts: {
       open: of('abierto'),
       inProgress: of('en_proceso'),
@@ -196,7 +228,7 @@ export function ticketList(items: TicketListItem[]): TicketList {
 /** API del data center falsa: listas vacías; el resto falla salvo lo que la prueba defina. */
 export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi {
   const missing = () => Promise.reject(new Error('no esperado'));
-  return {
+  const api = {
     rooms: () => Promise.resolve([]),
     racks: () => Promise.resolve([]),
     rack: missing,
@@ -204,7 +236,7 @@ export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi 
     devices: () => Promise.resolve([]),
     device: missing,
     outlets: () => Promise.resolve([]),
-    cables: () => Promise.resolve([]),
+    cables: () => Promise.resolve({ data: pageOf([]) }),
     path: missing,
     saveRoom: missing,
     deleteRoom: missing,
@@ -216,14 +248,16 @@ export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi 
     retireDevice: missing,
     pollDevice: missing,
     testDeviceApi: missing,
+    detectSwitches: missing,
+    registerSwitches: missing,
     installAgents: missing,
-    remoteInstalls: () => Promise.resolve([]),
+    remoteInstalls: () => Promise.resolve({ data: pageOf([]) }),
     savePort: missing,
     saveOutlet: missing,
     deleteOutlet: missing,
     createCable: missing,
     deleteCable: missing,
-    history: () => Promise.resolve({ items: [], total: 0, page: 1, pageSize: 50 }),
+    history: () => Promise.resolve({ data: pageOf([]) }),
     previewImport: missing,
     runImport: missing,
     summary: () =>
@@ -246,8 +280,8 @@ export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi 
         attention: [],
       }),
     collectors: () => Promise.resolve([]),
-    unknown: () => Promise.resolve([]),
-    differences: () => Promise.resolve([]),
+    unknown: () => Promise.resolve({ data: pageOf([]) }),
+    differences: () => Promise.resolve({ data: pageOf([]) }),
     topology: () => Promise.resolve({ nodes: [], links: [] }),
     subnets: () => Promise.resolve([]),
     subnet: missing,
@@ -261,23 +295,29 @@ export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi 
     assignPort: missing,
     ...overrides,
   };
+  return {
+    ...api,
+    modelsPage: overrides.modelsPage ?? pageFrom(() => api.models()),
+    devicesPage: overrides.devicesPage ?? ((filter, params) => pageFrom(() => api.devices(filter))(params)),
+    outletsPage: overrides.outletsPage ?? ((branchId, params) => pageFrom(() => api.outlets(branchId))(params)),
+  };
 }
 
 /** API remota falsa: biblioteca y ejecuciones vacías; lo demás falla salvo lo que la prueba defina. */
 export function fakeRemoteApi(overrides: Partial<RemoteApi> = {}): RemoteApi {
   const missing = () => Promise.reject(new Error('no esperado'));
-  return {
+  const api = {
     scripts: () => Promise.resolve([]),
     saveScript: missing,
     deleteScript: missing,
     run: missing,
-    runs: () => Promise.resolve([]),
+    runs: () => Promise.resolve({ data: pageOf([]) }),
     runDetail: missing,
     confirmTwoFactor: missing,
     openSession: missing,
     closeSession: missing,
-    sessions: () => Promise.resolve({ items: [], total: 0, page: 1, pageSize: 50 }),
-    tasks: () => Promise.resolve([]),
+    sessions: () => Promise.resolve({ data: pageOf([]) }),
+    tasks: () => Promise.resolve({ data: pageOf([]) }),
     saveTask: missing,
     deleteTask: missing,
     updates: missing,
@@ -287,13 +327,17 @@ export function fakeRemoteApi(overrides: Partial<RemoteApi> = {}): RemoteApi {
     saveRemoteSettings: missing,
     ...overrides,
   };
+  return {
+    ...api,
+    scriptsPage: overrides.scriptsPage ?? pageFrom(() => api.scripts()),
+  };
 }
 
 /** API de usuarios falsa: listas vacías; las escrituras fallan salvo lo que la prueba defina. */
 export function fakeUsersApi(overrides: Partial<UsersApi> = {}): UsersApi {
   const missing = () => Promise.reject(new Error('no esperado'));
   return {
-    list: () => Promise.resolve([]),
+    list: () => Promise.resolve({ data: pageOf([]) }),
     create: missing,
     update: missing,
     setActive: missing,
@@ -306,7 +350,7 @@ export function fakeUsersApi(overrides: Partial<UsersApi> = {}): UsersApi {
     profile: missing,
     rename: missing,
     changePassword: missing,
-    sessions: () => Promise.resolve([]),
+    sessions: () => Promise.resolve({ data: pageOf([]) }),
     closeSession: missing,
     closeOtherSessions: missing,
     ...overrides,
@@ -348,18 +392,33 @@ export function fakeReportsApi(overrides: Partial<ReportsApi> = {}): ReportsApi 
   };
 }
 
+export function fakeBackupsApi(overrides: Partial<BackupsApi> = {}): BackupsApi {
+  const missing = () => Promise.reject(new Error('no esperado'));
+  return {
+    overview: missing,
+    save: missing,
+    remove: missing,
+    runNow: missing,
+    explore: missing,
+    testDestination: missing,
+    ...overrides,
+  };
+}
+
 /** API del panel falsa: cada método falla salvo los que la prueba defina. */
 export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
   const missing = () => Promise.reject(new Error('no esperado'));
-  return {
+  const api: Omit<PanelApi, 'branchesPage'> & Partial<Pick<PanelApi, 'branchesPage'>> = {
     red: fakeNetworkApi(),
     remoto: fakeRemoteApi(),
     usuarios: fakeUsersApi(),
     configuracion: fakeSettingsApi(),
     reportes: fakeReportsApi(),
+    respaldos: fakeBackupsApi(),
     dashboard: missing,
     resolveQr: missing,
     machines: missing,
+    machineOptions: () => Promise.resolve([]),
     machine: missing,
     metrics: () => Promise.resolve([]),
     software: missing,
@@ -384,18 +443,18 @@ export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
     retireMachine: missing,
     qrLabels: missing,
     departments: () => Promise.resolve([]),
-    branchDepartments: () => Promise.resolve([]),
+    branchDepartments: () => Promise.resolve({ data: pageOf([]) }),
     saveDepartment: missing,
     deleteDepartment: missing,
     companyUsers: () => Promise.resolve([]),
     createBranch: missing,
     updateBranch: missing,
-    installers: () => Promise.resolve([]),
+    installers: () => Promise.resolve({ data: pageOf([]) }),
     createInstaller: missing,
     revokeInstaller: missing,
     deleteInstaller: missing,
     installerCommand: missing,
-    pendingAgents: () => Promise.resolve([]),
+    pendingAgents: () => Promise.resolve({ data: pageOf([]) }),
     approveAgent: missing,
     rejectAgent: missing,
     // La estructura pide el resumen de alertas para la insignia del menú.
@@ -419,6 +478,7 @@ export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
     ticketAttachment: missing,
     ...overrides,
   };
+  return { ...api, branchesPage: overrides.branchesPage ?? pageFrom(() => api.branches()) };
 }
 
 const fakeAuth: AuthApi = {

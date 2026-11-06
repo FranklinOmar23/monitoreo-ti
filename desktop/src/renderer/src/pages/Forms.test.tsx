@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type BranchItem } from '@monitoreoti/shared';
-import { counts, fakePanelApi, machineDetail, renderWithPanel } from '../test/fakes';
+import { counts, fakePanelApi, machineDetail, renderWithPanel, pageFrom } from '../test/fakes';
 import { InstaladoresPage } from './InstaladoresPage';
 import { MachineForm, RetireDialog } from './MachineForm';
 import { QrPrintPage } from './QrPrintPage';
@@ -205,7 +205,7 @@ describe('Instaladores (W-18, W-19)', () => {
       <InstaladoresPage />,
       fakePanelApi({
         deleteInstaller,
-        installers: () =>
+        installers: pageFrom(() =>
           Promise.resolve([
             {
               id: 3,
@@ -221,7 +221,7 @@ describe('Instaladores (W-18, W-19)', () => {
               createdBy: 'Ana Martínez',
               state: 'revocado',
             },
-          ]),
+          ])),
       }),
     );
 
@@ -238,7 +238,7 @@ describe('Instaladores (W-18, W-19)', () => {
       <InstaladoresPage />,
       fakePanelApi({
         approveAgent,
-        pendingAgents: () =>
+        pendingAgents: pageFrom(() =>
           Promise.resolve([
             {
               agentId: 9,
@@ -250,7 +250,7 @@ describe('Instaladores (W-18, W-19)', () => {
               branchName: 'Santiago',
               registeredAt: new Date().toISOString(),
             },
-          ]),
+          ])),
       }),
     );
 

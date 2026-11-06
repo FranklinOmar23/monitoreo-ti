@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
 using MonitoreoTI.Application.Agents;
@@ -42,13 +42,17 @@ public sealed class AgentInventory(IServiceScopeFactory scopes, OuiDirectory oui
             machine.Model = Trim(data.Modelo, 100) ?? machine.Model;
             machine.SerialNumber = Trim(data.Serie, 100) ?? machine.SerialNumber;
             machine.OperatingSystem = Trim(data.SistemaOperativo, 150) ?? machine.OperatingSystem;
-            machine.Type = data.Tipo?.Trim().ToLowerInvariant() switch
+            // Si alguien eligió el tipo en el panel, el inventario no lo cambia (decisión 82).
+            if (!machine.TypeLocked)
             {
-                "laptop" => MachineType.Laptop,
-                "servidor" => MachineType.Server,
-                "computadora" => MachineType.Desktop,
-                _ => machine.Type,
-            };
+                machine.Type = data.Tipo?.Trim().ToLowerInvariant() switch
+                {
+                    "laptop" => MachineType.Laptop,
+                    "servidor" => MachineType.Server,
+                    "computadora" => MachineType.Desktop,
+                    _ => machine.Type,
+                };
+            }
 
             if (data.RamTotalMb is > 0 and < 100_000_000)
                 machine.RamTotalMb = data.RamTotalMb;

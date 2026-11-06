@@ -1,6 +1,7 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
+using MonitoreoTI.Application.Backups;
 using MonitoreoTI.Application.Health;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Application.Remote;
@@ -56,6 +57,11 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         var components = await db.Components.AsNoTracking()
             .Where(c => ids.Contains(c.MachineId) && (c.Type == "disco" || c.Type == "antivirus" || c.Type == "toner"))
             .Select(c => new { c.MachineId, c.Type, c.Description, c.HealthStatus, c.Detail, c.Capacity }).ToListAsync(cancellationToken);
+        // Respaldos de servidores (decisión 82): fallidos, atrasados, sin disco o con servicios que no arrancaron.
+        var backups = await db.BackupJobs.AsNoTracking().Where(j => ids.Contains(j.MachineId))
+            .Select(j => new { j.MachineId, Snapshot = new BackupJobSnapshot(j.Id, j.Name, j.IsActive, j.Frequency, j.WeekDays, j.CreatedAt,
+                j.LastStatus, j.LastSuccessAt, j.LastError, j.DiskMissingSince, j.ServicesNotRestarted) })
+            .ToListAsync(cancellationToken);
         // Incluye las de red que nombran al equipo (puerto caído): cuentan para su semáforo, pero las abre y
         // resuelve el motor de red.
         var open = await db.Alerts.Where(a => a.MachineId != null && ids.Contains(a.MachineId.Value) && a.Status != AlertStatus.Resolved)
@@ -83,7 +89,9 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
                     .Select(c => new ComponentSnapshot(c.Type, c.Description, EnumMemberConverter<HealthStatus>.ToProvider(c.HealthStatus), c.Detail, c.Capacity))
                     .ToList());
 
-            var findings = HealthRules.Evaluate(snapshot, machineRules.Set, now);
+            var findings = HealthRules.Evaluate(snapshot, machineRules.Set, now)
+                .Concat(BackupRules.Evaluate(backups.Where(b => b.MachineId == machine.Id).Select(b => b.Snapshot), now))
+                .ToList();
             var machineOpen = open.Where(a => a.MachineId == machine.Id && a.Code != null && a.DeviceId == null).ToList();
 
             foreach (var finding in findings)

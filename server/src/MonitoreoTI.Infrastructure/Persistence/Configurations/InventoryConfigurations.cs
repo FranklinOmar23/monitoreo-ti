@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MonitoreoTI.Domain.Entities.Inventory;
 using MonitoreoTI.Domain.Entities.Security;
@@ -75,6 +75,7 @@ internal sealed class MachineConfiguration : IEntityTypeConfiguration<Machine>
         b.Property(x => x.QrCode).HasColumnName("codigo_qr").DefaultNewGuid();
         b.Property(x => x.Name).HasColumnName("nombre").HasMaxLength(100);
         b.Property(x => x.Type).HasColumnName("tipo");
+        b.Property(x => x.TypeLocked).HasColumnName("tipo_fijo");
         b.Property(x => x.Brand).HasColumnName("marca").HasMaxLength(100);
         b.Property(x => x.Model).HasColumnName("modelo").HasMaxLength(100);
         b.Property(x => x.SerialNumber).HasColumnName("serie").HasMaxLength(100);

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type BranchItem, type DepartmentItem } from '@monitoreoti/shared';
-import { counts, fakePanelApi, machineDetail, renderWithPanel } from '../test/fakes';
+import { counts, fakePanelApi, machineDetail, renderWithPanel, pageFrom } from '../test/fakes';
 import { MachineForm } from './MachineForm';
 import { SucursalesPage } from './SucursalesPage';
 
@@ -36,11 +36,11 @@ describe('Departamentos por sucursal (decisión 79)', () => {
       <SucursalesPage canEdit onOpenMachines={onOpenMachines} />,
       fakePanelApi({
         branches: () => Promise.resolve([santiago]),
-        branchDepartments: () =>
+        branchDepartments: pageFrom(() =>
           Promise.resolve([
             dep({ id: 10, name: 'Caja', machineCount: 3, responsibleName: 'José Almonte' }),
             dep({ id: 11, name: 'Archivo' }),
-          ]),
+          ])),
       }),
     );
 
@@ -66,7 +66,7 @@ describe('Departamentos por sucursal (decisión 79)', () => {
       <SucursalesPage canEdit onOpenMachines={vi.fn()} />,
       fakePanelApi({
         branches: () => Promise.resolve([santiago]),
-        branchDepartments: () => Promise.resolve([]),
+        branchDepartments: pageFrom(() => Promise.resolve([])),
         companyUsers: () => Promise.resolve([{ id: 5, nombre: 'Ana Martínez' }]),
         saveDepartment,
       }),
@@ -91,7 +91,7 @@ describe('Departamentos por sucursal (decisión 79)', () => {
       <SucursalesPage canEdit={false} onOpenMachines={vi.fn()} />,
       fakePanelApi({
         branches: () => Promise.resolve([santiago]),
-        branchDepartments: () => Promise.resolve([dep({})]),
+        branchDepartments: pageFrom(() => Promise.resolve([dep({})])),
       }),
     );
     fireEvent.click(await screen.findByRole('button', { name: /Santiago/ }));

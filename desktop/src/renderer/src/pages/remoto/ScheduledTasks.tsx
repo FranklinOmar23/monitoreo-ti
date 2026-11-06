@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../../data/usePaged';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   WEEK_DAYS,
@@ -32,7 +34,7 @@ const TARGETS: { value: TaskTarget; label: string }[] = [
 export function ScheduledTasks({ onOpenRun }: { onOpenRun: (batchId: string) => void }) {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const tasks = useQuery({ queryKey: ['tareas'], queryFn: () => api.remoto.tasks() });
+  const { query: tasks, data: page, items: taskItems, setPage } = usePaged(['tareas'], (p) => api.remoto.tasks(p));
   const [editing, setEditing] = useState<ScheduledTaskItem | 'nueva' | null>(null);
   const remove = useMutation({
     mutationFn: (id: number) => api.remoto.deleteTask(id),
@@ -50,7 +52,7 @@ export function ScheduledTasks({ onOpenRun }: { onOpenRun: (batchId: string) => 
           <Icon name="plus" size={16} /> Nueva tarea
         </button>
       </div>
-      {tasks.data.length === 0 ? (
+      {taskItems.length === 0 ? (
         <EmptyState title="No hay tareas programadas">
           Programe un script de la biblioteca para que se ejecute solo: por ejemplo, limpiar temporales cada noche.
         </EmptyState>
@@ -68,7 +70,7 @@ export function ScheduledTasks({ onOpenRun }: { onOpenRun: (batchId: string) => 
               </tr>
             </thead>
             <tbody>
-              {tasks.data.map((t) => (
+              {taskItems.map((t) => (
                 <tr key={t.id}>
                   <td>
                     <strong>{t.name}</strong>
@@ -111,6 +113,7 @@ export function ScheduledTasks({ onOpenRun }: { onOpenRun: (batchId: string) => 
               ))}
             </tbody>
           </table>
+          <Pager data={page} noun="tareas" onPage={setPage} />
         </div>
       )}
       {editing && <TaskForm task={editing === 'nueva' ? null : editing} onClose={() => setEditing(null)} />}

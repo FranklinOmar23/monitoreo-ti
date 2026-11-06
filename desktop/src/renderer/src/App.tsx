@@ -128,11 +128,11 @@ function useOpenAlerts(enabled: boolean) {
   const api = usePanelApi();
   const query = useQuery({
     queryKey: ['alertas', 'resumen'],
-    queryFn: () => api.alerts({ tamano: 8 }),
+    queryFn: () => api.alerts({ limit: 8 }),
     enabled,
     refetchInterval: 60_000,
   });
-  const items: NotificationItem[] | undefined = query.data?.page.items.map((a) => ({
+  const items: NotificationItem[] | undefined = query.data?.data.data.map((a) => ({
     id: a.id,
     level: a.level,
     message: a.message,
@@ -434,6 +434,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
                 key={equipoId}
                 machineId={equipoId}
                 onBack={() => setEquipoId(null)}
+                canManageBackups={can('respaldos.gestionar')}
                 onEdit={can('equipos.editar') ? (machine) => setForm({ kind: 'editar', machine }) : undefined}
                 onRetire={can('equipos.editar') ? (machine) => setForm({ kind: 'baja', machine }) : undefined}
                 onCreateTicket={

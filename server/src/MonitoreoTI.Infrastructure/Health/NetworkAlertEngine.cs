@@ -58,7 +58,9 @@ public sealed class NetworkAlertEngine(IServiceScopeFactory scopes, IRealtimeNot
         foreach (var device in devices)
         {
             var (rules, ruleIds) = RulesFor(ruleRows, device.BranchId);
-            var polled = device.CollectorAgentId != null && device.ManagementIp != null && device.SnmpEncryptedCredential != null;
+            // Por SNMP, o un FortiSwitch cuyos datos trae su FortiGate (decisión 80).
+            var polled = (device.CollectorAgentId != null && device.ManagementIp != null && device.SnmpEncryptedCredential != null)
+                || device.FortiGateId != null;
             var patience = TimeSpan.FromMinutes((double)(rules.For("switch_sin_respuesta")?.Warning ?? 10));
             var responding = device.LastError is null && device.LastPolledAt is DateTime polledAt && now - polledAt < patience;
 

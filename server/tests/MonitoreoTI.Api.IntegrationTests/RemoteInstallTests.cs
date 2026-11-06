@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -125,7 +125,7 @@ public sealed class RemoteInstallTests(TestDatabase database) : IAsyncLifetime
         // Un estado que no existe se ignora.
         await SendAckedAsync(socket, "instalacion_estado", new { instalacionId = firstId, estado = "registrado" });
 
-        var list = await JsonAsync(await admin.GetAsync($"/api/v1/red/subredes/{subnetId}/instalaciones"));
+        var list = (await JsonAsync(await admin.GetAsync($"/api/v1/red/subredes/{subnetId}/instalaciones?limit=100"))).GetProperty("data").GetProperty("data");
         var six = list.EnumerateArray().Single(i => i.GetProperty("id").GetInt32() == firstId);
         six.GetProperty("status").GetString().Should().Be("instalado");
         six.GetProperty("operatingSystem").GetString().Should().StartWith("Windows 10");
@@ -140,7 +140,7 @@ public sealed class RemoteInstallTests(TestDatabase database) : IAsyncLifetime
         // El equipo nuevo se registra con su token: la instalación queda cerrada con el equipo.
         var mac = AgentTestApi.NewMac();
         (await _api.RegisterAsync(enrollToken, mac, "PC-MONITOREO003")).EnsureSuccessStatusCode();
-        list = await JsonAsync(await admin.GetAsync($"/api/v1/red/subredes/{subnetId}/instalaciones"));
+        list = (await JsonAsync(await admin.GetAsync($"/api/v1/red/subredes/{subnetId}/instalaciones?limit=100"))).GetProperty("data").GetProperty("data");
         six = list.EnumerateArray().Single(i => i.GetProperty("id").GetInt32() == firstId);
         six.GetProperty("status").GetString().Should().Be("registrado");
         six.GetProperty("machineName").GetString().Should().Be("PC-MONITOREO003");

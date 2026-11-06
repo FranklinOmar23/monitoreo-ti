@@ -1,4 +1,4 @@
-using MonitoreoTI.Application.Panel;
+﻿using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Infrastructure.Network;
 using MonitoreoTI.Infrastructure.Panel;
 
@@ -23,6 +23,8 @@ public static class PanelEndpoints
 
         var machines = api.MapGroup("/maquinas").RequireAuthorization(PermissionPolicies.MachinesView);
         machines.MapGet("/", ListMachinesAsync);
+        // Para listas desplegables: todos los equipos visibles (id y nombre), sin paginar.
+        machines.MapGet("/opciones", (PanelQueries q, CancellationToken ct, int? sucursal) => q.MachineOptionsAsync(sucursal, ct));
         machines.MapGet("/{id:int}", async (int id, PanelQueries q, CancellationToken ct) => OkOrNotFound(await q.MachineAsync(id, ct)));
         machines.MapGet("/{id:int}/metricas", MetricsAsync);
         machines.MapGet("/{id:int}/software", async (int id, PanelQueries q, CancellationToken ct) => OkOrNotFound(await q.SoftwareAsync(id, ct)));
@@ -44,22 +46,44 @@ public static class PanelEndpoints
         });
 
         var branches = api.MapGroup("/sucursales").RequireAuthorization(PermissionPolicies.MachinesView);
-        branches.MapGet("/", (PanelQueries q, CancellationToken ct) => q.BranchesAsync(ct));
+        // Decisión 83: la pantalla de sucursales va paginada; los desplegables usan /opciones (todas).
+        branches.MapGet("/", async (PanelQueries q, HttpRequest request, CancellationToken ct) => ListPaging.Ok(await q.BranchesAsync(ct), request));
+        branches.MapGet("/opciones", (PanelQueries q, CancellationToken ct) => q.BranchesAsync(ct));
         branches.MapGet("/{id:int}", async (int id, PanelQueries q, CancellationToken ct) => OkOrNotFound(await q.BranchAsync(id, ct)));
     }
 
-    private static Task<MachineList> ListMachinesAsync(
+    /// <summary>Equipos (decisión 83): 10 por página, un filtro por campo y rango de fechas de alta.</summary>
+    private static async Task<IResult> ListMachinesAsync(
         PanelQueries queries,
         CancellationToken ct,
         [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search = null,
+        string? nombre = null,
         int? sucursal = null,
+        int? departamento = null,
         string? tipo = null,
         string? estado = null,
         string? so = null,
-        int pagina = 1,
-        int tamano = 50,
-        int? departamento = null) =>
-        queries.MachinesAsync(new MachineFilter(search, sucursal, tipo, estado, so, pagina, tamano, departamento), ct);
+        string? marca = null,
+        string? modelo = null,
+        string? serie = null,
+        string? ip = null,
+        string? mac = null,
+        string? responsable = null,
+        DateTime? fechaDesde = null,
+        DateTime? fechaHasta = null,
+        int? page = null,
+        int? limit = null)
+    {
+        if (Paging.DateRangeError(fechaDesde, fechaHasta) is { } error)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["fechaHasta"] = [error] });
+        var (p, l) = Paging.Normalize(page, limit);
+        return Results.Ok(await queries.MachinesAsync(new MachineFilter
+        {
+            Query = search, Name = nombre, BranchId = sucursal, DepartmentId = departamento, Type = tipo, Status = estado,
+            OperatingSystem = so, Brand = marca, Model = modelo, SerialNumber = serie, IpAddress = ip, MacAddress = mac,
+            AssignedTo = responsable, From = fechaDesde, To = fechaHasta, Page = p, Limit = l,
+        }, ct));
+    }
 
     private static async Task<IResult> MetricsAsync(int id, PanelQueries q, CancellationToken ct, string rango = "24h")
     {

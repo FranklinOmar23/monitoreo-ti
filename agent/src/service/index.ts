@@ -34,6 +34,7 @@ import { filesHandlerFactory } from './files';
 import { desktopHandlerFactory } from './desktop';
 import { AgentUpdater, UPDATE_EXIT_CODE } from './updater';
 import { hostRemoteInstall, RemoteInstaller } from './remote-install';
+import { BackupScheduler, hostBackups } from './backups';
 import { createEnvelope } from '@monitoreoti/shared';
 import { GatewayClient } from './gateway-client';
 import { readMachineIdentity } from './machine-info';
@@ -106,7 +107,11 @@ async function main(): Promise<void> {
     },
     collectors: {
       metrics: () => sampler.sample(),
-      hardware: collectHardware,
+      // /TIPO=servidor al instalar fija el tipo, aunque el hardware diga otra cosa (decisión 82).
+      hardware: async () => {
+        const hardware = await collectHardware();
+        return config.machineType ? { ...hardware, tipo: config.machineType } : hardware;
+      },
       software: collectSoftware,
       interfaces: collectInterfaces,
     },
@@ -149,6 +154,16 @@ async function main(): Promise<void> {
       dataDir: config.dataDir,
       caFile: process.env['NODE_EXTRA_CA_CERTS'],
       install: hostRemoteInstall(process.env['MONITOREOTI_HOST_EXE']),
+      submit: (envelope) => state.runtime?.submitMessage(envelope),
+      log,
+    }),
+    // Respaldos de servidores (decisión 82): los trabajos llegan firmados y se hacen a su hora con el anfitrión C#.
+    backups: new BackupScheduler({
+      machineId: credential.machineId,
+      credential: credential.credential,
+      publicKey: () => credential.companyPublicKey,
+      dataDir: config.dataDir,
+      host: hostBackups(process.env['MONITOREOTI_HOST_EXE']),
       submit: (envelope) => state.runtime?.submitMessage(envelope),
       log,
     }),

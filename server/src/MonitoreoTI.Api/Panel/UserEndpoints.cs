@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.RegularExpressions;
 using FluentValidation;
 using MonitoreoTI.Api.Auth;
@@ -18,7 +18,8 @@ public static class UserEndpoints
 
         // ---------------------------------------------------------------- usuarios de la empresa
         var users = api.MapGroup("/usuarios").RequireAuthorization(PermissionPolicies.UsersAdmin);
-        users.MapGet("/", (UserAdministration service, CancellationToken ct) => service.ListAsync(ct));
+        users.MapGet("/", async (UserAdministration service, HttpRequest request, CancellationToken ct) =>
+            ListPaging.Ok(await service.ListAsync(ct), request));
         users.MapPost("/", async (UserInput input, IValidator<UserInput> validator, UserAdministration service, CancellationToken ct) =>
         {
             if (await ValidateAsync(input, validator, ct) is { } invalid)
@@ -63,8 +64,8 @@ public static class UserEndpoints
             await ValidateAsync(input, validator, ct)
                 ?? ToResult(await profile.ChangePasswordAsync(AuthEndpoints.UserId(principal), SessionId(principal), input, ct)))
             .RequireRateLimiting(AuthEndpoints.RateLimitPolicy);
-        me.MapGet("/sesiones", (ClaimsPrincipal principal, UserProfile profile, CancellationToken ct) =>
-            profile.SessionsAsync(AuthEndpoints.UserId(principal), SessionId(principal), ct));
+        me.MapGet("/sesiones", async (ClaimsPrincipal principal, UserProfile profile, HttpRequest request, CancellationToken ct) =>
+            ListPaging.Ok(await profile.SessionsAsync(AuthEndpoints.UserId(principal), SessionId(principal), ct), request));
         me.MapDelete("/sesiones/{id:long}", async (long id, ClaimsPrincipal principal, UserProfile profile, CancellationToken ct) =>
             ToResult(await profile.CloseSessionAsync(AuthEndpoints.UserId(principal), id, ct)));
         me.MapPost("/sesiones/cerrar-otras", async (ClaimsPrincipal principal, UserProfile profile, CancellationToken ct) =>

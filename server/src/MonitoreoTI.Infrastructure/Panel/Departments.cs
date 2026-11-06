@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Application.Settings;
 using MonitoreoTI.Domain.Entities.Inventory;
@@ -39,6 +39,9 @@ public sealed class Departments(MonitoreoDbContext db, ICurrentUser user, IAudit
     public async Task<CommandResult> SaveAsync(int branchId, int? id, DepartmentInput input, CancellationToken ct)
     {
         if (!await CanUseBranchAsync(branchId, ct))
+            return CommandResult.NotFound();
+        // Uno que no es de esa sucursal no existe por esta ruta (antes de mirar si el nombre se repite).
+        if (id is int existing && !await db.Departments.AnyAsync(d => d.Id == existing && d.BranchId == branchId, ct))
             return CommandResult.NotFound();
         var name = input.Nombre.Trim();
         if (await db.Departments.AnyAsync(d => d.BranchId == branchId && d.Id != id && d.Name == name, ct))

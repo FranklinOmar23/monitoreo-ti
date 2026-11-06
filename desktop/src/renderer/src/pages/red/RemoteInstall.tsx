@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../../data/usePaged';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { IpItem, RemoteInstallItem, RemoteInstallStatus, SubnetItem } from '@monitoreoti/shared';
 import { Card } from '@components/Card';
 import { usePanelApi } from '../../data/PanelData';
@@ -28,6 +30,26 @@ export const canInstallOn = (ip: IpItem) =>
 export const looksLikeWindows = (ip: IpItem) =>
   !!ip.operatingSystem?.toLowerCase().includes('windows') || ip.hostnameSource === 'netbios';
 
+/** La cuenta del dominio que se recuerda en este equipo (solo el usuario; la clave nunca). */
+export const SAVED_ACCOUNT_KEY = 'centinela.instalar.cuenta';
+
+const readSavedAccount = () => {
+  try {
+    return localStorage.getItem(SAVED_ACCOUNT_KEY) ?? '';
+  } catch {
+    return '';
+  }
+};
+
+const writeSavedAccount = (account: string | null) => {
+  try {
+    if (account) localStorage.setItem(SAVED_ACCOUNT_KEY, account);
+    else localStorage.removeItem(SAVED_ACCOUNT_KEY);
+  } catch {
+    // Sin almacenamiento: simplemente no se recuerda.
+  }
+};
+
 const parseIps = (text: string) =>
   [...new Set(text.split(/[\s,;]+/).map((s) => s.trim()))].filter((s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s));
 
@@ -46,12 +68,21 @@ export function InstallAgentDialog({
 }) {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const [form, setForm] = useState({ ips: ips.join('\n'), cuenta: '', clave: '' });
+  const [saved] = useState(readSavedAccount);
+  const [form, setForm] = useState({ ips: ips.join('\n'), cuenta: saved, clave: '', recordar: true });
   const [askCode, setAskCode] = useState(false);
+  const claveRef = useRef<HTMLInputElement>(null);
+  // Con la cuenta ya puesta, el cursor va a la clave (después de que el <dialog> tome el foco al abrirse).
+  useEffect(() => {
+    if (!saved) return;
+    const timer = setTimeout(() => claveRef.current?.focus());
+    return () => clearTimeout(timer);
+  }, [saved]);
   const list = parseIps(form.ips);
   const install = useMutation({
     mutationFn: () => api.red.installAgents(subnet.id, { ips: list, cuenta: form.cuenta.trim(), clave: form.clave }),
     onSuccess: () => {
+      writeSavedAccount(form.recordar ? form.cuenta.trim() : null);
       void queries.invalidateQueries({ queryKey: ['red', 'instalaciones', subnet.id] });
       onClose();
     },
@@ -108,10 +139,23 @@ export function InstallAgentDialog({
             required
             type="password"
             autoComplete="new-password"
+            ref={claveRef}
             maxLength={256}
             value={form.clave}
             onChange={(e) => setForm({ ...form, clave: e.target.value })}
           />
+        </label>
+        <label className="check form-span">
+          <input
+            type="checkbox"
+            checked={form.recordar}
+            onChange={(e) => {
+              setForm({ ...form, recordar: e.target.checked });
+              // Desmarcarlo olvida la cuenta guardada en el acto.
+              if (!e.target.checked) writeSavedAccount(null);
+            }}
+          />
+          Guardar usuario (solo la cuenta, en este equipo; la clave se pide siempre)
         </label>
         <p className="muted form-span install-note">
           La clave viaja cifrada solo para el recolector y no se guarda en ningún lado. La auditoría registra quién lo
@@ -141,12 +185,11 @@ export function RemoteInstallsCard({
 }) {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const installs = useQuery({
-    queryKey: ['red', 'instalaciones', subnetId],
-    queryFn: () => api.red.remoteInstalls(subnetId),
-    refetchInterval: (q) => (q.state.data?.some((i) => !FINAL.has(i.status)) ? 3_000 : false),
-  });
-  const items = installs.data ?? [];
+  const { data: page, items, setPage } = usePaged(
+    ['red', 'instalaciones', subnetId],
+    (p) => api.red.remoteInstalls(subnetId, p),
+    { refetchInterval: (data) => (data?.data.some((i) => !FINAL.has(i.status)) ? 3_000 : false) },
+  );
   const registered = items.filter((i) => i.status === 'registrado').length;
   const seen = useRef(registered);
   useEffect(() => {
@@ -173,6 +216,7 @@ export function RemoteInstallsCard({
           ))}
         </tbody>
       </table>
+      <Pager data={page} noun="instalaciones" onPage={setPage} />
     </Card>
   );
 }

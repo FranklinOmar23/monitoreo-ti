@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Application.Health;
 
 namespace MonitoreoTI.Application.Panel;
@@ -6,16 +6,30 @@ namespace MonitoreoTI.Application.Panel;
 // ------------------------------------------------------------------ alertas (W-20, W-21)
 
 /// <param name="Status">abiertas (por defecto), nueva, en_proceso, resuelta o todas.</param>
-public sealed record AlertFilter(
-    string? Query = null,
-    string? Status = null,
-    string? Level = null,
-    int? BranchId = null,
-    int? MachineId = null,
+public sealed record AlertFilter
+{
+    public string? Query { get; init; }
+    public string? Status { get; init; }
+    public string? Level { get; init; }
+    public int? BranchId { get; init; }
+    public int? MachineId { get; init; }
+    public int? DeviceId { get; init; }
+
     /// <summary>true = solo las de red (switches, puertos); false = solo las de equipos.</summary>
-    bool? Network = null,
-    int Page = 1,
-    int PageSize = 50);
+    public bool? Network { get; init; }
+    public string? Source { get; init; }
+    public string? Code { get; init; }
+    public int? HandledById { get; init; }
+
+    /// <summary>true = las del motor de alertas; false = las creadas a mano.</summary>
+    public bool? Automatic { get; init; }
+
+    /// <summary>Fecha en que se creó la alerta.</summary>
+    public DateTime? From { get; init; }
+    public DateTime? To { get; init; }
+    public int Page { get; init; } = 1;
+    public int Limit { get; init; } = Paging.DefaultLimit;
+}
 
 /// <summary>Contadores de la cabecera de alertas (sin los filtros de estado y nivel).</summary>
 public sealed record AlertCounts(int Open, int New, int InProgress, int Critical, int Warning, int ResolvedLast24h);
@@ -39,7 +53,7 @@ public sealed record AlertListItem(
     int? DeviceId = null,
     string? DeviceName = null);
 
-public sealed record AlertList(PagedResult<AlertListItem> Page, AlertCounts Counts);
+public sealed record AlertList(PagedResult<AlertListItem> Data, AlertCounts Counts);
 
 public sealed record AlertHistoryItem(DateTime At, string Action, string? UserName, string? Note);
 

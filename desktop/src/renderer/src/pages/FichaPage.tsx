@@ -12,6 +12,7 @@ import { Tabs, type TabItem } from '@components/Tabs';
 import { clock, dateTime, megabytes, timeAgo, typeLabel, usedOfTotal, whole, shortDateTime } from '../data/format';
 import { usePanelApi, useRealtime } from '../data/PanelData';
 import { FichaTabs } from './FichaTabs';
+import { BackupsTab } from './respaldos/BackupsTab';
 import { serviceFromAlertCode, StartServiceButton } from './remoto/StartServiceButton';
 
 const RANGES: { value: MetricRange; label: string; title: string }[] = [
@@ -106,6 +107,16 @@ function MetricCard({ label, icon, value, unit, caption, series, levelOf = metri
 
 const temperatureLevel = (celsius: number) => (celsius > 90 ? 'critico' : celsius > 80 ? 'advertencia' : 'sano');
 
+const CLASSIC_NOTE =
+  'Agente clásico anterior a la 0.2.0: no tiene escritorio remoto, terminal ni archivos. Reinstale el agente para actualizarlo.';
+
+/** Clásico anterior a la 0.2.0 (decisión 84): desde esa versión tiene las mismas sesiones que el agente normal. */
+export function classicWithoutSessions(version: string | null | undefined): boolean {
+  if (!version?.includes('clasico')) return false;
+  const [major = 0, minor = 0] = (version.split('-')[0] ?? '').split('.').map(Number);
+  return major === 0 && minor < 2;
+}
+
 interface FichaPageProps {
   machineId: number;
   onBack: () => void;
@@ -120,6 +131,8 @@ interface FichaPageProps {
   /** Sesiones remotas que el usuario puede abrir (según sus permisos). */
   remoteTypes?: readonly SessionType[];
   onOpenSession?: (machine: MachineDetail, type: SessionType) => void;
+  /** respaldos.gestionar: crear, editar y lanzar respaldos (decisión 82). */
+  canManageBackups?: boolean;
 }
 
 /** W-06 a W-12 Ficha del equipo. */
@@ -133,6 +146,7 @@ export function FichaPage({
   onRunScript,
   remoteTypes = [],
   onOpenSession,
+  canManageBackups = false,
 }: FichaPageProps) {
   const api = usePanelApi();
   const realtime = useRealtime();
@@ -185,6 +199,9 @@ export function FichaPage({
   const healthRows = componentHealth(machine, interfaces.data ?? []);
   const topProcesses = (processes.data ?? []).slice(0, 5);
 
+  // El agente clásico anterior a la 0.2.0 no abre sesiones remotas (decisiones 78 y 84).
+  const classic = classicWithoutSessions(machine.agentVersion);
+
   const tabs: TabItem[] = [
     { id: 'resumen', label: 'Resumen' },
     { id: 'componentes', label: 'Componentes' },
@@ -193,6 +210,8 @@ export function FichaPage({
     { id: 'software', label: 'Software instalado' },
     { id: 'red', label: 'Red' },
     { id: 'historial', label: 'Historial' },
+    // Respaldos de servidores (decisión 82).
+    ...(machine.type === 'servidor' ? [{ id: 'respaldos', label: 'Respaldos' }] : []),
     { id: 'qr', label: 'Información y QR' },
   ];
 
@@ -235,7 +254,7 @@ export function FichaPage({
         <div className="ficha-actions">
           {(() => {
             const usable =
-              !!onOpenSession && remoteTypes.includes('escritorio') && machine.hasAgent && machine.status !== 'baja';
+              !!onOpenSession && remoteTypes.includes('escritorio') && machine.hasAgent && machine.status !== 'baja' && !classic;
             return (
               <button
                 type="button"
@@ -244,9 +263,11 @@ export function FichaPage({
                 title={
                   usable
                     ? 'Ver y controlar la pantalla'
-                    : machine.hasAgent
-                      ? 'Sin permiso'
-                      : 'El equipo no tiene agente'
+                    : classic
+                      ? CLASSIC_NOTE
+                      : machine.hasAgent
+                        ? 'Sin permiso'
+                        : 'El equipo no tiene agente'
                 }
                 onClick={() => onOpenSession?.(machine, 'escritorio')}
               >
@@ -256,14 +277,14 @@ export function FichaPage({
           })()}
           {(['terminal', 'archivos'] as const).map((type) => {
             const usable =
-              !!onOpenSession && remoteTypes.includes(type) && machine.hasAgent && machine.status !== 'baja';
+              !!onOpenSession && remoteTypes.includes(type) && machine.hasAgent && machine.status !== 'baja' && !classic;
             return (
               <button
                 key={type}
                 type="button"
                 className="btn btn-outline"
                 disabled={!usable}
-                title={usable ? undefined : machine.hasAgent ? 'Sin permiso' : 'El equipo no tiene agente'}
+                title={usable ? undefined : classic ? CLASSIC_NOTE : machine.hasAgent ? 'Sin permiso' : 'El equipo no tiene agente'}
                 onClick={() => onOpenSession?.(machine, type)}
               >
                 {type === 'terminal' ? 'Terminal' : 'Archivos'}
@@ -298,7 +319,9 @@ export function FichaPage({
 
       <Tabs items={tabs} activeId={tab} onChange={setTab} label="Secciones del equipo" />
 
-      {tab !== 'resumen' ? (
+      {tab === 'respaldos' ? (
+        <BackupsTab machine={machine} canManage={canManageBackups} />
+      ) : tab !== 'resumen' ? (
         <FichaTabs tab={tab} machine={machine} />
       ) : (
         <div className="ficha-grid">

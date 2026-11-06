@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -63,7 +63,7 @@ public sealed class RemoteCommandsTests(TestDatabase database) : IAsyncLifetime
             contenido = "Write-Output 'hola'\r\nGet-Date",
         }), HttpStatusCode.Created);
         var scriptId = created.GetProperty("id").GetInt32();
-        var scripts = await JsonAsync(await admin.GetAsync("/api/v1/scripts"));
+        var scripts = (await JsonAsync(await admin.GetAsync("/api/v1/scripts?limit=100"))).GetProperty("data").GetProperty("data");
         scripts.EnumerateArray().Single(s => s.GetProperty("id").GetInt32() == scriptId).GetProperty("signed").GetBoolean().Should().BeTrue();
 
         using var socket = await ConnectAsync(_api, agent.Credential);

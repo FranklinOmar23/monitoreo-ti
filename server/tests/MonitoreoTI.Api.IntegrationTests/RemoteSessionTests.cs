@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
@@ -102,7 +102,7 @@ public sealed class RemoteSessionTests(TestDatabase database) : IAsyncLifetime
         toPanel.Data.Should().Equal(1, 2, 3);
 
         var history = await (await tech.GetAsync($"/api/v1/sesiones-remotas?maquina={agent.MachineId}")).Content.ReadFromJsonAsync<JsonElement>();
-        history.GetProperty("items")[0].GetProperty("active").GetBoolean().Should().BeTrue();
+        history.GetProperty("data").GetProperty("data")[0].GetProperty("active").GetBoolean().Should().BeTrue();
 
         // Cerrar desde el panel: el agente recibe la orden y queda la duración en el historial.
         (await tech.PostAsync($"/api/v1/sesiones-remotas/{sessionId}/cerrar", null)).StatusCode.Should().Be(HttpStatusCode.OK);
@@ -111,7 +111,7 @@ public sealed class RemoteSessionTests(TestDatabase database) : IAsyncLifetime
         (await ReceiveAsync(agentSocket))!.Value.GetProperty("tipo").GetString().Should().Be("cerrar_sesion_remota");
 
         history = await (await tech.GetAsync($"/api/v1/sesiones-remotas?maquina={agent.MachineId}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = history.GetProperty("items")[0];
+        var item = history.GetProperty("data").GetProperty("data")[0];
         item.GetProperty("type").GetString().Should().Be("terminal");
         item.GetProperty("endedAt").ValueKind.Should().Be(JsonValueKind.String);
         item.GetProperty("active").GetBoolean().Should().BeFalse();
@@ -177,8 +177,8 @@ public sealed class RemoteSessionTests(TestDatabase database) : IAsyncLifetime
             open.GetProperty("archivos").GetBoolean().Should().BeTrue();
 
             var history = await (await tech.GetAsync($"/api/v1/sesiones-remotas?maquina={agent.MachineId}")).Content.ReadFromJsonAsync<JsonElement>();
-            history.GetProperty("items")[0].GetProperty("reason").GetString().Should().Be("Respaldar disco · TCK-1042");
-            history.GetProperty("items")[0].GetProperty("viewOnly").GetBoolean().Should().BeTrue();
+            history.GetProperty("data").GetProperty("data")[0].GetProperty("reason").GetString().Should().Be("Respaldar disco · TCK-1042");
+            history.GetProperty("data").GetProperty("data")[0].GetProperty("viewOnly").GetBoolean().Should().BeTrue();
         }
         finally
         {

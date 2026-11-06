@@ -4,6 +4,8 @@ import type { MachineListItem, MachineStatus } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
 import { Icon } from '@components/Icon';
+import { countActive, MoreFilters } from '@components/MoreFilters';
+import { Pager } from '@components/Pager';
 import { MiniBar } from '@components/MiniBar';
 import { PageHeader } from '@components/PageHeader';
 import { StatusBadge } from '@components/StatusBadge';
@@ -18,7 +20,10 @@ const ESTADOS: { value: MachineStatus; label: string }[] = [
   { value: 'desconectado', label: 'Desconectado' },
 ];
 
-const PAGE_SIZE = 50;
+/** Decisión 83: 10 equipos por página. */
+const PAGE_SIZE = 10;
+
+const NO_EXTRA = { marca: '', modelo: '', serie: '', ip: '', mac: '', responsable: '', desde: '', hasta: '' };
 
 interface EquiposPageProps {
   query: string;
@@ -54,6 +59,10 @@ export function EquiposPage({
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const search = useDebounced(query.trim());
+  // «Más filtros»: los campos menos usados y el rango de fechas de alta.
+  const [extra, setExtra] = useState(NO_EXTRA);
+  const extraDebounced = useDebounced(extra);
+  const datesValid = !(extraDebounced.desde && extraDebounced.hasta && extraDebounced.desde > extraDebounced.hasta);
 
   const filters = {
     q: search,
@@ -62,6 +71,14 @@ export function EquiposPage({
     tipo,
     estado,
     so: sistema,
+    marca: extraDebounced.marca.trim() || undefined,
+    modelo: extraDebounced.modelo.trim() || undefined,
+    serie: extraDebounced.serie.trim() || undefined,
+    ip: extraDebounced.ip.trim() || undefined,
+    mac: extraDebounced.mac.trim() || undefined,
+    responsable: extraDebounced.responsable.trim() || undefined,
+    fechaDesde: (datesValid && extraDebounced.desde) || undefined,
+    fechaHasta: (datesValid && extraDebounced.hasta) || undefined,
   };
   // Un filtro nuevo vuelve a la primera página.
   const filterKey = JSON.stringify(filters);
@@ -73,7 +90,7 @@ export function EquiposPage({
 
   const list = useQuery({
     queryKey: ['maquinas', filters, page],
-    queryFn: () => api.machines({ ...filters, pagina: page, tamano: PAGE_SIZE }),
+    queryFn: () => api.machines({ ...filters, page, limit: PAGE_SIZE }),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -85,7 +102,7 @@ export function EquiposPage({
     enabled: !!sucursal,
   });
 
-  const items = list.data?.page.items ?? [];
+  const items = list.data?.data.data ?? [];
   const toggle = (id: number) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -97,8 +114,6 @@ export function EquiposPage({
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(items.map((item) => item.id)));
 
   const counts = list.data?.counts;
-  const total = list.data?.page.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const chip = (value: MachineStatus, label: string, count: number) => (
     <button
@@ -171,6 +186,30 @@ export function EquiposPage({
           allLabel="Todos"
           onChange={setSistema}
         />
+        <MoreFilters
+          active={countActive(...Object.values(extra).map((v) => v || null))}
+          onClear={() => setExtra(NO_EXTRA)}
+          dateLabel="Alta"
+          from={extra.desde}
+          to={extra.hasta}
+          onDates={(desde, hasta) => setExtra({ ...extra, desde, hasta })}
+        >
+          {(
+            [
+              ['marca', 'Marca'],
+              ['modelo', 'Modelo'],
+              ['serie', 'Número de serie'],
+              ['ip', 'IP'],
+              ['mac', 'MAC'],
+              ['responsable', 'Responsable'],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key} className="field">
+              <span>{label}</span>
+              <input value={extra[key]} onChange={(e) => setExtra({ ...extra, [key]: e.target.value })} />
+            </label>
+          ))}
+        </MoreFilters>
       </div>
 
       {counts && (
@@ -256,24 +295,7 @@ export function EquiposPage({
               Cambie los filtros o instale el agente en un equipo nuevo.
             </EmptyState>
           )}
-          {pages > 1 && (
-            <div className="pager">
-              <span className="muted">
-                Página {page} de {pages} · {total} equipos
-              </span>
-              <button type="button" className="btn btn-outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-                Anterior
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Siguiente
-              </button>
-            </div>
-          )}
+          <Pager data={list.data?.data} noun="equipos" onPage={setPage} />
         </div>
       )}
     </>

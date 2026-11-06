@@ -1,6 +1,7 @@
 export * from './status';
 export * from './protocol';
 export * from './api/http';
+export * from './api/paging';
 export * from './api/auth';
 export * from './api/panel';
 export * from './api/network';
@@ -8,3 +9,4 @@ export * from './api/remote';
 export * from './api/users';
 export * from './api/settings';
 export * from './api/reports';
+export * from './api/backups';

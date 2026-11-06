@@ -1,4 +1,4 @@
-using System.Net.WebSockets;
+﻿using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.AspNetCore.TestHost;
 
@@ -41,9 +41,17 @@ public static class AgentSocket
     public static async Task SendAckedAsync(WebSocket socket, string tipo, object datos, DateTimeOffset? ts = null)
     {
         var id = await SendAsync(socket, tipo, datos, ts);
-        var reply = await ReceiveAsync(socket) ?? throw new InvalidOperationException("El servidor cerró la conexión.");
-        if (reply.GetProperty("tipo").GetString() != "ack" || reply.GetProperty("datos").GetProperty("id").GetString() != id)
-            throw new InvalidOperationException($"Se esperaba el ack de {id} y llegó: {reply}");
+        // El servidor también manda cosas por su cuenta (config_actualizada, sondear_ahora…) y algún ack atrasado:
+        // se dejan pasar hasta que llega el de este mensaje.
+        var skipped = new List<string>();
+        for (var i = 0; i < 20; i++)
+        {
+            var reply = await ReceiveAsync(socket) ?? throw new InvalidOperationException("El servidor cerró la conexión.");
+            if (reply.GetProperty("tipo").GetString() == "ack" && reply.GetProperty("datos").GetProperty("id").GetString() == id)
+                return;
+            skipped.Add(reply.GetProperty("tipo").GetString() ?? "?");
+        }
+        throw new InvalidOperationException($"No llegó el ack de {id}; llegaron: {string.Join(", ", skipped)}");
     }
 
     /// <summary>Siguiente mensaje del servidor; null si cerró la conexión.</summary>

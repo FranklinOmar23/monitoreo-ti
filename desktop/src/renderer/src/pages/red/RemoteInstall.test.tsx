@@ -1,10 +1,14 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type IpItem, type RemoteInstallItem, type SubnetDetail, type SubnetItem } from '@monitoreoti/shared';
-import { fakeNetworkApi, fakePanelApi, renderWithPanel } from '../../test/fakes';
+import { fakeNetworkApi, fakePanelApi, renderWithPanel, pageFrom } from '../../test/fakes';
 import { RedPage } from './RedPage';
+import { SAVED_ACCOUNT_KEY } from './RemoteInstall';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 const now = new Date().toISOString();
 
@@ -141,6 +145,39 @@ describe('Instalación remota del agente (decisión 77)', () => {
     expect(await screen.findByText('Confirme su identidad')).toBeTruthy();
   });
 
+  it('recuerda la cuenta del dominio (nunca la clave) y la siguiente vez solo pide la clave', async () => {
+    const installAgents = vi.fn(() => Promise.resolve({ id: 1 }));
+    const api = fakePanelApi({
+      red: fakeNetworkApi({
+        subnets: () => Promise.resolve([subnet]),
+        subnet: () => Promise.resolve(detail),
+        installAgents,
+      }),
+    });
+    renderWithPanel(<RedPage canEdit onOpenEquipo={vi.fn()} initialTab="ips" />, api);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Instalar agente…' }));
+    let dialog = await screen.findByRole('dialog');
+    expect((within(dialog).getByRole('checkbox', { name: /Guardar usuario/ }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(within(dialog).getByLabelText('Cuenta del dominio *'), { target: { value: ' CARIBE\\soporte ' } });
+    fireEvent.change(within(dialog).getByLabelText('Clave *'), { target: { value: 'Clave-1' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Instalar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(localStorage.getItem(SAVED_ACCOUNT_KEY)).toBe('CARIBE\\soporte');
+    expect(JSON.stringify({ ...localStorage })).not.toContain('Clave-1');
+
+    // La segunda vez la cuenta ya está y el cursor va a la clave.
+    fireEvent.click(screen.getByRole('button', { name: 'Instalar agente…' }));
+    dialog = await screen.findByRole('dialog');
+    expect((within(dialog).getByLabelText('Cuenta del dominio *') as HTMLInputElement).value).toBe('CARIBE\\soporte');
+    expect((within(dialog).getByLabelText('Clave *') as HTMLInputElement).value).toBe('');
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByLabelText('Clave *')));
+
+    // Desmarcarlo la olvida.
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Guardar usuario/ }));
+    expect(localStorage.getItem(SAVED_ACCOUNT_KEY)).toBeNull();
+  });
+
   it('"Instalar agente…" propone las IP sin identificar que parecen Windows', async () => {
     renderWithPanel(
       <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="ips" />,
@@ -163,7 +200,7 @@ describe('Instalación remota del agente (decisión 77)', () => {
         red: fakeNetworkApi({
           subnets: () => Promise.resolve([subnet]),
           subnet: () => Promise.resolve(detail),
-          remoteInstalls: () =>
+          remoteInstalls: pageFrom(() =>
             Promise.resolve([
               install({
                 id: 3,
@@ -180,7 +217,7 @@ describe('Instalación remota del agente (decisión 77)', () => {
                 detail: 'Windows 7: el agente actual necesita Windows 10 o superior.',
               }),
               install({ id: 1, ip: '192.168.4.10', status: 'error', detail: 'Usuario o clave incorrectos.' }),
-            ]),
+            ])),
         }),
       }),
     );

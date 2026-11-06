@@ -1,4 +1,4 @@
-namespace MonitoreoTI.Application.Panel;
+﻿namespace MonitoreoTI.Application.Panel;
 
 /// <summary>Usuario de la petición, tomado del token ya validado.</summary>
 public interface ICurrentUser
@@ -15,7 +15,6 @@ public interface ICurrentUser
     Task<IReadOnlyCollection<int>?> AllowedBranchIdsAsync(CancellationToken cancellationToken);
 }
 
-public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 
 /// <summary>A qué apunta un código QR (monitoreoti://q/{codigo}): Type es maquina, gabinete, dispositivo o roseta.</summary>
 public sealed record QrTarget(string Type, int Id);
@@ -50,15 +49,31 @@ public sealed record DashboardData(
 
 // ------------------------------------------------------------------ equipos (W-05)
 
-public sealed record MachineFilter(
-    string? Query = null,
-    int? BranchId = null,
-    string? Type = null,
-    string? Status = null,
-    string? OperatingSystem = null,
-    int Page = 1,
-    int PageSize = 50,
-    int? DepartmentId = null);
+/// <summary>Lista de equipos (decisión 83): un filtro por cada campo, rango de fechas de alta y página de 10.</summary>
+public sealed record MachineFilter
+{
+    public string? Query { get; init; }
+    public string? Name { get; init; }
+    public int? BranchId { get; init; }
+    public int? DepartmentId { get; init; }
+    public string? Type { get; init; }
+    public string? Status { get; init; }
+    public string? OperatingSystem { get; init; }
+    public string? Brand { get; init; }
+    public string? Model { get; init; }
+    public string? SerialNumber { get; init; }
+    public string? IpAddress { get; init; }
+    public string? MacAddress { get; init; }
+    public string? AssignedTo { get; init; }
+
+    /// <summary>Fecha de alta del equipo.</summary>
+    public DateTime? From { get; init; }
+    public DateTime? To { get; init; }
+    public int Page { get; init; } = 1;
+    public int Limit { get; init; } = Paging.DefaultLimit;
+}
+
+public sealed record MachineOption(int Id, string Name, int BranchId, string? IpAddress);
 
 public sealed record LatestMetrics(DateTime At, decimal? Cpu, decimal? Ram, decimal? Disk, decimal? Temperature);
 
@@ -74,7 +89,7 @@ public sealed record MachineListItem(
     LatestMetrics? Metrics,
     DateTime? LastReportAt);
 
-public sealed record MachineList(PagedResult<MachineListItem> Page, StatusCounts Counts, IReadOnlyList<string> OperatingSystems);
+public sealed record MachineList(PagedResult<MachineListItem> Data, StatusCounts Counts, IReadOnlyList<string> OperatingSystems);
 
 // ------------------------------------------------------------------ ficha (W-06 a W-12)
 

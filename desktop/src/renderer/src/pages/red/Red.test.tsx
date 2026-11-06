@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { DeviceDetail, ImportResult, ImportRow, PortItem, RackDetail, RoomItem } from '@monitoreoti/shared';
-import { fakeNetworkApi, fakePanelApi, renderWithPanel } from '../../test/fakes';
+import { fakeNetworkApi, fakePanelApi, renderWithPanel, pageOf } from '../../test/fakes';
 import { RedPage } from './RedPage';
 import { View3DWindows } from './View3DWindows';
 
@@ -360,7 +360,7 @@ describe('Red y data center (Fase 4.1)', () => {
         red: fakeNetworkApi({
           history: () =>
             Promise.resolve({
-              items: [
+              data: pageOf([
                 {
                   id: 1,
                   at: new Date().toISOString(),
@@ -372,10 +372,7 @@ describe('Red y data center (Fase 4.1)', () => {
                   user: 'Ana Martínez',
                   changes: [{ field: 'U', before: '38', after: '20' }],
                 },
-              ],
-              total: 1,
-              page: 1,
-              pageSize: 50,
+              ]),
             }),
         }),
       }),

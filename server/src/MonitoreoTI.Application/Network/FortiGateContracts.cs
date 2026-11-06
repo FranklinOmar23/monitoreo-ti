@@ -1,3 +1,4 @@
+using FluentValidation;
 using MonitoreoTI.Application.Agents;
 
 namespace MonitoreoTI.Application.Network;
@@ -11,6 +12,12 @@ public static class FortiGateRules
 {
     /// <summary>Primera versión del agente que entiende "probar_api" y lee la API.</summary>
     public static readonly Version ApiVersion = new(0, 3, 6);
+
+    /// <summary>Primera versión del agente que lee los FortiSwitch por la API (decisión 80).</summary>
+    public static readonly Version SwitchesVersion = new(0, 3, 13);
+
+    public static bool SupportsSwitches(string? agentVersion) =>
+        Version.TryParse(agentVersion?.Split('-', '+')[0], out var version) && version >= SwitchesVersion;
 
     /// <summary>Puerto de administración HTTPS que usa la empresa de prueba; el estándar es 443.</summary>
     public const int DefaultPort = 12443;
@@ -53,8 +60,13 @@ public static class FortiGateRules
 
 // ------------------------------------------------------------------ servidor → recolector
 
-/// <summary>API del dispositivo en la lista del recolector: la dirección y el token sellado para ese agente.</summary>
-public sealed record CollectorApi(string Url, string Token, bool AceptarCertificado);
+/// <summary>
+/// API del dispositivo en la lista del recolector: la dirección, el token sellado para ese agente y los FortiSwitch
+/// registrados que dependen de ese FortiGate (decisión 80), para mandar un resultado de sondeo por cada uno.
+/// </summary>
+public sealed record CollectorApi(string Url, string Token, bool AceptarCertificado, IReadOnlyList<CollectorSwitch>? Switches = null);
+
+public sealed record CollectorSwitch(int Id, string Serie);
 
 /// <summary>"probar_api": el recolector consulta system/status con esta dirección y este token.</summary>
 public sealed record ApiTestRequest(string SolicitudId, string Url, string Token, bool AceptarCertificado);
@@ -86,12 +98,52 @@ public sealed record FortiReservedData(string Ip, string? Mac, string? Descripci
 /// <summary>Dispositivo en línea según el FortiGate (identificación de dispositivos).</summary>
 public sealed record FortiDeviceData(string? Ip, string? Mac, string? Nombre, string? Sistema, string? Interfaz);
 
+// ------------------------------------------------------------------ FortiSwitch (decisión 80)
+
+/// <summary>Un FortiSwitch que el FortiGate administra, como lo resume el recolector en "Detectar".</summary>
+public sealed record DetectedSwitchData(
+    string Serie, string? Nombre, string? Modelo, string? Ip, bool Conectado, int Puertos, string? Firmware);
+
+/// <summary>"switches_detectados": la respuesta a "detectar_switches". <see cref="Campos"/>: los campos que trajo la API (diagnóstico).</summary>
+public sealed record SwitchesDetectadosData(
+    string SolicitudId, bool Ok, string? Error, IReadOnlyList<DetectedSwitchData>? Switches, IReadOnlyList<string>? Campos);
+
+/// <summary>Lo que ve el panel: cada switch y, si ya está en Centinela, cuál es.</summary>
+public sealed record DetectedSwitchItem(
+    string Serial, string? Name, string? Model, string? Ip, bool Connected, int PortCount, string? Firmware,
+    int? DeviceId, string? DeviceName);
+
+public sealed record DetectSwitchesResult(bool Ok, string? Error, IReadOnlyList<DetectedSwitchItem> Switches, IReadOnlyList<string> Fields);
+
+/// <summary>Registrar los FortiSwitch elegidos: van a la sucursal del FortiGate (gabinete y U se ubican después).</summary>
+public sealed record RegisterSwitchesInput(IReadOnlyList<RegisterSwitchItem> Switches);
+
+public sealed record RegisterSwitchItem(string Serie, string Nombre, string? Modelo, int Puertos, string? Ip = null);
+
+public sealed class RegisterSwitchesInputValidator : AbstractValidator<RegisterSwitchesInput>
+{
+    public RegisterSwitchesInputValidator()
+    {
+        RuleFor(x => x.Switches).NotEmpty().WithMessage("Elija al menos un switch.");
+        RuleForEach(x => x.Switches).ChildRules(s =>
+        {
+            s.RuleFor(x => x.Serie).NotEmpty().MaximumLength(50);
+            s.RuleFor(x => x.Nombre).NotEmpty().WithMessage("Cada switch necesita un nombre.").MaximumLength(100);
+            s.RuleFor(x => x.Modelo).MaximumLength(100);
+            s.RuleFor(x => x.Puertos).InclusiveBetween(1, 128).WithMessage("El switch debe tener entre 1 y 128 puertos.");
+        });
+    }
+}
+
 // ------------------------------------------------------------------ servicios
 
 /// <summary>Manda "probar_api" y espera la respuesta; null si el recolector no está conectado o no contestó a tiempo.</summary>
 public interface IFortiGateApiTester
 {
     Task<ApiTestResult?> TestAsync(int companyId, int agentId, string url, string sealedToken, bool acceptSelfSigned, CancellationToken cancellationToken);
+
+    /// <summary>"Detectar" FortiSwitch (decisión 80); null si el recolector no está conectado o no contestó a tiempo.</summary>
+    Task<SwitchesDetectadosData?> DetectSwitchesAsync(int companyId, int agentId, string url, string sealedToken, bool acceptSelfSigned, CancellationToken cancellationToken);
 }
 
 /// <summary>Guarda lo que el recolector leyó de la API.</summary>

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -54,7 +54,7 @@ public sealed class UserAdministrationTests(TestDatabase database) : IAsyncLifet
         var token = link.GetProperty("link").GetString()!.Split("token=")[1];
         File.ReadAllText(Directory.GetFiles(TestHost.EmailFolder).Single(f => File.ReadAllText(f).Contains(email))).Should().Contain(token);
 
-        var list = await (await admin.GetAsync("/api/v1/usuarios")).Content.ReadFromJsonAsync<JsonElement>();
+        var list = (await (await admin.GetAsync("/api/v1/usuarios?limit=100")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("data");
         var row = list.EnumerateArray().Single(u => u.GetProperty("id").GetInt32() == id);
         row.GetProperty("roleName").GetString().Should().Be("Empleado");
         row.GetProperty("pending").GetBoolean().Should().BeTrue();
@@ -189,7 +189,7 @@ public sealed class UserAdministrationTests(TestDatabase database) : IAsyncLifet
 
         var email = NewEmail();
         var user = await ReadAsync(await admin.PostAsJsonAsync("/api/v1/usuarios", new { nombre = "Con rol propio", correo = email, rolId = roleId }));
-        var list = await (await admin.GetAsync("/api/v1/usuarios")).Content.ReadFromJsonAsync<JsonElement>();
+        var list = (await (await admin.GetAsync("/api/v1/usuarios?limit=100")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("data");
         list.EnumerateArray().Single(u => u.GetProperty("id").GetInt32() == user.GetProperty("id").GetInt32())
             .GetProperty("twoFactorRequired").GetBoolean().Should().BeTrue("el rol da acceso remoto");
 
@@ -209,7 +209,7 @@ public sealed class UserAdministrationTests(TestDatabase database) : IAsyncLifet
         var current = (await ReadAsync(await LoginAsync(email, "Mozilla/5.0 (Windows NT 10.0) Electron/33 Equipo/PC-OFICINA"))).GetProperty("sesion");
         var me = _api.ClientWith(current.GetProperty("accessToken").GetString()!);
 
-        var sessions = await (await me.GetAsync("/api/v1/auth/sesiones")).Content.ReadFromJsonAsync<JsonElement>();
+        var sessions = (await (await me.GetAsync("/api/v1/auth/sesiones?limit=100")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("data");
         sessions.GetArrayLength().Should().Be(2);
         var mine = sessions.EnumerateArray().Single(s => s.GetProperty("current").GetBoolean());
         mine.GetProperty("device").GetString().Should().Be("Centinela en PC-OFICINA (Windows)");
@@ -237,7 +237,7 @@ public sealed class UserAdministrationTests(TestDatabase database) : IAsyncLifet
         var me = _api.ClientWith(second.GetProperty("accessToken").GetString()!);
         var stranger = _api.ClientWith(await _api.TokenForAsync(Company, "Empleado"));
 
-        var sessions = await (await me.GetAsync("/api/v1/auth/sesiones")).Content.ReadFromJsonAsync<JsonElement>();
+        var sessions = (await (await me.GetAsync("/api/v1/auth/sesiones?limit=100")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("data");
         var otherId = sessions.EnumerateArray().Single(s => !s.GetProperty("current").GetBoolean()).GetProperty("id").GetInt64();
 
         (await stranger.DeleteAsync($"/api/v1/auth/sesiones/{otherId}")).StatusCode.Should().Be(HttpStatusCode.NotFound);

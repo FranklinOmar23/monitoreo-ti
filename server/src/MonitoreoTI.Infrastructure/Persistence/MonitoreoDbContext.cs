@@ -1,5 +1,6 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using MonitoreoTI.Domain.Entities.Backups;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MonitoreoTI.Application.Abstractions;
@@ -86,6 +87,15 @@ public class MonitoreoDbContext(DbContextOptions<MonitoreoDbContext> options, IT
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<RemoteSession> RemoteSessions => Set<RemoteSession>();
+    public DbSet<BackupJob> BackupJobs => Set<BackupJob>();
+    public DbSet<BackupRun> BackupRuns => Set<BackupRun>();
+
+    // Vistas de los listados (decisión 83): solo lectura.
+    public DbSet<Views.MachineListRow> MachineListView => Set<Views.MachineListRow>();
+    public DbSet<Views.FleetStatusRow> FleetStatusView => Set<Views.FleetStatusRow>();
+    public DbSet<Views.AlertListRow> AlertListView => Set<Views.AlertListRow>();
+    public DbSet<Views.TicketListRow> TicketListView => Set<Views.TicketListRow>();
+    public DbSet<Views.ProblemRow> ProblemsView => Set<Views.ProblemRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

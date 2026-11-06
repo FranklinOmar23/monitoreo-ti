@@ -1,14 +1,21 @@
-import { useState, type DragEvent } from 'react';
+import { useState, type DragEvent, type ReactNode } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TicketListItem, TicketPriority, TicketStatus } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
 import { Icon } from '@components/Icon';
+import { countActive, MoreFilters } from '@components/MoreFilters';
+import { Pager } from '@components/Pager';
 import { PageHeader } from '@components/PageHeader';
 import { dateTime, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
 import { useDebounced } from '../data/useDebounced';
 import { NewTicketDialog } from './NewTicketDialog';
+
+/** Decisión 83: la lista va de 10 en 10; el tablero muestra hasta 100 activos (los más prioritarios). */
+const PAGE_SIZE = 10;
+const BOARD_LIMIT = 100;
+const NO_EXTRA = { titulo: '', desde: '', hasta: '' };
 import { TicketDetailView } from './TicketDetail';
 import { PRIORITY_LABEL, TICKET_STATUS_LABEL } from './ticketLabels';
 
@@ -110,7 +117,11 @@ function TicketBrowser({
   const [prioridad, setPrioridad] = useState('');
   const [estado, setEstado] = useState('');
   const [sucursal, setSucursal] = useState('');
+  const [extra, setExtra] = useState(NO_EXTRA);
+  const [page, setPage] = useState(1);
   const search = useDebounced(query.trim());
+  const titulo = useDebounced(extra.titulo.trim());
+  const datesValid = !(extra.desde && extra.hasta && extra.desde > extra.hasta);
 
   // El tablero muestra los activos; la lista puede incluir los cerrados.
   const filters = {
@@ -119,11 +130,21 @@ function TicketBrowser({
     prioridad,
     estado: view === 'lista' ? estado || 'activos' : 'activos',
     sucursal: sucursal ? Number(sucursal) : null,
-    tamano: 300,
+    titulo: titulo || undefined,
+    fechaDesde: (datesValid && extra.desde) || undefined,
+    fechaHasta: (datesValid && extra.hasta) || undefined,
   };
+  // Un filtro nuevo (o cambiar de vista) vuelve a la primera página.
+  const filterKey = JSON.stringify([filters, view]);
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) {
+    setLastFilterKey(filterKey);
+    setPage(1);
+  }
+  const paging = view === 'lista' ? { page, limit: PAGE_SIZE } : { page: 1, limit: BOARD_LIMIT };
   const list = useQuery({
-    queryKey: ['tickets', filters],
-    queryFn: () => api.tickets(filters),
+    queryKey: ['tickets', filters, paging],
+    queryFn: () => api.tickets({ ...filters, ...paging }),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -135,7 +156,7 @@ function TicketBrowser({
   });
 
   const counts = list.data?.counts;
-  const items = list.data?.page.items ?? [];
+  const items = list.data?.data.data ?? [];
 
   return (
     <>
@@ -180,6 +201,19 @@ function TicketBrowser({
           allLabel="Todas"
           onChange={setSucursal}
         />
+        <MoreFilters
+          active={countActive(...Object.values(extra).map((v) => v || null))}
+          onClear={() => setExtra(NO_EXTRA)}
+          dateLabel="Abierto"
+          from={extra.desde}
+          to={extra.hasta}
+          onDates={(desde, hasta) => setExtra({ ...extra, desde, hasta })}
+        >
+          <label className="field">
+            <span>Título</span>
+            <input value={extra.titulo} onChange={(e) => setExtra({ ...extra, titulo: e.target.value })} />
+          </label>
+        </MoreFilters>
       </div>
 
       {counts && canManage && (
@@ -215,9 +249,22 @@ function TicketBrowser({
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : view === 'tablero' ? (
-        <Board items={items} canMove={canManage} onOpen={onOpen} onMove={(id, status) => move.mutate({ id, status })} />
+        <>
+          <Board items={items} canMove={canManage} onOpen={onOpen} onMove={(id, status) => move.mutate({ id, status })} />
+          {list.data?.data.isThereNextPage && (
+            <p className="muted note">
+              El tablero muestra los {BOARD_LIMIT} tickets activos más prioritarios de {list.data.data.total}. Use la vista
+              Lista para recorrerlos todos.
+            </p>
+          )}
+        </>
       ) : (
-        <TicketTable items={items} onOpen={onOpen} onOpenEquipo={onOpenEquipo} />
+        <TicketTable
+          items={items}
+          onOpen={onOpen}
+          onOpenEquipo={onOpenEquipo}
+          footer={<Pager data={list.data?.data} noun="tickets" onPage={setPage} />}
+        />
       )}
     </>
   );
@@ -346,10 +393,12 @@ function TicketTable({
   items,
   onOpen,
   onOpenEquipo,
+  footer,
 }: {
   items: TicketListItem[];
   onOpen: (id: number) => void;
   onOpenEquipo: (id: number) => void;
+  footer?: ReactNode;
 }) {
   return (
     <div className="table-card">
@@ -406,6 +455,7 @@ function TicketTable({
         </tbody>
       </table>
       {items.length === 0 && <EmptyState title="Ningún ticket coincide con los filtros." />}
+      {footer}
     </div>
   );
 }

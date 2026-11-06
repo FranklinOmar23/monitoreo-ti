@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -56,7 +56,8 @@ public class ModelMatchesDatabaseTests(TestDatabase database)
         while (await reader.ReadAsync())
             tables.Add(reader.GetString(0));
 
-        tables.Should().HaveCount(54);
+        // 54 + instalaciones_remotas (decisión 77) + respaldo_trabajos y respaldo_ejecuciones (decisión 82).
+        tables.Should().HaveCount(57);
         tables.Where(t => !mapped.Contains(t)).Should().BeEmpty("cada tabla del script debe tener su entidad");
     }
 

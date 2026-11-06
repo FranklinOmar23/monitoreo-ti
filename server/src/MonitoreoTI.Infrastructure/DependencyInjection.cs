@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
 using MonitoreoTI.Application.Agents;
@@ -18,11 +18,12 @@ public static class DependencyInjection
         services.AddScoped<TenantContext>();
         services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<TenantContext>());
         services.AddScoped<TenantSessionContextInterceptor>();
+        services.AddSingleton<SlowQueryInterceptor>();
 
         services.AddDbContext<MonitoreoDbContext>((sp, options) =>
         {
             options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure());
-            options.AddInterceptors(sp.GetRequiredService<TenantSessionContextInterceptor>());
+            options.AddInterceptors(sp.GetRequiredService<TenantSessionContextInterceptor>(), sp.GetRequiredService<SlowQueryInterceptor>());
         });
 
         services.AddScoped<IAgentEnrollmentService, AgentEnrollmentService>();

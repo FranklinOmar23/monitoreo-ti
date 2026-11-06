@@ -1,6 +1,6 @@
 {
   "name": "@monitoreoti/agent",
-  "version": "0.3.12",
+  "version": "0.4.1",
   "private": true,
   "description": "Agente MonitoreoTI: servicio de Windows (modo servicio) e interfaz en la sesión del usuario (modo UI)",
   "main": "out/main/index.js",

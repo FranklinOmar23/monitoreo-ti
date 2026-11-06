@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -172,7 +172,7 @@ public sealed class PanelWriteTests(TestDatabase database) : IAsyncLifetime
 
         (await _api.RegisterAsync(token, AgentTestApi.NewMac())).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var list = await JsonAsync(await admin.GetAsync("/api/v1/instaladores"));
+        var list = (await JsonAsync(await admin.GetAsync("/api/v1/instaladores?limit=100"))).GetProperty("data").GetProperty("data");
         var row = list.EnumerateArray().Single(t => t.GetProperty("id").GetInt32() == installer.GetProperty("id").GetInt32());
         row.GetProperty("uses").GetInt32().Should().Be(1);
         row.GetProperty("state").GetString().Should().Be("activo");
@@ -199,7 +199,7 @@ public sealed class PanelWriteTests(TestDatabase database) : IAsyncLifetime
 
         (await admin.DeleteAsync($"/api/v1/instaladores/{id}")).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var list = await JsonAsync(await admin.GetAsync("/api/v1/instaladores"));
+        var list = (await JsonAsync(await admin.GetAsync("/api/v1/instaladores?limit=100"))).GetProperty("data").GetProperty("data");
         list.EnumerateArray().Should().NotContain(t => t.GetProperty("id").GetInt32() == id);
         using var socket = await ConnectAndGreetAsync(_api, agent);
         socket.State.Should().Be(System.Net.WebSockets.WebSocketState.Open, "el equipo ya registrado tiene su propia credencial");
@@ -221,7 +221,7 @@ public sealed class PanelWriteTests(TestDatabase database) : IAsyncLifetime
         var refused = () => ConnectAsync(_api, agent.Credential);
         await refused.Should().ThrowAsync<Exception>("pendiente de aprobación no puede conectarse");
 
-        var pending = await JsonAsync(await admin.GetAsync("/api/v1/equipos-pendientes"));
+        var pending = (await JsonAsync(await admin.GetAsync("/api/v1/equipos-pendientes?limit=100"))).GetProperty("data").GetProperty("data");
         pending.EnumerateArray().Should().Contain(p => p.GetProperty("agentId").GetInt32() == agent.AgentId);
 
         (await admin.PostAsync($"/api/v1/equipos-pendientes/{agent.AgentId}/aprobar", null)).StatusCode.Should().Be(HttpStatusCode.OK);

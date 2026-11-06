@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Agents;
@@ -67,8 +67,12 @@ public sealed class PanelCommands(
 
         var before = Snapshot(machine);
         var previousCollector = machine.CollectorAgentId;
+        var previousType = machine.Type;
         Apply(machine, input);
         ApplySnmp(machine, input);
+        // Un tipo elegido a mano (por ejemplo, marcarlo como servidor) ya no lo cambia el inventario (decisión 82).
+        if (machine.Type != previousType)
+            machine.TypeLocked = true;
         await db.SaveChangesAsync(ct);
 
         await audit.RecordAsync("maquina.editar", "maquinas", id.ToString(), before, Snapshot(machine), ct);

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!--
     Agente clásico (decisión 78): para Windows 7 SP1 y equipos de 32 bits, donde no corren Electron ni .NET 8.
@@ -13,15 +13,17 @@
     <LangVersion>8.0</LangVersion>
     <AssemblyName>MonitoreoTI.AgenteClasico</AssemblyName>
     <RootNamespace>MonitoreoTI.AgenteClasico</RootNamespace>
-    <Version>0.1.0</Version>
-    <InformationalVersion>0.1.0-clasico</InformationalVersion>
+    <Version>0.2.0</Version>
+    <InformationalVersion>0.2.0-clasico</InformationalVersion>
     <Product>MonitoreoTI Agente clásico</Product>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <DebugType>none</DebugType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Management" />
     <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Security" />

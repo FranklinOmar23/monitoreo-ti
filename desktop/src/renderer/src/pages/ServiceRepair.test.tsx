@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type InstallerToken, type RuleItem, type RunDetail } from '@monitoreoti/shared';
-import { fakePanelApi, fakeRemoteApi, renderWithPanel } from '../test/fakes';
+import { fakePanelApi, fakeRemoteApi, renderWithPanel, pageFrom } from '../test/fakes';
 import { InstaladoresPage } from './InstaladoresPage';
 import { ReglasPage } from './ReglasPage';
 import { StartServiceButton } from './remoto/StartServiceButton';
@@ -118,7 +118,7 @@ describe('Reparar servicios (decisión 73)', () => {
     );
     renderWithPanel(
       <InstaladoresPage />,
-      fakePanelApi({ installers: () => Promise.resolve([token]), installerCommand }),
+      fakePanelApi({ installers: pageFrom(() => Promise.resolve([token])), installerCommand }),
     );
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ver comando' }));

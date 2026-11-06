@@ -1,7 +1,8 @@
-namespace MonitoreoTI.AgentHost;
+﻿namespace MonitoreoTI.AgentHost;
 
 /// <summary>Opciones de la línea de comandos (--server, --token, --app, --keep-data).</summary>
-public sealed record CommandOptions(string? ServerUrl, string? EnrollToken, string? AppDirectory, bool KeepData)
+/// <param name="MachineType">--tipo servidor|estacion del instalador (/TIPO=): fija el tipo del equipo (decisión 82).</param>
+public sealed record CommandOptions(string? ServerUrl, string? EnrollToken, string? AppDirectory, bool KeepData, string? MachineType = null)
 {
     public static CommandOptions Parse(string[] args)
     {
@@ -15,7 +16,13 @@ public sealed record CommandOptions(string? ServerUrl, string? EnrollToken, stri
             Value("--server"),
             Value("--token"),
             Value("--app"),
-            args.Any(a => string.Equals(a, "--keep-data", StringComparison.OrdinalIgnoreCase)));
+            args.Any(a => string.Equals(a, "--keep-data", StringComparison.OrdinalIgnoreCase)),
+            Value("--tipo")?.ToLowerInvariant() switch
+            {
+                "servidor" => "servidor",
+                "estacion" or "computadora" => "computadora",
+                _ => null,
+            });
     }
 }
 

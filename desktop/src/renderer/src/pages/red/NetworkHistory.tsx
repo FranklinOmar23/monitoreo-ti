@@ -1,3 +1,5 @@
+import { MoreFilters } from '@components/MoreFilters';
+import { Pager } from '@components/Pager';
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
@@ -47,21 +49,27 @@ export function NetworkHistory({ entity, entityId, cardTitle }: NetworkHistoryPr
   const [entidad, setEntidad] = useState('');
   const [dias, setDias] = useState(fixed ? '365' : '30');
   const [pagina, setPagina] = useState(1);
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+  const datesValid = !(desde && hasta && desde > hasta);
+  // Decisión 83: 10 cambios por página; con fechas, el periodo lo dan ellas.
   const filter = {
     entidad: fixed ? entity : entidad || null,
     id: entityId === undefined ? null : String(entityId),
-    dias: Number(dias),
-    pagina,
+    dias: (datesValid && desde) ? 365 : Number(dias),
+    fechaDesde: (datesValid && desde) || undefined,
+    fechaHasta: (datesValid && hasta) || undefined,
+    page: pagina,
+    limit: 10,
   };
   const history = useQuery({
     queryKey: ['red', 'historial', filter],
     queryFn: () => api.red.history(filter),
     placeholderData: keepPreviousData,
   });
-  const pages = history.data ? Math.max(1, Math.ceil(history.data.total / history.data.pageSize)) : 1;
 
   if (cardTitle) {
-    const total = history.data?.total;
+    const total = history.data?.data.total;
     return (
       <Card
         title={cardTitle}
@@ -78,11 +86,11 @@ export function NetworkHistory({ entity, entityId, cardTitle }: NetworkHistoryPr
           <Loading variant="list" rows={3} />
         ) : history.isError ? (
           <ErrorState error={history.error} onRetry={() => void history.refetch()} />
-        ) : history.data.items.length === 0 ? (
+        ) : history.data.data.data.length === 0 ? (
           <EmptyState title="Sin cambios registrados." />
         ) : (
           <ul className="event-log" aria-label={cardTitle}>
-            {history.data.items.map((item) => (
+            {history.data.data.data.map((item) => (
               <li key={item.id}>
                 <span className="dot" data-status={eventTone(item.title)} aria-hidden="true" />
                 <strong className="event-log-title">
@@ -106,6 +114,7 @@ export function NetworkHistory({ entity, entityId, cardTitle }: NetworkHistoryPr
             ))}
           </ul>
         )}
+        <Pager data={history.data?.data} noun="eventos" onPage={setPagina} />
       </Card>
     );
   }
@@ -133,18 +142,34 @@ export function NetworkHistory({ entity, entityId, cardTitle }: NetworkHistoryPr
               setPagina(1);
             }}
           />
+          <MoreFilters
+            active={(desde ? 1 : 0) + (hasta ? 1 : 0)}
+            onClear={() => {
+              setDesde('');
+              setHasta('');
+              setPagina(1);
+            }}
+            dateLabel="Fecha"
+            from={desde}
+            to={hasta}
+            onDates={(from, to) => {
+              setDesde(from);
+              setHasta(to);
+              setPagina(1);
+            }}
+          />
         </div>
       )}
       {history.isPending ? (
         <Loading variant="list" />
       ) : history.isError ? (
         <ErrorState error={history.error} onRetry={() => void history.refetch()} />
-      ) : history.data.items.length === 0 ? (
+      ) : history.data.data.data.length === 0 ? (
         <EmptyState title="Sin cambios en este periodo." />
       ) : (
         <div className={fixed ? undefined : 'table-card'}>
           <ul className={fixed ? 'timeline' : 'timeline history-list'} aria-label="Historial del data center">
-            {history.data.items.map((item) => (
+            {history.data.data.data.map((item) => (
               <li key={item.id}>
                 <strong>
                   {item.title}
@@ -165,29 +190,7 @@ export function NetworkHistory({ entity, entityId, cardTitle }: NetworkHistoryPr
               </li>
             ))}
           </ul>
-          {pages > 1 && (
-            <div className="pager">
-              <button
-                type="button"
-                className="btn btn-outline"
-                disabled={pagina <= 1}
-                onClick={() => setPagina(pagina - 1)}
-              >
-                Anterior
-              </button>
-              <span className="muted">
-                Página {pagina} de {pages}
-              </span>
-              <button
-                type="button"
-                className="btn btn-outline"
-                disabled={pagina >= pages}
-                onClick={() => setPagina(pagina + 1)}
-              >
-                Siguiente
-              </button>
-            </div>
-          )}
+          <Pager data={history.data?.data} noun="cambios" onPage={setPagina} />
         </div>
       )}
     </>

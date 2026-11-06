@@ -174,7 +174,7 @@ export function MachinePicker({
 }) {
   const api = usePanelApi();
   const [q, setQ] = useState('');
-  const list = useQuery({ queryKey: ['maquinas', 'selector', q], queryFn: () => api.machines({ q, tamano: 25 }) });
+  const list = useQuery({ queryKey: ['maquinas', 'selector', q], queryFn: () => api.machines({ q, limit: 25 }) });
   const ids = new Set(chosen.map((m) => m.id));
   const toggle = (m: MachineRef) => onChange(ids.has(m.id) ? chosen.filter((c) => c.id !== m.id) : [...chosen, m]);
 
@@ -190,7 +190,7 @@ export function MachinePicker({
       />
       <ul>
         {chosen
-          .filter((m) => !(list.data?.page.items ?? []).some((i) => i.id === m.id))
+          .filter((m) => !(list.data?.data.data ?? []).some((i) => i.id === m.id))
           .map((m) => (
             <li key={m.id}>
               <label>
@@ -198,7 +198,7 @@ export function MachinePicker({
               </label>
             </li>
           ))}
-        {(list.data?.page.items ?? []).map((m) => (
+        {(list.data?.data.data ?? []).map((m) => (
           <li key={m.id}>
             <label>
               <input type="checkbox" checked={ids.has(m.id)} onChange={() => toggle({ id: m.id, name: m.name })} />{' '}

@@ -6,11 +6,8 @@ import {
   alertList,
   fakeNetworkApi,
   fakePanelApi,
-  machine,
   machineDetail,
-  machineList,
-  renderWithPanel,
-} from '../../test/fakes';
+  renderWithPanel, pageFrom } from '../../test/fakes';
 import { FichaTabs } from '../FichaTabs';
 import { RedPage } from './RedPage';
 
@@ -140,7 +137,7 @@ describe('Recolector SNMP y correlación (Fase 4.2 y 4.3)', () => {
       <RedPage canEdit={false} onOpenEquipo={vi.fn()} initialTab="desconocidos" />,
       fakePanelApi({
         red: fakeNetworkApi({
-          unknown: () =>
+          unknown: pageFrom(() =>
             Promise.resolve([
               {
                 mac: '3C:52:82:00:00:99',
@@ -172,8 +169,8 @@ describe('Recolector SNMP y correlación (Fase 4.2 y 4.3)', () => {
                 lastSeenAt: now,
                 viaAccessPoint: true,
               },
-            ]),
-          differences: () =>
+            ])),
+          differences: pageFrom(() =>
             Promise.resolve([
               {
                 kind: 'equipo_sin_cable',
@@ -183,7 +180,7 @@ describe('Recolector SNMP y correlación (Fase 4.2 y 4.3)', () => {
                 portId: 105,
                 machineId: 3,
               },
-            ]),
+            ])),
         }),
       }),
     );
@@ -202,8 +199,8 @@ describe('Recolector SNMP y correlación (Fase 4.2 y 4.3)', () => {
     renderWithPanel(
       <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="dispositivos" />,
       fakePanelApi({
-        machines: () =>
-          Promise.resolve(machineList([machine({ id: 3, name: 'IMPRESORA-02', ipAddress: '10.10.20.90' })])),
+        // El selector de equipos usa la lista liviana, sin paginar (decisión 83).
+        machineOptions: () => Promise.resolve([{ id: 3, name: 'IMPRESORA-02', branchId: 1, ipAddress: '10.10.20.90' }]),
         red: fakeNetworkApi({
           devices: () => Promise.resolve(summary.attention),
           device: () => Promise.resolve(device),

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -138,10 +138,10 @@ public sealed class SettingsTests(TestDatabase database) : IAsyncLifetime
         await _api.ExecuteAsync("UPDATE dbo.maquinas SET departamento_id = @d WHERE id = @m", ("@d", id), ("@m", machine));
         try
         {
-            var list = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/sucursales/{branch}/departamentos");
+            var list = (await admin.GetFromJsonAsync<JsonElement>($"/api/v1/sucursales/{branch}/departamentos?limit=100")).GetProperty("data").GetProperty("data");
             list.EnumerateArray().Single(d => d.GetProperty("id").GetInt32() == id).GetProperty("machineCount").GetInt32().Should().Be(1);
             var machines = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/maquinas?departamento={id}");
-            machines.GetProperty("page").GetProperty("total").GetInt32().Should().Be(1);
+            machines.GetProperty("data").GetProperty("total").GetInt32().Should().Be(1);
             var refused = await admin.DeleteAsync($"/api/v1/sucursales/{branch}/departamentos/{id}");
             refused.StatusCode.Should().Be(HttpStatusCode.Conflict);
             (await refused.Content.ReadAsStringAsync()).Should().Contain("1 equipo");

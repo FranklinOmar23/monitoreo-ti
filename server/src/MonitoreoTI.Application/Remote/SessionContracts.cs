@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 
 namespace MonitoreoTI.Application.Remote;
 
@@ -31,7 +31,10 @@ public sealed record SessionItem(
     long Id, string Type, int MachineId, string MachineName, string BranchName, int UserId, string UserName,
     DateTime StartedAt, DateTime? EndedAt, int? DurationSeconds, string? SourceIp, bool Active, string? Reason = null, bool ViewOnly = false);
 
-public sealed record SessionPage(IReadOnlyList<SessionItem> Items, int Total, int Page, int PageSize);
+/// <summary>Historial de sesiones (decisión 83): filtros por cada campo y página de 10.</summary>
+public sealed record SessionFilter(
+    int? MachineId = null, int? UserId = null, string? Type = null, bool? ViewOnly = null, bool? Active = null,
+    DateTime? From = null, DateTime? To = null, int Page = 1, int Limit = Panel.Paging.DefaultLimit);
 
 /// <summary>Abre y cierra sesiones en el relay; implementado en el API (tiene las conexiones de los agentes).</summary>
 public interface IRemoteRelay
@@ -66,6 +69,21 @@ public sealed record RemoteSettings(bool PedirPermiso);
 
 public static class SessionRules
 {
+    /// <summary>El agente clásico (Windows 7 y 8, versión "-clasico") abre sesiones remotas desde la 0.2.0 (decisión 84).</summary>
+    public static readonly Version ClassicSessionsVersion = new(0, 2, 0);
+
+    /// <summary>
+    /// Agente clásico anterior a la 0.2.0: no tiene escritorio remoto, terminal ni archivos e ignoraría la orden. Con el
+    /// clásico 0.2.0 o posterior las sesiones son iguales a las del agente normal.
+    /// </summary>
+    public static bool IsClassicWithoutSessions(string? agentVersion)
+    {
+        if (agentVersion?.Contains("clasico", StringComparison.OrdinalIgnoreCase) != true)
+            return false;
+        var number = agentVersion.Split('-')[0];
+        return !Version.TryParse(number, out var version) || version < ClassicSessionsVersion;
+    }
+
     /// <summary>Vigencia de los tokens de un solo uso y espera máxima a que llegue la otra parte.</summary>
     public static readonly TimeSpan TokenLifetime = TimeSpan.FromSeconds(60);
 

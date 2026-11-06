@@ -14,16 +14,19 @@ export interface ServiceConfig {
   /** Carpeta donde el agente guarda su credencial cifrada y su cola local. */
   dataDir: string;
   agentVersion: string;
+  /** Tipo fijado al instalar (/TIPO=servidor): reemplaza al que detecta el inventario (decisión 82). */
+  machineType?: 'servidor' | 'computadora';
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-export const AGENT_VERSION = '0.3.12';
+export const AGENT_VERSION = '0.4.1';
 
 /** Lo que deja el instalador en config.json. */
 export interface ConfigFile {
   serverUrl?: string;
   enrollToken?: string;
+  machineType?: 'servidor' | 'computadora';
 }
 
 export const CONFIG_FILE_NAME = 'config.json';
@@ -37,6 +40,8 @@ export function readConfigFile(dataDir: string): ConfigFile {
     return {
       serverUrl: typeof value['serverUrl'] === 'string' ? value['serverUrl'] : undefined,
       enrollToken: typeof value['enrollToken'] === 'string' ? value['enrollToken'] : undefined,
+      machineType:
+        value['machineType'] === 'servidor' || value['machineType'] === 'computadora' ? value['machineType'] : undefined,
     };
   } catch {
     return {};
@@ -87,7 +92,14 @@ export function loadServiceConfig(
 
   const enrollToken = env['MONITOREOTI_ENROLL_TOKEN']?.trim() || file.enrollToken?.trim() || undefined;
 
-  return { serverUrl, heartbeatSeconds, enrollToken, dataDir, agentVersion: AGENT_VERSION };
+  return {
+    serverUrl,
+    heartbeatSeconds,
+    enrollToken,
+    dataDir,
+    agentVersion: AGENT_VERSION,
+    ...(file.machineType ? { machineType: file.machineType } : {}),
+  };
 }
 
 /** %ProgramData%\MonitoreoTI\Agent en producción (el instalador restringe la carpeta a SYSTEM y administradores). */

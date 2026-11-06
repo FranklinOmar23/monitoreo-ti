@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Api.IntegrationTests.Infrastructure;
@@ -91,7 +91,9 @@ public class TenantIsolationTests(TestDatabase database)
         var caribe = await database.GetCompanyIdAsync(Caribe);
         await using var db = database.CreateContext(t => t.SetCompany(caribe));
 
-        var department = new Department { Name = $"Prueba {Guid.NewGuid():N}" };
+        // Los departamentos son de una sucursal (decisión 79).
+        var branch = await db.Branches.Select(b => b.Id).FirstAsync();
+        var department = new Department { BranchId = branch, Name = $"Prueba {Guid.NewGuid():N}" };
         db.Departments.Add(department);
         await db.SaveChangesAsync();
 
@@ -133,12 +135,15 @@ public class TenantIsolationTests(TestDatabase database)
     [DatabaseFact]
     public async Task Database_blocks_writes_for_another_company_without_ef()
     {
+        int rafaelBranch;
         var caribe = await database.GetCompanyIdAsync(Caribe);
         var rafael = await database.GetCompanyIdAsync(SanRafael);
+        await using (var admin = database.CreateContext(t => t.SetSuperAdmin()))
+            rafaelBranch = await admin.Branches.Where(b => b.CompanyId == rafael).Select(b => b.Id).FirstAsync();
         await using var connection = await database.OpenConnectionAsync(companyId: caribe);
 
         var insert = () => TestDatabase.ExecuteAsync(connection,
-            $"INSERT INTO dbo.departamentos (empresa_id, nombre) VALUES ({rafael}, N'Intruso');");
+            $"INSERT INTO dbo.departamentos (empresa_id, sucursal_id, nombre) VALUES ({rafael}, {rafaelBranch}, N'Intruso');");
 
         await insert.Should().ThrowAsync<SqlException>().Where(e => e.Number == 33504);
     }

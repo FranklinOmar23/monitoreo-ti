@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -184,7 +184,7 @@ public sealed class ServiceRepairTests(TestDatabase database) : IAsyncLifetime
         }));
         var id = created.GetProperty("id").GetInt32();
 
-        var list = await JsonAsync(await admin.GetAsync("/api/v1/instaladores"));
+        var list = (await JsonAsync(await admin.GetAsync("/api/v1/instaladores?limit=100"))).GetProperty("data").GetProperty("data");
         list.EnumerateArray().Single(t => t.GetProperty("id").GetInt32() == id).GetProperty("canShowCommand").GetBoolean().Should().BeTrue();
 
         var shown = await JsonAsync(await admin.GetAsync($"/api/v1/instaladores/{id}/comando"));

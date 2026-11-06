@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../data/usePaged';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, type CreatedInstallerToken, type InstallerToken, type PendingAgent } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Icon } from '@components/Icon';
@@ -26,7 +28,7 @@ export function InstaladoresPage() {
   const [tab, setTab] = useState('instaladores');
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedInstallerToken | null>(null);
-  const pending = useQuery({ queryKey: ['pendientes'], queryFn: () => api.pendingAgents(), refetchInterval: 30_000 });
+  const pending = usePaged(['pendientes'], (p) => api.pendingAgents(p), { refetchInterval: 30_000 });
 
   return (
     <>
@@ -48,12 +50,12 @@ export function InstaladoresPage() {
         onChange={setTab}
         items={[
           { id: 'instaladores', label: 'Tokens de instalación' },
-          { id: 'pendientes', label: 'Pendientes de aprobación', count: pending.data?.length },
+          { id: 'pendientes', label: 'Pendientes de aprobación', count: pending.data?.total },
           { id: 'actualizacion', label: 'Actualización del agente' },
         ]}
       />
       {tab === 'instaladores' && <TokenList />}
-      {tab === 'pendientes' && <PendingList query={pending} />}
+      {tab === 'pendientes' && <PendingList list={pending} />}
       {tab === 'actualizacion' && <AgentUpdates />}
 
       {creating && (
@@ -73,7 +75,7 @@ export function InstaladoresPage() {
 function TokenList() {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const tokens = useQuery({ queryKey: ['instaladores'], queryFn: () => api.installers() });
+  const { query: tokens, data: tokensPage, items: tokenItems, setPage } = usePaged(['instaladores'], (p) => api.installers(p));
   const revoke = useMutation({
     mutationFn: (id: number) => api.revokeInstaller(id),
     onSuccess: () => void queries.invalidateQueries({ queryKey: ['instaladores'] }),
@@ -88,7 +90,7 @@ function TokenList() {
 
   if (tokens.isPending) return <Loading />;
   if (tokens.isError) return <ErrorState error={tokens.error} onRetry={() => void tokens.refetch()} />;
-  if (tokens.data.length === 0)
+  if (tokenItems.length === 0)
     return (
       <EmptyState title="Todavía no hay tokens de instalación">
         Cree uno para la sucursal donde va a instalar el agente.
@@ -116,7 +118,7 @@ function TokenList() {
           </tr>
         </thead>
         <tbody>
-          {tokens.data.map((token) => (
+          {tokenItems.map((token) => (
             <tr key={token.id}>
               <td>
                 <span className="status-badge" data-status={STATE_LABEL[token.state].status}>
@@ -165,6 +167,7 @@ function TokenList() {
           ))}
         </tbody>
       </table>
+      <Pager data={tokensPage} noun="tokens" onPage={setPage} />
       {deleting && <DeleteTokenDialog token={deleting} onClose={() => setDeleting(null)} />}
       {shown && <CreatedToken token={shown} again onClose={() => setShown(null)} />}
     </div>
@@ -211,7 +214,8 @@ function DeleteTokenDialog({ token, onClose }: { token: InstallerToken; onClose:
   );
 }
 
-function PendingList({ query }: { query: UseQueryResult<PendingAgent[]> }) {
+function PendingList({ list }: { list: ReturnType<typeof usePaged<PendingAgent>> }) {
+  const { query, items, data: page, setPage } = list;
   const api = usePanelApi();
   const queries = useQueryClient();
   const decide = useMutation({
@@ -225,7 +229,7 @@ function PendingList({ query }: { query: UseQueryResult<PendingAgent[]> }) {
 
   if (query.isPending) return <Loading variant="table" columns={5} />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  if (query.data.length === 0)
+  if (items.length === 0)
     return (
       <EmptyState title="No hay equipos esperando aprobación">
         Aparecen aquí los que se registran con un token que exige aprobación.
@@ -247,7 +251,7 @@ function PendingList({ query }: { query: UseQueryResult<PendingAgent[]> }) {
           </tr>
         </thead>
         <tbody>
-          {query.data.map((agent) => (
+          {items.map((agent) => (
             <tr key={agent.agentId}>
               <td className="mono">{agent.machineName}</td>
               <td>{agent.branchName}</td>
@@ -277,6 +281,7 @@ function PendingList({ query }: { query: UseQueryResult<PendingAgent[]> }) {
           ))}
         </tbody>
       </table>
+      <Pager data={page} noun="equipos" onPage={setPage} />
     </div>
   );
 }

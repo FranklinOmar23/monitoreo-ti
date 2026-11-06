@@ -55,6 +55,16 @@ public sealed class SnmpCollectors(
             .OrderBy(d => d.Name)
             .ToListAsync(cancellationToken);
 
+        // FortiSwitch administrados (decisión 80): van con la API de su FortiGate.
+        var deviceIds = devices.Select(d => d.Id).ToList();
+        var switches = (await db.NetworkDevices.AsNoTracking()
+                .Where(s => s.FortiGateId != null && deviceIds.Contains(s.FortiGateId.Value) && s.SerialNumber != null
+                    && s.Status != NetworkDeviceStatus.Retired)
+                .Select(s => new { s.Id, FortiGateId = s.FortiGateId!.Value, s.SerialNumber })
+                .ToListAsync(cancellationToken))
+            .GroupBy(s => s.FortiGateId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<CollectorSwitch>)g.Select(s => new CollectorSwitch(s.Id, s.SerialNumber!)).ToList());
+
         var list = new List<CollectorDevice>();
         foreach (var d in devices)
         {
@@ -66,7 +76,7 @@ public sealed class SnmpCollectors(
                 continue;
             }
             list.Add(new CollectorDevice(d.Id, d.Name, d.ManagementIp!, Text(d.Type), d.SnmpUser!, SnmpCredentialSeal.Seal(hash, secret),
-                Api: SealApi(d, hash)));
+                Api: SealApi(d, hash) is { } api ? api with { Switches = switches.GetValueOrDefault(d.Id) } : null));
         }
 
         // Impresoras (sin agente): v3 o v2c según la impresora; solo se leen sus consumibles.
@@ -113,9 +123,12 @@ public sealed class SnmpCollectors(
             return;
         }
 
+        // Lo consulta este recolector, o es un FortiSwitch cuyo FortiGate consulta este recolector (decisión 80).
         var device = await db.NetworkDevices.Include(d => d.Ports)
-            .FirstOrDefaultAsync(d => d.Id == data.DispositivoId && d.CollectorAgentId == identity.AgentId
-                && d.Status != NetworkDeviceStatus.Retired, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == data.DispositivoId && d.Status != NetworkDeviceStatus.Retired
+                && (d.CollectorAgentId == identity.AgentId
+                    || (d.FortiGateId != null && db.NetworkDevices.Any(f => f.Id == d.FortiGateId && f.CollectorAgentId == identity.AgentId))),
+                cancellationToken);
         if (device is null)
         {
             logger.LogWarning("Agente {AgentId}: reportó el dispositivo {DeviceId}, que no tiene asignado; se ignora.", identity.AgentId, data.DispositivoId);

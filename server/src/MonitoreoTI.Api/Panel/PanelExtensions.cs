@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Api.Remote;
 using MonitoreoTI.Application.Network;
 using MonitoreoTI.Application.Panel;
@@ -45,6 +45,9 @@ public static class PanelExtensions
         services.AddScoped<NetworkInsights>();
         services.AddScoped<IpAddresses>();
         services.AddScoped<RemoteInstalls>();
+        services.AddScoped<MonitoreoTI.Infrastructure.Backups.Backups>();
+        services.AddSingleton<IValidator<MonitoreoTI.Application.Backups.BackupJobInput>, MonitoreoTI.Application.Backups.BackupJobInputValidator>();
+        services.AddSingleton<IValidator<MonitoreoTI.Application.Backups.BackupDestinationInput>, MonitoreoTI.Application.Backups.BackupDestinationInputValidator>();
         services.AddScoped<MonitoreoTI.Infrastructure.Panel.Departments>();
         services.AddSingleton<IValidator<SubnetInput>, SubnetInputValidator>();
         services.AddSingleton<IValidator<IpReservationInput>, IpReservationInputValidator>();
@@ -65,6 +68,7 @@ public static class PanelExtensions
         services.AddSingleton<IValidator<DeviceModelInput>, DeviceModelInputValidator>();
         services.AddSingleton<IValidator<DeviceInput>, DeviceInputValidator>();
         services.AddSingleton<IValidator<ApiTestInput>, ApiTestInputValidator>();
+        services.AddSingleton<IValidator<RegisterSwitchesInput>, RegisterSwitchesInputValidator>();
         services.AddSingleton<IValidator<RemoteInstallInput>, RemoteInstallInputValidator>();
         services.AddSingleton<IValidator<PortInput>, PortInputValidator>();
         services.AddSingleton<IValidator<OutletInput>, OutletInputValidator>();
@@ -98,6 +102,7 @@ public static class PanelExtensions
         app.MapNetworkEndpoints();
         app.MapMaintenanceEndpoints();
         app.MapRemoteEndpoints();
+        app.MapBackupEndpoints();
         app.MapUserEndpoints();
         app.MapReportEndpoints();
         app.MapPanelUpdateEndpoints();

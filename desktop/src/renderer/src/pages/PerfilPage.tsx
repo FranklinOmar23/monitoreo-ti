@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../data/usePaged';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
@@ -223,14 +225,15 @@ function EmailPreference() {
 function OpenSessions() {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const sessions = useQuery({ queryKey: ['mis-sesiones'], queryFn: () => api.usuarios.sessions() });
+  const { query: sessions, data: page, items, setPage } = usePaged(['mis-sesiones'], (p) => api.usuarios.sessions(p));
   const refresh = () => void queries.invalidateQueries({ queryKey: ['mis-sesiones'] });
   const close = useMutation({ mutationFn: (id: number) => api.usuarios.closeSession(id), onSuccess: refresh });
   const closeOthers = useMutation({ mutationFn: () => api.usuarios.closeOtherSessions(), onSuccess: refresh });
 
   if (sessions.isPending) return <Loading />;
   if (sessions.isError) return <ErrorState error={sessions.error} onRetry={() => void sessions.refetch()} />;
-  const others = sessions.data.filter((s) => !s.current).length;
+  // Todas menos la actual (que siempre existe).
+  const others = Math.max(0, (page?.total ?? 0) - 1);
   const error = close.error ?? closeOthers.error;
 
   return (
@@ -255,7 +258,7 @@ function OpenSessions() {
           </tr>
         </thead>
         <tbody>
-          {sessions.data.map((s) => (
+          {items.map((s) => (
             <tr key={s.id}>
               <td>
                 <Icon name="laptop" size={16} /> {s.device ?? 'Desconocido'}
@@ -280,6 +283,7 @@ function OpenSessions() {
           ))}
         </tbody>
       </table>
+      <Pager data={page} noun="sesiones" onPage={setPage} />
       {others > 0 && (
         <button
           type="button"

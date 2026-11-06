@@ -2,7 +2,15 @@ import { spawn } from 'node:child_process';
 import { createDecipheriv, createHash, hkdfSync } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createEnvelope, type Envelope } from '@monitoreoti/shared';
-import { collectFortiGate, fortiHttpGet, parseApiConfig, type FortiApiConfig, type FortiHttp } from './fortigate';
+import {
+  collectFortiGate,
+  fortiHttpGet,
+  parseApiConfig,
+  readFortiSwitches,
+  switchToSnmpResult,
+  type FortiApiConfig,
+  type FortiHttp,
+} from './fortigate';
 
 /** Algo a consultar, tal como llega en "bienvenida" o "config_actualizada": un dispositivo de red o una impresora. */
 export interface CollectorDevice {
@@ -287,8 +295,9 @@ export class SnmpPoller {
   /** Después del SNMP, lo que da la API REST (DHCP y dispositivos). El token no se escribe en el registro. */
   private async readApi(device: CollectorDevice, api: FortiApiConfig): Promise<void> {
     let datos: Record<string, unknown>;
+    let token: string | undefined;
     try {
-      const token = openApiToken(this.options.credential, api.token);
+      token = openApiToken(this.options.credential, api.token);
       datos = {
         dispositivoId: device.id,
         ...(await collectFortiGate(this.options.fortiHttp ?? fortiHttpGet, {
@@ -303,6 +312,30 @@ export class SnmpPoller {
     if (datos['ok'] !== true)
       this.options.log('error', 'Lectura de la API fallida', { dispositivo: device.nombre, error: datos['error'] });
     this.options.submit(createEnvelope('fortigate_datos', datos));
+    if (token && api.switches?.length) await this.readSwitches(device, api, token);
+  }
+
+  /** Los FortiSwitch de este FortiGate (decisión 80): un "snmp_resultado" por cada uno, con lo que da la API. */
+  private async readSwitches(device: CollectorDevice, api: FortiApiConfig, token: string): Promise<void> {
+    const read = await readFortiSwitches(this.options.fortiHttp ?? fortiHttpGet, {
+      url: api.url,
+      token,
+      acceptSelfSigned: api.acceptSelfSigned,
+    });
+    if (!read.ok)
+      this.options.log('error', 'Lectura de los FortiSwitch fallida', {
+        dispositivo: device.nombre,
+        error: read.error,
+      });
+    for (const registered of api.switches ?? []) {
+      const sw = read.switches.find((s) => s.serie.toUpperCase() === registered.serie.toUpperCase());
+      this.options.submit(
+        createEnvelope(
+          'snmp_resultado',
+          switchToSnmpResult(registered.id, registered.serie, sw, device.nombre, read.ok ? undefined : read.error),
+        ),
+      );
+    }
   }
 
   private clear(): void {

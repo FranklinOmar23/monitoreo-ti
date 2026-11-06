@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScheduledTaskItem, ScriptItem, UpdateStatus } from '@monitoreoti/shared';
-import { fakePanelApi, fakeRemoteApi, renderWithPanel } from '../../test/fakes';
+import { fakePanelApi, fakeRemoteApi, renderWithPanel, pageFrom } from '../../test/fakes';
 import { AgentUpdates } from '../AgentUpdates';
 import { RemotoPage } from './RemotoPage';
 
@@ -47,7 +47,7 @@ describe('tareas programadas (6.5)', () => {
   it('lista las tareas con su descripción en palabras', async () => {
     renderWithPanel(
       <RemotoPage canRun canEdit={false} onOpenEquipo={vi.fn()} />,
-      fakePanelApi({ remoto: fakeRemoteApi({ tasks: () => Promise.resolve([task]) }) }),
+      fakePanelApi({ remoto: fakeRemoteApi({ tasks: pageFrom(() => Promise.resolve([task])) }) }),
     );
 
     fireEvent.click(screen.getByRole('tab', { name: 'Tareas programadas' }));

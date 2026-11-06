@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Application.Settings;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Infrastructure.Panel;
@@ -45,7 +45,8 @@ public static class PanelWriteEndpoints
         // Para el formulario del equipo: los departamentos de la sucursal elegida.
         api.MapGet("/departamentos", (PanelCommands commands, CancellationToken ct, int? sucursal) => commands.DepartmentsAsync(sucursal, ct))
             .RequireAuthorization(PermissionPolicies.MachinesView);
-        api.MapGet("/sucursales/{id:int}/departamentos", (int id, Departments departments, CancellationToken ct) => departments.ListAsync(id, ct))
+        api.MapGet("/sucursales/{id:int}/departamentos", async (int id, Departments departments, HttpRequest request, CancellationToken ct) =>
+                ListPaging.Ok(await departments.ListAsync(id, ct), request))
             .RequireAuthorization(PermissionPolicies.MachinesView);
 
         // ---------------------------------------------------------------- sucursales
@@ -65,7 +66,8 @@ public static class PanelWriteEndpoints
 
         // ---------------------------------------------------------------- instaladores
         var installers = api.MapGroup("/instaladores").RequireAuthorization(PermissionPolicies.InstallersGenerate);
-        installers.MapGet("/", (PanelCommands commands, CancellationToken ct) => commands.EnrollmentTokensAsync(ct));
+        installers.MapGet("/", async (PanelCommands commands, HttpRequest request, CancellationToken ct) =>
+            ListPaging.Ok(await commands.EnrollmentTokensAsync(ct), request));
         installers.MapPost("/", CreateTokenAsync);
         installers.MapGet("/{id:int}/comando", RevealTokenAsync);
         installers.MapPost("/{id:int}/revocar", async (int id, PanelCommands commands, CancellationToken ct) =>
@@ -75,7 +77,8 @@ public static class PanelWriteEndpoints
         installers.MapGet("/descarga", DownloadInstaller);
 
         var pending = api.MapGroup("/equipos-pendientes").RequireAuthorization(PermissionPolicies.InstallersGenerate);
-        pending.MapGet("/", (PanelCommands commands, CancellationToken ct) => commands.PendingAgentsAsync(ct));
+        pending.MapGet("/", async (PanelCommands commands, HttpRequest request, CancellationToken ct) =>
+            ListPaging.Ok(await commands.PendingAgentsAsync(ct), request));
         pending.MapPost("/{agentId:int}/aprobar", async (int agentId, PanelCommands commands, CancellationToken ct) =>
             ToResult(await commands.DecidePendingAgentAsync(agentId, approve: true, ct)));
         pending.MapPost("/{agentId:int}/rechazar", async (int agentId, PanelCommands commands, CancellationToken ct) =>

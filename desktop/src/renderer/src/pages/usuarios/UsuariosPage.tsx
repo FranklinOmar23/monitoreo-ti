@@ -8,7 +8,10 @@ import { Modal } from '@components/Modal';
 import { PageHeader } from '@components/PageHeader';
 import { Tabs } from '@components/Tabs';
 import { initials } from '@components/Topbar';
+import { Pager } from '@components/Pager';
 import { usePanelApi } from '../../data/PanelData';
+import { useDebounced } from '../../data/useDebounced';
+import { usePaged } from '../../data/usePaged';
 import { dateTime, timeAgo } from '../../data/format';
 import { RolesView } from './RolesView';
 
@@ -27,16 +30,18 @@ export function UsuariosPage() {
   const [editing, setEditing] = useState<UserItem | 'new' | null>(null);
   const [newRole, setNewRole] = useState(false);
   const api = usePanelApi();
-  const users = useQuery({ queryKey: ['usuarios'], queryFn: () => api.usuarios.list() });
-  const active = users.data?.filter((u) => u.isActive).length ?? 0;
+  // Para el encabezado: cuántos hay y cuántos activos (solo el total de cada consulta).
+  const all = useQuery({ queryKey: ['usuarios', 'total'], queryFn: () => api.usuarios.list({ limit: 1 }) });
+  const activeOnes = useQuery({ queryKey: ['usuarios', 'activos'], queryFn: () => api.usuarios.list({ isActive: true, limit: 1 }) });
+  const active = activeOnes.data?.data.total ?? 0;
 
   return (
     <div className="page">
       <PageHeader
         title="Usuarios"
         subtitle={
-          users.data
-            ? `${users.data.length} usuarios · ${active} activos. Cada uno entra con su correo, su contraseña y, si su rol lo exige, el 2FA.`
+          all.data
+            ? `${all.data.data.total} usuarios · ${active} activos. Cada uno entra con su correo, su contraseña y, si su rol lo exige, el 2FA.`
             : 'Cargando…'
         }
         actions={
@@ -61,14 +66,7 @@ export function UsuariosPage() {
         label="Secciones de usuarios"
       />
 
-      {tab === 'usuarios' &&
-        (users.isPending ? (
-          <Loading variant="table" columns={6} />
-        ) : users.isError ? (
-          <ErrorState error={users.error} onRetry={() => void users.refetch()} />
-        ) : (
-          <UserList users={users.data} onOpen={setEditing} />
-        ))}
+      {tab === 'usuarios' && <UserList onOpen={setEditing} />}
       {tab === 'roles' && <RolesView creating={newRole} onCreatingDone={() => setNewRole(false)} />}
 
       {editing && <UserForm user={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
@@ -76,21 +74,24 @@ export function UsuariosPage() {
   );
 }
 
-function UserList({ users, onOpen }: { users: UserItem[]; onOpen: (user: UserItem) => void }) {
+function UserList({ onOpen }: { onOpen: (user: UserItem) => void }) {
+  const api = usePanelApi();
   const [query, setQuery] = useState('');
   const [role, setRole] = useState('');
   const [state, setState] = useState('');
-  const roles = [...new Set(users.map((u) => u.roleName))].sort((a, b) => a.localeCompare(b, 'es'));
+  const text = useDebounced(query.trim());
+  const rolesList = useQuery({ queryKey: ['roles'], queryFn: () => api.usuarios.roles() });
+  const roles = (rolesList.data ?? []).map((r) => r.name).sort((a, b) => a.localeCompare(b, 'es'));
 
-  const text = query.trim().toLocaleLowerCase('es');
-  const visible = users.filter(
-    (u) =>
-      (!text || u.name.toLocaleLowerCase('es').includes(text) || u.email.toLocaleLowerCase('es').includes(text)) &&
-      (!role || u.roleName === role) &&
-      (!state ||
-        (state === 'activos' && u.isActive) ||
-        (state === 'inactivos' && !u.isActive) ||
-        (state === 'pendientes' && u.isActive && u.pending)),
+  // Decisión 83: el servidor filtra (cualquier campo con su nombre) y pagina de 10 en 10.
+  const filters = {
+    q: text || undefined,
+    roleName: role || undefined,
+    isActive: state === 'activos' || state === 'pendientes' ? true : state === 'inactivos' ? false : undefined,
+    pending: state === 'pendientes' ? true : undefined,
+  };
+  const { query: list, data: page, items: visible, setPage } = usePaged(['usuarios', 'lista', filters], (p) =>
+    api.usuarios.list({ ...filters, ...p }),
   );
 
   return (
@@ -116,7 +117,11 @@ function UserList({ users, onOpen }: { users: UserItem[]; onOpen: (user: UserIte
         <FilterSelect label="Estado" value={state} options={STATES} allLabel="Todos" onChange={setState} />
       </div>
 
-      {visible.length === 0 ? (
+      {list.isPending ? (
+        <Loading variant="table" columns={6} />
+      ) : list.isError ? (
+        <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+      ) : visible.length === 0 ? (
         <EmptyState title="No hay usuarios con esos filtros" />
       ) : (
         <div className="table-card">
@@ -161,6 +166,7 @@ function UserList({ users, onOpen }: { users: UserItem[]; onOpen: (user: UserIte
               ))}
             </tbody>
           </table>
+          <Pager data={page} noun="usuarios" onPage={setPage} />
         </div>
       )}
     </>

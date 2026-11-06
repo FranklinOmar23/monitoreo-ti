@@ -1,4 +1,7 @@
 import { useState, type FormEvent } from 'react';
+import { Pager } from '@components/Pager';
+import { useDebounced } from '../data/useDebounced';
+import { usePaged } from '../data/usePaged';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BranchItem } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
@@ -19,9 +22,15 @@ interface SucursalesPageProps {
 /** W-15 Sucursales (lista), W-16 detalle y W-17 formulario. */
 export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps) {
   const api = usePanelApi();
+  // Todas (para abrir el detalle de cualquiera) y la cuadrícula de 10 en 10 (decisión 83).
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
   const [editing, setEditing] = useState<BranchItem | 'new' | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [query, setQuery] = useState('');
+  const search = useDebounced(query.trim());
+  const { data: page, items: cards, setPage } = usePaged(['sucursales', 'lista', search], (p) =>
+    api.branchesPage({ ...p, q: search || undefined }),
+  );
 
   const detail = branches.data?.find((b) => b.id === selected);
 
@@ -56,8 +65,21 @@ export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps)
           }
         />
       ) : (
+        <>
+        <div className="filters">
+          <label className="search filter-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={query}
+              placeholder="Buscar sucursal o provincia"
+              aria-label="Buscar sucursal"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+        </div>
         <div className="branch-grid">
-          {branches.data.map((branch) => (
+          {cards.map((branch) => (
             <button key={branch.id} type="button" className="card branch-card" onClick={() => setSelected(branch.id)}>
               <span className="branch-name">
                 <span className="dot" data-status={worst(branch.counts)} aria-hidden="true" />
@@ -73,6 +95,8 @@ export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps)
             </button>
           ))}
         </div>
+        <Pager data={page} noun="sucursales" onPage={setPage} />
+        </>
       )}
 
       {editing && (

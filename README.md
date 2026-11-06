@@ -28,6 +28,7 @@ $env:MONITOREOTI_SQL_PASSWORD = '...'; $env:MONITOREOTI_APP_PASSWORD = '...'
 
 # 2. Servidor (ver server/README.md para los User Secrets)
 cd server; dotnet test; dotnet run --project src/MonitoreoTI.Api   # http://localhost:5126/health
+npm run dev:api   # la API se reinicia sola al guardar un .cs (dotnet watch)
 
 # 3. Clientes TypeScript (desde la raíz)
 npm install

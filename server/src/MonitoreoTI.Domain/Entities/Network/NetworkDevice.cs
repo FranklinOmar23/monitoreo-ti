@@ -52,6 +52,14 @@ public class NetworkDevice : ITenantEntity
 
     public DateTime? ApiLastOkAt { get; set; }
     public string? ApiLastError { get; set; }
+
+    /// <summary>
+    /// FortiSwitch administrado (decisión 80): sus datos llegan por la API de este FortiGate, no por SNMP. Se reconoce
+    /// por su número de serie.
+    /// </summary>
+    public int? FortiGateId { get; set; }
+
+    public string? SerialNumber { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public Rack? Rack { get; set; }

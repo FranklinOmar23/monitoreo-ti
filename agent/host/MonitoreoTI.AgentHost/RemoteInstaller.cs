@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -100,6 +100,12 @@ public static class RemoteInstaller
             Native.WNetCancelConnection2(share, 0, true);
             var resource = new Native.NetResource { Type = Native.ResourceTypeDisk, RemoteName = share };
             var code = Native.WNetAddConnection2(ref resource, request.Clave, request.Usuario, Native.ConnectTemporary);
+            // 64: el equipo cortó la sesión SMB. A veces es pasajero (otra sesión que se cerraba): un reintento.
+            if (code == NetNameDeleted)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3));
+                code = Native.WNetAddConnection2(ref resource, request.Clave, request.Usuario, Native.ConnectTemporary);
+            }
             if (code != 0)
             {
                 Step("error", ConnectionError(code), fin: true);
@@ -126,10 +132,18 @@ public static class RemoteInstaller
                 return 0;
             }
             var classic = kind == AgentKind.Classic;
+            // Un clásico más viejo que el que trae este agente se actualiza (conserva su registro): así lo instalado a
+            // distancia queda igual a lo instalado a mano (decisión 84).
+            var updateClassic = false;
             if (ServiceExists(request.Ip, Installation.ServiceName))
             {
-                Step("omitido", "Ya tiene el agente instalado.", sistema, fin: true);
-                return 0;
+                var installed = classic ? InstalledClassicVersion(share) : null;
+                if (installed is null || installed >= BundledClassicVersion())
+                {
+                    Step("omitido", "Ya tiene el agente instalado.", sistema, fin: true);
+                    return 0;
+                }
+                updateClassic = true;
             }
 
             Step("copiando", null, sistema);
@@ -141,13 +155,29 @@ public static class RemoteInstaller
                 File.Copy(request.Ca, Path.Combine(folder, CaName), overwrite: true);
 
             Step("instalando", null, sistema);
-            LaunchAsSystem(request.Ip, classic ? ClassicCommandLine(request.Servidor, request.Token) : CommandLine(request.Servidor, request.Token));
+            LaunchAsSystem(request.Ip, updateClassic
+                ? ClassicUpdateCommandLine()
+                : classic ? ClassicCommandLine(request.Servidor, request.Token) : CommandLine(request.Servidor, request.Token));
 
             var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(Math.Clamp(request.EsperaMinutos ?? 10, 2, 30));
             var started = DateTime.UtcNow;
             while (DateTime.UtcNow < deadline)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5));
+                if (updateClassic)
+                {
+                    // El servicio ya existía: terminó cuando suelta el archivo copiado.
+                    if (DateTime.UtcNow - started < TimeSpan.FromSeconds(10) || !TryDelete(Path.Combine(folder, setupName)))
+                        continue;
+                    var now = InstalledClassicVersion(share);
+                    if (now is not null && now >= BundledClassicVersion())
+                    {
+                        Step("instalado", $"Se actualizó el agente clásico a la versión {now.ToString(3)}: ya tiene escritorio remoto, terminal y archivos.", sistema, fin: true);
+                        return 0;
+                    }
+                    Step("error", ClassicFailure(share), sistema, fin: true);
+                    return 1;
+                }
                 if (ServiceExists(request.Ip, Installation.ServiceName))
                 {
                     Step("instalado", classic
@@ -220,6 +250,31 @@ public static class RemoteInstaller
     public static string ClassicCommandLine(string server, string token) =>
         $"%SystemRoot%\\System32\\cmd.exe /c start \"\" \"%SystemRoot%\\{RemoteFolder}\\{ClassicName}\" instalar /SERVER={server} /TOKEN={token}";
 
+    /// <summary>Sin token: el clásico ya registrado solo reemplaza su programa y reinicia el servicio.</summary>
+    public static string ClassicUpdateCommandLine() =>
+        $"%SystemRoot%\\System32\\cmd.exe /c start \"\" \"%SystemRoot%\\{RemoteFolder}\\{ClassicName}\" instalar";
+
+    private static Version BundledClassicVersion() => FileVersion(ClassicPath) ?? new Version(0, 0);
+
+    /// <summary>Versión del clásico instalado en el equipo (por C$), o null si no se puede leer.</summary>
+    private static Version? InstalledClassicVersion(string share) =>
+        FileVersion(Path.Combine(share.Replace("ADMIN$", "C$"), "Program Files", "MonitoreoTI", "AgenteClasico", ClassicName));
+
+    private static Version? FileVersion(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return null;
+            var info = FileVersionInfo.GetVersionInfo(path);
+            return new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>La última línea con error del registro del agente clásico en el equipo (dice por qué no se instaló).</summary>
     private static string ClassicFailure(string share)
     {
@@ -237,8 +292,11 @@ public static class RemoteInstaller
         return "El agente clásico no se instaló. Revise C:\\ProgramData\\MonitoreoTI\\Agent\\agente-clasico.log en ese equipo.";
     }
 
+    private const int NetNameDeleted = 64;
+
     public static string ConnectionError(int code) => code switch
     {
+        NetNameDeleted or 59 => $"El equipo aceptó la conexión por el puerto 445 pero la cortó ({code}). Suele ser un equipo que solo habla SMB1 (Windows XP, una impresora, un NAS o un punto de venta viejo), un antivirus o firewall que corta las conexiones de archivos, o que no es una PC con Windows.",
         1326 => "Usuario o clave incorrectos.",
         5 => "La cuenta no es administrador de ese equipo.",
         53 or 67 => "No se encontró el recurso ADMIN$: el equipo no comparte sus recursos administrativos.",
@@ -264,6 +322,10 @@ public static class RemoteInstaller
     /// </summary>
     public static (string Name, AgentKind? Kind, string? Reason) DescribeVersion(int major, int minor, int build, bool is64, bool hasClassic = false, bool? dotNet452 = null)
     {
+        // Hay Windows 10 cuyo kernel32.dll dice 6.2 en la versión numérica; el número de compilación no miente
+        // (Windows 10 empieza en la 10240).
+        if (major < 10 && build >= 10240)
+            (major, minor) = (10, 0);
         var name = (major, minor) switch
         {
             (10, _) when build >= 22000 => "Windows 11",

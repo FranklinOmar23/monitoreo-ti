@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
@@ -44,6 +44,37 @@ namespace MonitoreoTI.AgenteClasico
                 return (int)l;
             if (v is decimal m && m == Math.Floor(m) && m >= int.MinValue && m <= int.MaxValue)
                 return (int)m;
+            return null;
+        }
+
+        public static bool Bool(this Dictionary<string, object> d, string key) =>
+            d != null && d.TryGetValue(key, out var v) && v is bool b && b;
+
+        public static long? Long(this Dictionary<string, object> d, string key)
+        {
+            if (d == null || !d.TryGetValue(key, out var v) || v == null)
+                return null;
+            if (v is int i)
+                return i;
+            if (v is long l)
+                return l;
+            if (v is decimal m && m == Math.Floor(m) && m >= long.MinValue && m <= long.MaxValue)
+                return (long)m;
+            return null;
+        }
+
+        public static double? Double(this Dictionary<string, object> d, string key)
+        {
+            if (d == null || !d.TryGetValue(key, out var v) || v == null)
+                return null;
+            if (v is int i)
+                return i;
+            if (v is long l)
+                return l;
+            if (v is decimal m)
+                return (double)m;
+            if (v is double x)
+                return x;
             return null;
         }
 
@@ -185,9 +216,9 @@ namespace MonitoreoTI.AgenteClasico
     public static class AgentInfo
     {
         /// <summary>
-        /// Versión que ve el servidor. "-clasico": nunca se le ofrece el instalador del agente normal, y al ser 0.1 no
+        /// Versión que ve el servidor. "-clasico": nunca se le ofrece el instalador del agente normal, y al ser 0.x no
         /// recibe funciones de recolector (SNMP, barridos, API, instalación remota).
         /// </summary>
-        public const string Version = "0.1.0-clasico";
+        public const string Version = "0.2.0-clasico";
     }
 }

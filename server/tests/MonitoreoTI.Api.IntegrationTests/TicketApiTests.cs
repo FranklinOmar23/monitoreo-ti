@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -78,7 +78,7 @@ public sealed class TicketApiTests(TestDatabase database) : IAsyncLifetime
         (await again.Content.ReadAsStringAsync()).Should().Contain($"#{id}");
 
         var byAlert = await JsonAsync(await tech.GetAsync($"/api/v1/tickets?alerta={alertId}"));
-        byAlert.GetProperty("page").GetProperty("items").EnumerateArray().Single().GetProperty("id").GetInt32().Should().Be(id);
+        byAlert.GetProperty("data").GetProperty("data").EnumerateArray().Single().GetProperty("id").GetInt32().Should().Be(id);
     }
 
     [DatabaseFact]
@@ -115,7 +115,7 @@ public sealed class TicketApiTests(TestDatabase database) : IAsyncLifetime
         (await tech.PostAsJsonAsync($"/api/v1/tickets/{id}/comentarios", new { texto = "Tarde" })).StatusCode.Should().Be(HttpStatusCode.Conflict);
 
         var active = await JsonAsync(await tech.GetAsync($"/api/v1/tickets?maquina={agent.MachineId}"));
-        active.GetProperty("page").GetProperty("total").GetInt32().Should().Be(0, "la lista por defecto oculta los cerrados");
+        active.GetProperty("data").GetProperty("total").GetInt32().Should().Be(0, "la lista por defecto oculta los cerrados");
     }
 
     [DatabaseFact]
@@ -128,8 +128,8 @@ public sealed class TicketApiTests(TestDatabase database) : IAsyncLifetime
         var techTicket = await CreateAsync(tech, new { titulo = "Ticket del técnico", prioridad = "baja", maquinaId = agent.MachineId });
         var mine = await CreateAsync(employee, new { titulo = "Mi impresora no imprime", prioridad = "media", maquinaId = agent.MachineId });
 
-        var list = await JsonAsync(await employee.GetAsync("/api/v1/tickets?estado=todos&tamano=300"));
-        list.GetProperty("page").GetProperty("items").EnumerateArray().Select(t => t.GetProperty("id").GetInt32()).Should().Equal(mine);
+        var list = await JsonAsync(await employee.GetAsync("/api/v1/tickets?estado=todos&limit=100"));
+        list.GetProperty("data").GetProperty("data").EnumerateArray().Select(t => t.GetProperty("id").GetInt32()).Should().Equal(mine);
         (await employee.GetAsync($"/api/v1/tickets/{techTicket}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
 
         (await employee.PostAsJsonAsync($"/api/v1/tickets/{mine}/estado", new { estado = "cerrado" })).StatusCode.Should().Be(HttpStatusCode.Forbidden);

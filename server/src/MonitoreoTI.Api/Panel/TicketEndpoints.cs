@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Infrastructure.Panel;
 using static MonitoreoTI.Api.Panel.PanelWriteEndpoints;
@@ -37,17 +37,31 @@ public static class TicketEndpoints
             ToResult(await commands.AssignAsync(id, input, ct)));
     }
 
-    private static Task<TicketList> ListAsync(
+    /// <summary>Tickets (decisión 83): 10 por página, un filtro por campo y rango de fechas de apertura.</summary>
+    private static async Task<IResult> ListAsync(
         TicketQueries queries,
         CancellationToken ct,
         [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search = null,
+        string? titulo = null,
         string? estado = null,
         string? prioridad = null,
         string? asignado = null,
+        int? creadoPor = null,
         int? sucursal = null,
         int? maquina = null,
         long? alerta = null,
-        int pagina = 1,
-        int tamano = 100) =>
-        queries.TicketsAsync(new TicketFilter(search, estado, prioridad, asignado, sucursal, maquina, alerta, pagina, tamano), ct);
+        DateTime? fechaDesde = null,
+        DateTime? fechaHasta = null,
+        int? page = null,
+        int? limit = null)
+    {
+        if (Paging.DateRangeError(fechaDesde, fechaHasta) is { } error)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["fechaHasta"] = [error] });
+        var (p, l) = Paging.Normalize(page, limit);
+        return Results.Ok(await queries.TicketsAsync(new TicketFilter
+        {
+            Query = search, Title = titulo, Status = estado, Priority = prioridad, Assignee = asignado, CreatedById = creadoPor,
+            BranchId = sucursal, MachineId = maquina, AlertId = alerta, From = fechaDesde, To = fechaHasta, Page = p, Limit = l,
+        }, ct));
+    }
 }

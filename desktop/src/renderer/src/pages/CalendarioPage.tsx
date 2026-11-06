@@ -352,7 +352,7 @@ export function MaintenanceForm({
   });
   const machines = useQuery({
     queryKey: ['maquinas', 'buscar', q],
-    queryFn: () => api.machines({ q, tamano: 30 }),
+    queryFn: () => api.machines({ q, limit: 30 }),
     enabled: !request.machineId,
   });
   const technicians = useQuery({ queryKey: ['tickets', 'tecnicos'], queryFn: () => api.technicians() });
@@ -419,7 +419,7 @@ export function MaintenanceForm({
               <span>Equipo *</span>
               <select required value={form.maquinaId} onChange={set('maquinaId')}>
                 <option value="">Elija…</option>
-                {(machines.data?.page.items ?? []).map((m) => (
+                {(machines.data?.data.data ?? []).map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name} · {m.branchName}
                   </option>

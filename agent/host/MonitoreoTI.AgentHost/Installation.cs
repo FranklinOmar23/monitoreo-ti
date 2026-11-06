@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 
 namespace MonitoreoTI.AgentHost;
@@ -89,6 +89,8 @@ public static class Installation
         config["serverUrl"] = options.ServerUrl!.TrimEnd('/');
         if (!string.IsNullOrWhiteSpace(options.EnrollToken))
             config["enrollToken"] = options.EnrollToken;
+        if (options.MachineType is not null)
+            config["machineType"] = options.MachineType;
 
         File.WriteAllText(paths.ConfigFile, JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
     }

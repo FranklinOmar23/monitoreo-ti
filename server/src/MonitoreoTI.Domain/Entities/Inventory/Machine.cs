@@ -18,6 +18,9 @@ public class Machine : ITenantEntity
     public Guid QrCode { get; set; }
     public string Name { get; set; } = string.Empty;
     public MachineType Type { get; set; } = MachineType.Desktop;
+
+    /// <summary>El tipo lo eligió una persona en el panel: el inventario del agente ya no lo cambia (decisión 82).</summary>
+    public bool TypeLocked { get; set; }
     public string? Brand { get; set; }
     public string? Model { get; set; }
     public string? SerialNumber { get; set; }

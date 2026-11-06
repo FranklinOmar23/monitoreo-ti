@@ -1,4 +1,5 @@
 /** Usuarios (W-36, W-37), roles y permisos (W-38) y Mi perfil (W-41). */
+import type { ListParams, Paged } from './paging';
 
 export interface BranchRef {
   id: number;
@@ -85,7 +86,7 @@ export interface OpenSessionItem {
 }
 
 export interface UsersApi {
-  list(): Promise<UserItem[]>;
+  list(params?: ListParams): Promise<Paged<UserItem>>;
   /** enlace es null si el correo ya tenía cuenta en otra empresa (entra con su contraseña de siempre). */
   create(input: UserInput): Promise<{ id: number; enlace: PasswordLink | null }>;
   update(id: number, input: UserInput): Promise<{ id: number }>;
@@ -100,7 +101,7 @@ export interface UsersApi {
   rename(nombre: string): Promise<{ id: number }>;
   /** Cierra las demás sesiones; la actual sigue abierta. */
   changePassword(contrasenaActual: string, nuevaContrasena: string): Promise<{ id: number }>;
-  sessions(): Promise<OpenSessionItem[]>;
+  sessions(params?: ListParams): Promise<Paged<OpenSessionItem>>;
   closeSession(id: number): Promise<{ id: number }>;
   closeOtherSessions(): Promise<{ cerradas: number }>;
 }
@@ -110,7 +111,7 @@ export function createUsersApi(
   send: <T>(method: string, path: string, body?: unknown) => Promise<T>,
 ): UsersApi {
   return {
-    list: () => get('/usuarios'),
+    list: (params = {}) => get('/usuarios', { ...params }),
     create: (input) => send('POST', '/usuarios', input),
     update: (id, input) => send('PUT', `/usuarios/${id}`, input),
     setActive: (id, activo) => send('POST', `/usuarios/${id}/${activo ? 'activar' : 'desactivar'}`),
@@ -124,7 +125,7 @@ export function createUsersApi(
     rename: (nombre) => send('PUT', '/auth/perfil', { nombre }),
     changePassword: (contrasenaActual, nuevaContrasena) =>
       send('POST', '/auth/contrasena', { contrasenaActual, nuevaContrasena }),
-    sessions: () => get('/auth/sesiones'),
+    sessions: (params = {}) => get('/auth/sesiones', { ...params }),
     closeSession: (id) => send('DELETE', `/auth/sesiones/${id}`),
     closeOtherSessions: () => send('POST', '/auth/sesiones/cerrar-otras'),
   };

@@ -55,6 +55,7 @@ export function RedPage({
         canEdit={canEdit}
         onBack={() => setDeviceId(null)}
         onOpenEquipo={onOpenEquipo}
+        onOpenDevice={setDeviceId}
       />
     );
 

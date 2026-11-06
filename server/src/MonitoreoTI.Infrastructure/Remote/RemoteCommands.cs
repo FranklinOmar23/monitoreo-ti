@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Application.Remote;
 using MonitoreoTI.Domain.Entities.Support;
@@ -190,7 +190,7 @@ public sealed class RemoteCommands(
             .GroupBy(c => c.BatchId)
             .Select(g => new { BatchId = g.Key!.Value, CreatedAt = g.Max(c => c.CreatedAt) })
             .OrderByDescending(g => g.CreatedAt)
-            .Take(50)
+            .Take(500)
             .ToListAsync(ct);
         var ids = batches.Select(b => (Guid?)b.BatchId).ToList();
         var rows = await visible.Where(c => ids.Contains(c.BatchId))

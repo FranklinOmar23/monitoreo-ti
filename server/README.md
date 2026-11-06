@@ -25,6 +25,7 @@ También se aceptan las variables de entorno `ConnectionStrings__MonitoreoTI` y 
 dotnet build
 dotnet test                                   # recrea la base MonitoreoTI_Tests desde ../database
 dotnet run --project src/MonitoreoTI.Api      # http://localhost:5126/health
+dotnet watch --project src/MonitoreoTI.Api --launch-profile http --no-hot-reload   # se reinicia sola al guardar (o `npm run dev:api` en la raíz)
 ```
 
 Sin `ConnectionStrings:TestServer` las pruebas que necesitan SQL Server se omiten.

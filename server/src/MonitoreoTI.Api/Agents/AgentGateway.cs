@@ -1,4 +1,4 @@
-using System.Net.WebSockets;
+﻿using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Primitives;
 using MonitoreoTI.Api.Remote;
@@ -42,6 +42,7 @@ public sealed class AgentGateway(
     AgentCommands commands,
     CommandDispatcher dispatcher,
     AgentUpdater updater,
+    BackupAgentLink backups,
     AgentGatewayOptions options,
     ILogger<AgentGateway> logger)
 {
@@ -117,6 +118,8 @@ public sealed class AgentGateway(
                 llave_empresa = await commands.PublicKeyAsync(identity.CompanyId, aborted),
             },
             aborted);
+        // Servidor con respaldos (decisión 82): sus trabajos firmados (el agente los programa aunque luego pierda la red).
+        await backups.SendConfigAsync(connection, aborted);
         // Lo que se pidió mientras estaba desconectado.
         await dispatcher.SendPendingAsync(connection, null, aborted);
         // Si está atrasado y su empresa actualiza sola, se le ofrece la versión publicada.
@@ -240,7 +243,13 @@ public sealed class AgentGateway(
             credencial = d.Credencial,
             version = d.Version,
             origen = d.Origen,
-            api = d.Api is null ? null : new { url = d.Api.Url, token = d.Api.Token, aceptar_certificado = d.Api.AceptarCertificado },
+            api = d.Api is null ? null : new
+            {
+                url = d.Api.Url,
+                token = d.Api.Token,
+                aceptar_certificado = d.Api.AceptarCertificado,
+                switches = (d.Api.Switches ?? []).Select(s => new { id = s.Id, serie = s.Serie }),
+            },
         }),
     };
 

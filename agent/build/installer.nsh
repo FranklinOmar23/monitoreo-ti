@@ -1,13 +1,20 @@
 ; Instalador del agente MonitoreoTI (NSIS, incluido por electron-builder).
 ;
 ; Interactivo: pide la dirección del servidor y el token de instalación de la sucursal.
-; Silencioso:  MonitoreoTI-Agente-Setup.exe /S /SERVER=https://servidor /TOKEN=<token>
+; Silencioso:  MonitoreoTI-Agente-Setup.exe /S /SERVER=https://servidor /TOKEN=<token> [/TIPO=servidor]
+;
+; /TIPO=servidor marca el equipo como servidor (habilita los respaldos, decisión 82). Sin él, el agente lo detecta solo
+; (las ediciones Windows Server quedan como servidor).
 ;
 ; Servidor con certificado propio (por ejemplo, en la red local): copie MonitoreoTI-CA.pem junto al instalador y el
 ; agente confiará en ese certificado (queda en la carpeta de datos como ca-confianza.pem).
 ;
 ; Copia los archivos y deja el resto al anfitrión del servicio (resources\host\MonitoreoTI.AgentHost.exe):
 ; crea el servicio de Windows, protege la carpeta de datos y escribe config.json.
+;
+; Un solo instalador para todos los Windows (decisión 84): en Windows 7, 8 y 8.1 (compilación anterior a 10240), donde
+; no corren Electron ni .NET 8, instala el agente clásico (resources\host\MonitoreoTI.AgenteClasico.exe, .NET Framework
+; 4.5.2) con las mismas capacidades remotas. Mismo servicio (MonitoreoTIAgent) y misma carpeta de datos.
 
 !include MUI2.nsh
 !include nsDialogs.nsh
@@ -17,12 +24,26 @@
 
 !define AGENT_SERVICE "MonitoreoTIAgent"
 !define AGENT_HOST "$INSTDIR\resources\host\MonitoreoTI.AgentHost.exe"
+!define AGENT_CLASSIC "$INSTDIR\resources\host\MonitoreoTI.AgenteClasico.exe"
+
+; $R9 = 1 si este Windows necesita el agente clásico (anterior a Windows 10).
+!macro _DetectClassic
+  StrCpy $R9 0
+  ReadRegStr $R8 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentBuildNumber"
+  ${If} $R8 != ""
+  ${AndIf} $R8 < 10240
+    StrCpy $R9 1
+  ${EndIf}
+!macroend
+!define DetectClassic "!insertmacro _DetectClassic"
 
 !ifndef BUILD_UNINSTALLER
   Var AgentServer
   Var AgentToken
   Var AgentServerField
   Var AgentTokenField
+  Var AgentType
+  Var AgentTypeField
 !endif
 
 ; Antes de copiar o borrar archivos: detener el servicio y cerrar el agente (corre como SYSTEM, el
@@ -42,6 +63,8 @@
   ${GetOptions} $R0 "/SERVER=" $AgentServer
   ClearErrors
   ${GetOptions} $R0 "/TOKEN=" $AgentToken
+  ClearErrors
+  ${GetOptions} $R0 "/TIPO=" $AgentType
   ClearErrors
 !macroend
 
@@ -85,9 +108,11 @@ FunctionEnd
 Function AgentConfigPage
   ; En una actualización ya hay configuración: no se vuelve a pedir.
   ReadEnvStr $1 "PROGRAMDATA"
-  ${If} ${FileExists} "$1\MonitoreoTI\Agent\config.json"
-  ${AndIf} $AgentToken == ""
-    Abort
+  ${If} $AgentToken == ""
+    ${If} ${FileExists} "$1\MonitoreoTI\Agent\config.json"
+    ${OrIf} ${FileExists} "$1\MonitoreoTI\Agent\agente-clasico.json"
+      Abort
+    ${EndIf}
   ${EndIf}
 
   !insertmacro MUI_HEADER_TEXT "Conexión con el servidor" "Datos que le dio el administrador de MonitoreoTI."
@@ -102,13 +127,25 @@ Function AgentConfigPage
   ${NSD_CreateText} 0 54u 100% 13u "$AgentToken"
   Pop $AgentTokenField
 
-  ${NSD_CreateLabel} 0 80u 100% 36u "El token se genera en el panel, en Instaladores. Solo se usa para registrar este equipo la primera vez."
+  ${NSD_CreateLabel} 0 80u 100% 24u "El token se genera en el panel, en Instaladores. Solo se usa para registrar este equipo la primera vez."
+
+  ${NSD_CreateCheckbox} 0 108u 100% 12u "Este equipo es un servidor (habilita los respaldos)"
+  Pop $AgentTypeField
+  ${If} $AgentType == "servidor"
+    ${NSD_Check} $AgentTypeField
+  ${EndIf}
   nsDialogs::Show
 FunctionEnd
 
 Function AgentConfigLeave
   ${NSD_GetText} $AgentServerField $AgentServer
   ${NSD_GetText} $AgentTokenField $AgentToken
+  ${NSD_GetState} $AgentTypeField $1
+  ${If} $1 == ${BST_CHECKED}
+    StrCpy $AgentType "servidor"
+  ${ElseIf} $AgentType == "servidor"
+    StrCpy $AgentType ""
+  ${EndIf}
 
   ; Si se pegó el comando completo ("... /SERVER=... /TOKEN=...") en cualquiera de los campos, se toman de ahí.
   ${GetOptions} "$AgentServer $AgentToken" "/SERVER=" $1
@@ -156,12 +193,64 @@ FunctionEnd
 
 
 !macro customInstall
+  ${DetectClassic}
+  ${If} $R9 == 1
+    !insertmacro InstallClassic
+  ${Else}
+    !insertmacro InstallHost
+  ${EndIf}
+!macroend
+
+; Windows 7 / 8 / 8.1: el agente clásico se registra, se copia a %ProgramFiles%\MonitoreoTI\AgenteClasico y crea el servicio.
+!macro InstallClassic
+  DetailPrint "Windows anterior a 10: se instala el agente clásico…"
+  ; .NET Framework 4.5.2 o posterior (Release 379893).
+  ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" "Release"
+  ${If} $0 == ""
+  ${OrIf} $0 < 379893
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "Este equipo necesita .NET Framework 4.5.2 o posterior (se recomienda 4.8) para el agente de MonitoreoTI.$\r$\n$\r$\nInstálelo desde Windows Update o el sitio de Microsoft y vuelva a ejecutar este instalador."
+    ${EndIf}
+    SetErrorLevel 3
+    Abort
+  ${EndIf}
+  ; El clásico toma la autoridad propia de su misma carpeta.
+  ${If} ${FileExists} "$EXEDIR\MonitoreoTI-CA.pem"
+    CopyFiles /SILENT "$EXEDIR\MonitoreoTI-CA.pem" "$INSTDIR\resources\host\MonitoreoTI-CA.pem"
+  ${EndIf}
+  StrCpy $3 ""
+  ${If} $AgentType == "servidor"
+    StrCpy $3 " /TIPO=servidor"
+  ${EndIf}
+  ${If} $AgentToken == ""
+    ; Actualización: conserva el registro del equipo y reemplaza el programa.
+    nsExec::ExecToStack '"${AGENT_CLASSIC}" instalar'
+  ${Else}
+    nsExec::ExecToStack '"${AGENT_CLASSIC}" instalar "/SERVER=$AgentServer" "/TOKEN=$AgentToken"$3'
+  ${EndIf}
+  Pop $0
+  Pop $1
+  DetailPrint $1
+  ${If} $0 != 0
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "No se pudo instalar el agente clásico (código $0).$\r$\n$\r$\n$1$\r$\nDetalle en C:\ProgramData\MonitoreoTI\Agent\agente-clasico.log"
+    ${EndIf}
+    SetErrorLevel $0
+    Abort
+  ${EndIf}
+!macroend
+
+!macro InstallHost
   DetailPrint "Registrando el servicio del agente…"
+  StrCpy $3 ""
+  ${If} $AgentType == "servidor"
+    StrCpy $3 ' --tipo servidor'
+  ${EndIf}
   ${If} $AgentToken == ""
     ; Actualización: el anfitrión conserva la configuración existente.
-    nsExec::ExecToStack '"${AGENT_HOST}" install --server "$AgentServer" --app "$INSTDIR"'
+    nsExec::ExecToStack '"${AGENT_HOST}" install --server "$AgentServer" --app "$INSTDIR"$3'
   ${Else}
-    nsExec::ExecToStack '"${AGENT_HOST}" install --server "$AgentServer" --token "$AgentToken" --app "$INSTDIR"'
+    nsExec::ExecToStack '"${AGENT_HOST}" install --server "$AgentServer" --token "$AgentToken" --app "$INSTDIR"$3'
   ${EndIf}
   Pop $0 ; código de salida
   Pop $1 ; lo que explicó el anfitrión
@@ -188,8 +277,16 @@ FunctionEnd
 !endif
 
 !macro customUnInstall
+  ${DetectClassic}
+  ${If} $R9 == 1
+    ; Agente clásico: misma regla, en una actualización se conserva el registro del equipo.
+    ${If} ${isUpdated}
+      nsExec::ExecToLog '"${AGENT_CLASSIC}" desinstalar /CONSERVAR'
+    ${Else}
+      nsExec::ExecToLog '"${AGENT_CLASSIC}" desinstalar'
+    ${EndIf}
   ; En una actualización solo se quita el servicio: la credencial y la cola local se conservan.
-  ${If} ${isUpdated}
+  ${ElseIf} ${isUpdated}
     nsExec::ExecToLog '"${AGENT_HOST}" uninstall --keep-data --app "$INSTDIR"'
   ${Else}
     nsExec::ExecToLog '"${AGENT_HOST}" uninstall --app "$INSTDIR"'

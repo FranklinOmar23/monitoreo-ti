@@ -1923,18 +1923,38 @@ body {
 }
 
 .topology-canvas {
-  overflow: auto;
-  max-height: 72vh;
+  position: relative;
+  overflow: hidden;
   margin: -16px -16px 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   background-color: var(--color-surface-sunken);
   background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
   background-size: 16px 16px;
 }
 
-.topology-canvas[data-fit] svg {
+.topology-canvas[data-dragging] {
+  cursor: grabbing;
+}
+
+.topology-canvas svg {
   display: block;
-  min-width: 720px;
-  height: auto;
+}
+
+/* Controles de zoom flotando sobre el mapa. */
+.topology-zoom {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  display: flex;
+  gap: 4px;
+}
+
+.topology-zoom .btn {
+  min-width: 32px;
+  background: var(--color-surface-raised);
 }
 
 .topology-canvas svg {
@@ -2233,4 +2253,379 @@ body {
 .install-table td {
   vertical-align: top;
   font-size: 12.5px;
+}
+
+/* ---------- Topología: tarjetas, ruta resaltada (decisión 81) ---------- */
+
+.topology-stripe {
+  fill: var(--color-border-strong);
+}
+
+.topology-node[data-status='en_linea'] .topology-stripe {
+  fill: var(--st-sano);
+}
+
+.topology-node[data-status='advertencia'] .topology-stripe {
+  fill: var(--st-advertencia);
+}
+
+.topology-node[data-status='critico'] .topology-stripe,
+.topology-node[data-status='sin_respuesta'] .topology-stripe {
+  fill: var(--st-critico);
+}
+
+.topology-node,
+.topology-endpoint,
+.topology-more,
+.topology-link,
+.topology-bus {
+  transition: opacity 160ms ease;
+}
+
+/* Con algo elegido, lo que no está en su ruta se atenúa. */
+svg[data-focus] .topology-node:not([data-path]),
+svg[data-focus] .topology-endpoint:not([data-path]),
+svg[data-focus] .topology-more,
+svg[data-focus] .topology-link:not([data-path]),
+svg[data-focus] .topology-bus:not([data-path]) {
+  opacity: 0.28;
+}
+
+.topology-node[data-path] rect:first-of-type {
+  stroke: var(--color-primary);
+  stroke-width: 1.5;
+}
+
+.topology-link[data-path] path:first-of-type {
+  stroke: var(--color-primary);
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+
+.topology-flow {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 8;
+  stroke-linecap: round;
+  animation: topology-flow 900ms linear infinite;
+}
+
+@keyframes topology-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topology-flow {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+.topology-route {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-sunken);
+  font-size: 12px;
+  list-style: none;
+}
+
+.topology-route li {
+  position: relative;
+  padding: 3px 0 3px 16px;
+}
+
+.topology-route li::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+.topology-route li + li::after {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 5px;
+  height: 14px;
+  border-left: 1.5px solid var(--color-primary);
+}
+
+/* ---------- Respaldos de servidores (decisión 82) ---------- */
+
+.backups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.backup-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.backup-kpi-text {
+  font-size: 18px;
+}
+
+.backup-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 10px 14px;
+  border: 1px solid var(--st-critico);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--color-surface-muted);
+  font-size: 13px;
+}
+
+.backup-strip[data-level='advertencia'] {
+  border-color: var(--st-advertencia);
+}
+
+.backup-jobs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backup-job {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.backup-job:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.backup-job[data-active='false'] .backup-job-main {
+  opacity: 0.6;
+}
+
+.backup-job-main {
+  min-width: 0;
+  flex: 1 1 360px;
+}
+
+.backup-job-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.backup-job-line {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.backup-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.backup-delete {
+  color: var(--st-critico);
+}
+
+.backup-status {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.backup-status[data-status='correcto'] {
+  border-color: var(--st-sano);
+  color: var(--st-sano);
+}
+
+.backup-status[data-status='advertencia'] {
+  border-color: var(--st-advertencia);
+  color: var(--st-advertencia);
+}
+
+.backup-status[data-status='error'] {
+  border-color: var(--st-critico);
+  color: var(--st-critico);
+}
+
+.backup-status[data-status='en_curso'] {
+  border-color: var(--st-info);
+  color: var(--st-info);
+}
+
+.backup-runs td {
+  vertical-align: top;
+  font-size: 12.5px;
+}
+
+.backup-detail {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.backup-set {
+  display: block;
+  font-size: 11px;
+}
+
+.backup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.backup-section > legend {
+  padding: 0 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.backup-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.backup-choice label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.backup-choice label:has(input:checked) {
+  border-color: var(--color-primary);
+  background: var(--color-surface-muted);
+}
+
+.backup-checklist {
+  max-height: 200px;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  list-style: none;
+}
+
+.backup-checklist label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.backup-checklist label .muted {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+.backup-services {
+  max-height: 240px;
+}
+
+.backup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.backup-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+}
+
+.backup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.backup-grid .form-span {
+  grid-column: 1 / -1;
+}
+
+.backup-inline {
+  max-width: 260px;
+}
+
+.backup-help {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* ---------- Paginación y «Más filtros» (decisión 83) ---------- */
+
+.pager {
+  flex-wrap: wrap;
+}
+
+.pager-page {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.more-filters {
+  display: contents;
+}
+
+.more-filters-panel {
+  display: grid;
+  flex-basis: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px 12px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-muted);
+}
+
+.more-filters-panel .field {
+  margin: 0;
+}
+
+.more-filters-wide {
+  grid-column: 1 / -1;
+  justify-self: start;
 }

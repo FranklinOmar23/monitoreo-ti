@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../../data/usePaged';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
@@ -25,7 +27,7 @@ export function NetworkSummaryView({
 }) {
   const api = usePanelApi();
   const summary = useQuery({ queryKey: ['red', 'resumen'], queryFn: () => api.red.summary() });
-  const alerts = useQuery({ queryKey: ['alertas', 'red'], queryFn: () => api.alerts({ red: true, tamano: 8 }) });
+  const alerts = useQuery({ queryKey: ['alertas', 'red'], queryFn: () => api.alerts({ red: true, limit: 8 }) });
 
   if (summary.isPending) return <Loading variant="dashboard" />;
   if (summary.isError) return <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />;
@@ -102,11 +104,11 @@ export function NetworkSummaryView({
             <Loading variant="table" columns={5} />
           ) : alerts.isError ? (
             <ErrorState error={alerts.error} onRetry={() => void alerts.refetch()} />
-          ) : alerts.data.page.items.length === 0 ? (
+          ) : alerts.data.data.data.length === 0 ? (
             <EmptyState title="Sin alertas de red abiertas." />
           ) : (
             <ul className="net-alerts">
-              {alerts.data.page.items.map((a) => (
+              {alerts.data.data.data.map((a) => (
                 <li key={a.id} data-level={a.level}>
                   <button type="button" className="link-quiet" onClick={() => onOpenAlerta?.(a.id)}>
                     {a.message}
@@ -127,11 +129,11 @@ export function NetworkSummaryView({
 /** W-53 Equipos desconocidos: MAC vistas en puertos de acceso sin equipo registrado. */
 export function UnknownList({ onOpenDevice }: Pick<Navigation, 'onOpenDevice'>) {
   const api = usePanelApi();
-  const list = useQuery({ queryKey: ['red', 'desconocidos'], queryFn: () => api.red.unknown() });
+  const { query: list, data: page, items, setPage } = usePaged(['red', 'desconocidos'], (p) => api.red.unknown(p));
 
   if (list.isPending) return <Loading variant="table" columns={5} />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
-  if (list.data.length === 0)
+  if (items.length === 0)
     return (
       <EmptyState title="Sin equipos desconocidos">
         Todo lo que ven los switches en sus puertos de acceso es un equipo registrado.
@@ -152,7 +154,7 @@ export function UnknownList({ onOpenDevice }: Pick<Navigation, 'onOpenDevice'>) 
           </tr>
         </thead>
         <tbody>
-          {list.data.map((u) => (
+          {items.map((u) => (
             <tr key={`${u.portId}-${u.mac}`}>
               <td className="mono">
                 {u.isRandom ? (
@@ -181,6 +183,7 @@ export function UnknownList({ onOpenDevice }: Pick<Navigation, 'onOpenDevice'>) 
           ))}
         </tbody>
       </table>
+      <Pager data={page} noun="equipos desconocidos" onPage={setPage} />
     </div>
   );
 }
@@ -190,11 +193,11 @@ const DIFFERENCE_ICON = { enlace_sin_cable: 'plug', cable_distinto: 'network', e
 /** W-66 Diferencias entre lo detectado por SNMP y lo documentado. */
 export function DifferencesList({ onOpenDevice, onOpenEquipo }: Navigation) {
   const api = usePanelApi();
-  const list = useQuery({ queryKey: ['red', 'diferencias'], queryFn: () => api.red.differences() });
+  const { query: list, data: page, items, setPage } = usePaged(['red', 'diferencias'], (p) => api.red.differences(p));
 
   if (list.isPending) return <Loading variant="table" columns={5} />;
   if (list.isError) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
-  if (list.data.length === 0)
+  if (items.length === 0)
     return (
       <EmptyState title="Sin diferencias">
         Lo que detectan los switches coincide con el cableado documentado.
@@ -202,8 +205,9 @@ export function DifferencesList({ onOpenDevice, onOpenEquipo }: Navigation) {
     );
 
   return (
+    <>
     <ul className="difference-list">
-      {list.data.map((d, i) => (
+      {items.map((d, i) => (
         <li key={i} className="card">
           <Icon name={DIFFERENCE_ICON[d.kind]} />
           <div>
@@ -225,6 +229,8 @@ export function DifferencesList({ onOpenDevice, onOpenEquipo }: Navigation) {
         </li>
       ))}
     </ul>
+    <Pager data={page} noun="diferencias" onPage={setPage} />
+    </>
   );
 }
 

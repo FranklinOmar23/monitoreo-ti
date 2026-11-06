@@ -14,8 +14,9 @@ import type { CommandExecutor } from './executor';
 import type { RemoteSessions } from './remote-sessions';
 import type { AgentUpdater } from './updater';
 import type { RemoteInstaller } from './remote-install';
+import type { BackupScheduler } from './backups';
 import { IpSweeper, type HostSweep } from './ipsweep';
-import { fortiHttpGet, testFortiApi, type FortiHttp } from './fortigate';
+import { fortiHttpGet, readFortiSwitches, testFortiApi, type FortiHttp } from './fortigate';
 import { openApiToken, parseCollectorConfig, SnmpPoller, type SnmpQuery } from './snmp';
 
 export type Log = (level: 'info' | 'error', message: string, extra?: Record<string, unknown>) => void;
@@ -77,6 +78,8 @@ export interface RuntimeOptions {
   updater?: AgentUpdater;
   /** Instalación remota del agente en otros equipos (decisión 77). */
   remoteInstaller?: RemoteInstaller;
+  /** Respaldos de servidores (decisión 82). */
+  backups?: BackupScheduler;
   /** La bienvenida trae la llave de la empresa: se guarda si el agente aún no la tenía. */
   onCompanyKey?: (publicKey: string) => void;
   log: Log;
@@ -163,6 +166,7 @@ export class AgentRuntime {
       });
     }
 
+    this.options.backups?.start();
     this.gateway.start();
   }
 
@@ -174,6 +178,7 @@ export class AgentRuntime {
     }
     this.timers.clear();
     this.snmp?.stop();
+    this.options.backups?.stop();
     this.options.sessions?.closeAll();
     this.gateway.stop();
   }
@@ -199,6 +204,8 @@ export class AgentRuntime {
         this.options.log('error', 'Sondeo pedido de un dispositivo que este recolector no tiene', { dispositivo: id });
     } else if (message.tipo === 'probar_api' && this.options.snmp) {
       void this.guarded(() => this.testApi(message.datos), 'prueba de API');
+    } else if (message.tipo === 'detectar_switches' && this.options.snmp) {
+      void this.guarded(() => this.detectSwitches(message.datos), 'detección de FortiSwitch');
     } else if (message.tipo === 'barrido_ip' && this.ipSweeper) {
       void this.guarded(() => this.ipSweeper!.handle(message.datos), 'barrido de IP');
     } else if (message.tipo === 'instalar_agente' && this.options.remoteInstaller) {
@@ -210,12 +217,54 @@ export class AgentRuntime {
     } else if (message.tipo === 'cerrar_sesion_remota') {
       const id = (message.datos as { sesion_id?: unknown } | null)?.sesion_id;
       if (typeof id === 'number') this.options.sessions?.close(id);
+    } else if (message.tipo === 'respaldos_config' && this.options.backups) {
+      this.options.backups.configure(message.datos);
+    } else if (message.tipo === 'respaldo_ahora' && this.options.backups) {
+      this.options.backups.runNow(message.datos);
+    } else if (message.tipo === 'respaldo_explorar' && this.options.backups) {
+      void this.guarded(() => this.options.backups!.explore(message.datos), 'exploración de respaldos');
+    } else if (message.tipo === 'respaldo_probar' && this.options.backups) {
+      void this.guarded(() => this.options.backups!.test(message.datos), 'prueba del destino de respaldo');
     } else if (message.tipo === 'ejecutar_comando' && this.executor) {
       void this.guarded(() => this.executor!.handle(message.datos), 'comando');
     }
   }
 
   /** "Probar API" desde el panel: system/status del FortiGate con el token que mandó el servidor (sellado). */
+  /** "Detectar" FortiSwitch desde el panel (decisión 80): el resumen de cada switch y los campos que dio la API. */
+  private async detectSwitches(datos: unknown): Promise<void> {
+    const v = (datos ?? {}) as Record<string, unknown>;
+    const id = v['solicitud_id'];
+    if (typeof id !== 'string' || typeof v['url'] !== 'string' || typeof v['token'] !== 'string') return;
+    let reply: Record<string, unknown>;
+    try {
+      const token = openApiToken(this.options.snmp!.credential, v['token']);
+      const read = await readFortiSwitches(this.options.snmp!.fortiHttp ?? fortiHttpGet, {
+        url: v['url'],
+        token,
+        acceptSelfSigned: v['aceptar_certificado'] !== false,
+      });
+      reply = {
+        ok: read.ok,
+        error: read.error ?? null,
+        campos: read.campos,
+        switches: read.switches.map((s) => ({
+          serie: s.serie,
+          nombre: s.nombre,
+          modelo: s.modelo ?? null,
+          ip: s.ip ?? null,
+          conectado: s.conectado,
+          puertos: s.puertos.length,
+          firmware: s.firmware ?? null,
+        })),
+      };
+    } catch {
+      reply = { ok: false, error: 'No se pudo abrir el token de la API.', switches: [], campos: [] };
+    }
+    this.options.log('info', 'Detección de FortiSwitch', { url: v['url'], ok: reply['ok'], error: reply['error'] });
+    this.submit(createEnvelope('switches_detectados', { solicitudId: id, ...reply }));
+  }
+
   private async testApi(datos: unknown): Promise<void> {
     const v = (datos ?? {}) as Record<string, unknown>;
     const id = v['solicitud_id'];

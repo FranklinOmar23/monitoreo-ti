@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Network;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Domain.Entities.Network;
@@ -215,7 +215,10 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
             d.RackPositionU, d.HeightUnits, d.ManagementIp, d.Firmware, Text(d.Status), d.LastPolledAt,
             d.SnmpUser, d.SnmpEncryptedCredential is not null, d.QrCode, d.CreatedAt, items,
             d.CollectorAgentId, row.Collector, d.LastError,
-            d.ApiUrl, d.ApiEncryptedToken is not null, d.ApiAcceptSelfSigned, d.ApiLastOkAt, d.ApiLastError);
+            d.ApiUrl, d.ApiEncryptedToken is not null, d.ApiAcceptSelfSigned, d.ApiLastOkAt, d.ApiLastError,
+            d.FortiGateId,
+            d.FortiGateId is int fortigateId ? await db.NetworkDevices.Where(f => f.Id == fortigateId).Select(f => f.Name).FirstOrDefaultAsync(ct) : null,
+            d.SerialNumber);
     }
 
     /// <summary>"SW-ACC-02 Gi1/0/12" para cada puerto visible.</summary>
@@ -309,13 +312,16 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
                 || (l.Entity == "cableado" && cables.Contains(l.EntityId!)));
         }
 
-        var page = Math.Max(1, filter.Page);
-        var pageSize = Math.Clamp(filter.PageSize, 1, 200);
-        var total = await logs.CountAsync(ct);
-        var rows = await logs.OrderByDescending(l => l.Timestamp).ThenByDescending(l => l.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize)
+        var (from, to) = Paging.DateRange(filter.From, filter.To);
+        if (from is not null)
+            logs = logs.Where(l => l.Timestamp >= from);
+        if (to is not null)
+            logs = logs.Where(l => l.Timestamp < to);
+        var (page, limit) = Paging.Normalize(filter.Page, filter.Limit);
+        var paged = await logs.OrderByDescending(l => l.Timestamp).ThenByDescending(l => l.Id)
             .Select(l => new { Log = l, User = db.Users.Where(u => u.Id == l.UserId).Select(u => u.Name).FirstOrDefault() })
-            .ToListAsync(ct);
+            .ToPageAsync(page, limit, ct);
+        var rows = paged.Data;
 
         // Nombres actuales de lo referido; lo eliminado se muestra con el nombre guardado en la auditoría.
         var branches = await db.Branches.AsNoTracking().ToDictionaryAsync(b => b.Id.ToString(), b => b.Name, ct);
@@ -346,11 +352,10 @@ public sealed class NetworkQueries(MonitoreoDbContext db, ICurrentUser user)
             _ => null,
         };
 
-        var items = rows.Select(r => new HistoryItem(
+        return paged.Map(r => new HistoryItem(
             r.Log.Id, r.Log.Timestamp, r.Log.Action, HistoryText.Title(r.Log.Action), r.Log.Entity, r.Log.EntityId,
             Current(r.Log.Entity, r.Log.EntityId) ?? HistoryText.Subject(r.Log.Details), r.User,
-            HistoryText.Changes(r.Log.Details, Resolve))).ToList();
-        return new PagedResult<HistoryItem>(items, total, page, pageSize);
+            HistoryText.Changes(r.Log.Details, Resolve)));
     }
 
     /// <summary>Ruta completa desde una roseta o un puerto (W-65). null si el origen no existe o no es visible.</summary>

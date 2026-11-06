@@ -1,4 +1,4 @@
-using MonitoreoTI.AgentHost;
+﻿using MonitoreoTI.AgentHost;
 
 // Uso:
 //   MonitoreoTI.AgentHost.exe run                                   (lo ejecuta Windows como servicio; en consola sirve para depurar)
@@ -11,6 +11,8 @@ using MonitoreoTI.AgentHost;
 //   MonitoreoTI.AgentHost.exe escritorio                            (escritorio remoto: abre el asistente en la sesión del usuario)
 //   MonitoreoTI.AgentHost.exe asistente                             (asistente de sesión; lo abre "escritorio")
 //   MonitoreoTI.AgentHost.exe prueba-pantalla [--archivo x.h264]    (soporte: ¿este equipo puede usar la pantalla V2?)
+//   MonitoreoTI.AgentHost.exe respaldo                              (respaldo de un servidor: trabajo JSON por stdin; ver BackupRunner)
+//   MonitoreoTI.AgentHost.exe respaldo-explorar | respaldo-discos | respaldo-probar   (para configurar respaldos; ver BackupTools)
 
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "run";
 var options = CommandOptions.Parse(args.Skip(1).ToArray());
@@ -28,6 +30,14 @@ switch (command)
         return await IpSweep.RunAsync(Console.In, Console.Out);
     case "instalar-remoto":
         return await RemoteInstaller.RunAsync(Console.In, Console.Out);
+    case "respaldo":
+        return await MonitoreoTI.AgentHost.Backup.BackupRunner.RunAsync(Console.In, Console.Out);
+    case "respaldo-explorar":
+        return await MonitoreoTI.AgentHost.Backup.BackupTools.ExploreAsync(Console.Out);
+    case "respaldo-discos":
+        return MonitoreoTI.AgentHost.Backup.BackupTools.ListDisks(Console.Out);
+    case "respaldo-probar":
+        return await MonitoreoTI.AgentHost.Backup.BackupTools.TestAsync(Console.In, Console.Out);
     case "pty":
         return await PtyHost.RunAsync(args);
     case "escritorio":

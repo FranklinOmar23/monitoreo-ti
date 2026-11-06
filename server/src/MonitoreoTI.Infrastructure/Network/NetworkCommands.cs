@@ -498,6 +498,123 @@ public sealed class NetworkCommands(
         return (null, result);
     }
 
+    // ------------------------------------------------------------------ FortiSwitch (decisión 80)
+
+    /// <summary>
+    /// "Detectar" (red.editar): el recolector lee del FortiGate los FortiSwitch que administra. Dice cuáles ya están en
+    /// Centinela (por número de serie).
+    /// </summary>
+    public async Task<(CommandResult? Error, DetectSwitchesResult? Result)> DetectSwitchesAsync(int fortigateId, CancellationToken ct)
+    {
+        var fortigate = await (await queries.VisibleDevicesAsync(ct)).AsNoTracking().FirstOrDefaultAsync(d => d.Id == fortigateId, ct);
+        if (fortigate is null)
+            return (CommandResult.NotFound(), null);
+        if (fortigate.ApiUrl is null || fortigate.ApiEncryptedToken is null)
+            return (CommandResult.Invalid("Configure primero la API REST del FortiGate (dirección y token)."), null);
+        if (fortigate.CollectorAgentId is not int agentId)
+            return (CommandResult.Invalid("Asigne un recolector al FortiGate."), null);
+        var agent = await db.Agents.AsNoTracking().Where(a => a.Id == agentId)
+            .Select(a => new { a.Version, a.TokenHash, Name = db.Machines.Where(m => m.Id == a.MachineId).Select(m => m.Name).FirstOrDefault() })
+            .FirstOrDefaultAsync(ct);
+        if (agent is null)
+            return (CommandResult.Invalid("El recolector ya no existe."), null);
+        if (!FortiGateRules.SupportsSwitches(agent.Version))
+            return (CommandResult.Conflict(
+                $"El agente de {agent.Name ?? "el recolector"} es la versión {agent.Version ?? "?"}; leer los FortiSwitch necesita la {FortiGateRules.SwitchesVersion} o superior."), null);
+        var token = protector.Unprotect(Encoding.UTF8.GetString(fortigate.ApiEncryptedToken));
+        if (token is null)
+            return (CommandResult.Invalid("No se pudo abrir el token guardado: vuelva a pegarlo en Editar."), null);
+
+        var data = await apiTester.DetectSwitchesAsync(user.CompanyId, agentId, fortigate.ApiUrl,
+            SnmpCredentialSeal.Seal(agent.TokenHash, JsonSerializer.Serialize(new { token })), fortigate.ApiAcceptSelfSigned, ct);
+        if (data is null)
+            return (CommandResult.Conflict(agent.Name is { } name
+                ? $"El recolector {name} no está conectado o no respondió a tiempo."
+                : "El recolector no está conectado o no respondió a tiempo."), null);
+
+        var serials = (data.Switches ?? []).Select(s => s.Serie).ToList();
+        var known = await db.NetworkDevices.AsNoTracking()
+            .Where(d => d.SerialNumber != null && serials.Contains(d.SerialNumber) && d.Status != NetworkDeviceStatus.Retired)
+            .Select(d => new { d.Id, d.Name, d.SerialNumber })
+            .ToListAsync(ct);
+        var items = (data.Switches ?? []).Select(s =>
+        {
+            var device = known.FirstOrDefault(k => k.SerialNumber == s.Serie);
+            return new DetectedSwitchItem(s.Serie, s.Nombre, s.Modelo, s.Ip, s.Conectado, s.Puertos, s.Firmware, device?.Id, device?.Name);
+        }).ToList();
+        return (null, new DetectSwitchesResult(data.Ok, data.Error, items, data.Campos ?? []));
+    }
+
+    /// <summary>
+    /// Registra los FortiSwitch elegidos en la sucursal del FortiGate: el modelo se crea si no está en el catálogo, y
+    /// cada switch queda con sus puertos, su número de serie y "datos por el FortiGate". Enseguida se pide un sondeo.
+    /// </summary>
+    public async Task<CommandResult> RegisterSwitchesAsync(int fortigateId, RegisterSwitchesInput input, CancellationToken ct)
+    {
+        var fortigate = await (await queries.VisibleDevicesAsync(ct)).AsNoTracking().FirstOrDefaultAsync(d => d.Id == fortigateId, ct);
+        if (fortigate is null)
+            return CommandResult.NotFound();
+        if (fortigate.CollectorAgentId is null)
+            return CommandResult.Invalid("Asigne un recolector al FortiGate.");
+        var serials = input.Switches.Select(s => s.Serie.Trim()).ToList();
+        if (serials.Distinct(StringComparer.OrdinalIgnoreCase).Count() != serials.Count)
+            return CommandResult.Invalid("Hay un número de serie repetido.");
+        if (await db.NetworkDevices.Where(d => d.SerialNumber != null && serials.Contains(d.SerialNumber) && d.Status != NetworkDeviceStatus.Retired)
+                .Select(d => d.Name).FirstOrDefaultAsync(ct) is { } already)
+            return CommandResult.Conflict($"Ese switch ya está registrado como {already}.");
+        var names = input.Switches.Select(s => s.Nombre.Trim()).ToList();
+        if (await db.NetworkDevices.Where(d => names.Contains(d.Name)).Select(d => d.Name).FirstOrDefaultAsync(ct) is { } taken)
+            return CommandResult.Conflict($"Ya hay un dispositivo llamado {taken}.");
+
+        var created = new List<NetworkDevice>();
+        foreach (var item in input.Switches)
+        {
+            var modelName = Clean(item.Modelo) is { } m ? (m.StartsWith("FortiSwitch", StringComparison.OrdinalIgnoreCase) ? m : $"FortiSwitch {m}") : "FortiSwitch";
+            var model = await db.DeviceModels.FirstOrDefaultAsync(x => x.Brand == "Fortinet" && x.ModelName == modelName && x.PortCount == item.Puertos, ct)
+                ?? db.DeviceModels.Local.FirstOrDefault(x => x.Brand == "Fortinet" && x.ModelName == modelName && x.PortCount == item.Puertos);
+            if (model is null)
+            {
+                model = db.DeviceModels.Add(new DeviceModel
+                {
+                    Brand = "Fortinet",
+                    ModelName = modelName,
+                    Type = DeviceType.Switch,
+                    HeightUnits = 1,
+                    PortCount = item.Puertos,
+                    PortDescription = "RJ45",
+                    IsActiveDevice = true,
+                }).Entity;
+                await db.SaveChangesAsync(ct);
+            }
+            var device = new NetworkDevice
+            {
+                Name = item.Nombre.Trim(),
+                ModelId = model.Id,
+                Type = DeviceType.Switch,
+                HeightUnits = model.HeightUnits,
+                BranchId = fortigate.BranchId,
+                ManagementIp = Clean(item.Ip),
+                Status = NetworkDeviceStatus.NotResponding,
+                CollectorAgentId = fortigate.CollectorAgentId,
+                FortiGateId = fortigate.Id,
+                SerialNumber = item.Serie.Trim(),
+            };
+            foreach (var port in PortPlan.FromModel(model.PortCount, model.PortDescription, false))
+                device.Ports.Add(new Port { Number = port.Number, Name = port.Name, Type = Parse<PortType>(port.Type) });
+            db.NetworkDevices.Add(device);
+            created.Add(device);
+        }
+        await db.SaveChangesAsync(ct);
+        foreach (var device in created)
+            await audit.RecordAsync("dispositivo.crear", "dispositivos_red", device.Id.ToString(), null, DeviceSnapshot(device), ct);
+
+        // El recolector recibe la lista nueva y lee el FortiGate ahora mismo.
+        await CollectorsChangedAsync([fortigate.CollectorAgentId], ct);
+        var version = await db.Agents.AsNoTracking().Where(a => a.Id == fortigate.CollectorAgentId).Select(a => a.Version).FirstOrDefaultAsync(ct);
+        await collectors.PollNowAsync(user.CompanyId, fortigate.CollectorAgentId!.Value, fortigate.Id, SnmpRules.SupportsPollNow(version), ct);
+        return CommandResult.Ok(created[0].Id);
+    }
+
     /// <summary>Lo que se audita del dispositivo: nunca las claves SNMP, solo si hay credencial.</summary>
     private static object DeviceSnapshot(NetworkDevice d) => new
     {
@@ -513,6 +630,8 @@ public sealed class NetworkCommands(
         recolectorId = d.CollectorAgentId,
         apiUrl = d.ApiUrl,
         apiToken = d.ApiEncryptedToken is not null,
+        fortigateId = d.FortiGateId,
+        serie = d.SerialNumber,
     };
 
     // ------------------------------------------------------------------ puertos

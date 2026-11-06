@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Api.Panel;
 using MonitoreoTI.Application.Remote;
@@ -16,7 +16,9 @@ public static class RemoteEndpoints
     public static void MapRemoteEndpoints(this IEndpointRouteBuilder app)
     {
         var view = app.MapGroup("/api/v1/scripts").RequireAuthorization(PermissionPolicies.ScriptsView);
-        view.MapGet("/", async (RemoteCommands r, CancellationToken ct) => Results.Ok(await r.ScriptsAsync(ct)));
+        // Biblioteca paginada; los selectores (ejecutar, tareas) usan /opciones con todos.
+        view.MapGet("/", async (RemoteCommands r, HttpRequest request, CancellationToken ct) => MonitoreoTI.Api.Panel.ListPaging.Ok(await r.ScriptsAsync(ct), request));
+        view.MapGet("/opciones", async (RemoteCommands r, CancellationToken ct) => Results.Ok(await r.ScriptsAsync(ct)));
 
         var edit = app.MapGroup("/api/v1/scripts").RequireAuthorization(PermissionPolicies.ScriptsEdit);
         edit.MapPost("/", async (ScriptInput input, IValidator<ScriptInput> v, RemoteCommands r, CancellationToken ct) =>
@@ -26,8 +28,15 @@ public static class RemoteEndpoints
         edit.MapDelete("/{id:int}", async (int id, RemoteCommands r, CancellationToken ct) => ToResult(await r.DeleteScriptAsync(id, ct)));
 
         var sessions = app.MapGroup("/api/v1/sesiones-remotas").RequireAuthorization(PermissionPolicies.RemoteAny);
-        sessions.MapGet("/", async (RemoteSessions s, CancellationToken ct, int? maquina, int? pagina, int? tamano) =>
-            Results.Ok(await s.ListAsync(maquina, Math.Max(1, pagina ?? 1), Math.Clamp(tamano ?? 50, 1, 200), ct)));
+        // Historial de sesiones (decisión 83): 10 por página, filtros por campo y rango de fechas de inicio.
+        sessions.MapGet("/", async (RemoteSessions s, CancellationToken ct, int? maquina, int? usuario, string? tipo, bool? soloVer,
+            bool? activa, DateTime? fechaDesde, DateTime? fechaHasta, int? page, int? limit) =>
+        {
+            if (MonitoreoTI.Application.Panel.Paging.DateRangeError(fechaDesde, fechaHasta) is { } error)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["fechaHasta"] = [error] });
+            var (p, l) = MonitoreoTI.Application.Panel.Paging.Normalize(page, limit);
+            return Results.Ok(new { data = await s.ListAsync(new SessionFilter(maquina, usuario, tipo, soloVer, activa, fechaDesde, fechaHasta, p, l), ct) });
+        });
         sessions.MapPost("/", async (SessionInput input, IValidator<SessionInput> v, RemoteAccessGuard guard, RemoteSessions s, HttpContext http, CancellationToken ct) =>
         {
             if (await ValidateAsync(input, v, ct) is { } invalid)
@@ -55,7 +64,7 @@ public static class RemoteEndpoints
 
         // Tareas programadas (6.5): mismo permiso que ejecutar; guardar exige el módulo remoto y el 2FA reciente.
         var tasks = app.MapGroup("/api/v1/tareas-programadas").RequireAuthorization(PermissionPolicies.ScriptsRun);
-        tasks.MapGet("/", async (ScheduledTasks t, CancellationToken ct) => Results.Ok(await t.ListAsync(ct)));
+        tasks.MapGet("/", async (ScheduledTasks t, HttpRequest request, CancellationToken ct) => MonitoreoTI.Api.Panel.ListPaging.Ok(await t.ListAsync(ct), request));
         tasks.MapPost("/", async (ScheduledTaskInput input, IValidator<ScheduledTaskInput> v, RemoteAccessGuard guard, ScheduledTasks t, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? (await guard.CheckAsync(ct) is { } denial ? Denied(denial) : ToResult(await t.SaveAsync(null, input, ct), created: true)));
         tasks.MapPut("/{id:int}", async (int id, ScheduledTaskInput input, IValidator<ScheduledTaskInput> v, RemoteAccessGuard guard, ScheduledTasks t, CancellationToken ct) =>
@@ -82,7 +91,8 @@ public static class RemoteEndpoints
         });
 
         var run = app.MapGroup("/api/v1/ejecuciones").RequireAuthorization(PermissionPolicies.ScriptsRun);
-        run.MapGet("/", async (RemoteCommands r, CancellationToken ct, int? maquina) => Results.Ok(await r.RunsAsync(maquina, ct)));
+        run.MapGet("/", async (RemoteCommands r, HttpRequest request, CancellationToken ct, int? maquina) =>
+            MonitoreoTI.Api.Panel.ListPaging.Ok(await r.RunsAsync(maquina, ct), request));
         run.MapGet("/{batchId:guid}", async (Guid batchId, RemoteCommands r, CancellationToken ct) =>
             await r.RunAsync(batchId, ct) is { } detail ? Results.Ok(detail) : Results.NotFound());
         run.MapPost("/", async (RunInput input, IValidator<RunInput> v, RemoteAccessGuard guard, RemoteCommands r, CancellationToken ct) =>

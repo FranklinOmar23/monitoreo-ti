@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Health;
 using MonitoreoTI.Application.Panel;
@@ -31,22 +31,38 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
 
     public async Task<AlertList> AlertsAsync(AlertFilter filter, CancellationToken ct)
     {
-        var scoped = await VisibleAlertsAsync(ct);
+        // Decisión 83: la vista trae el equipo o dispositivo, la sucursal y quién la atiende en la misma consulta.
+        var allowed = await user.AllowedBranchIdsAsync(ct);
+        var scoped = db.AlertListView.AsNoTracking();
+        if (allowed is not null)
+            scoped = scoped.Where(a => a.BranchId != null && allowed.Contains(a.BranchId.Value));
 
         if (filter.BranchId is int branchId)
-            scoped = scoped.Where(a => a.DeviceId != null
-                ? db.NetworkDevices.Any(d => d.Id == a.DeviceId && d.BranchId == branchId)
-                : db.Machines.Any(m => m.Id == a.MachineId && m.BranchId == branchId));
+            scoped = scoped.Where(a => a.BranchId == branchId);
         if (filter.MachineId is int machineId)
             scoped = scoped.Where(a => a.MachineId == machineId);
+        if (filter.DeviceId is int deviceId)
+            scoped = scoped.Where(a => a.DeviceId == deviceId);
         if (filter.Network is bool network)
             scoped = network ? scoped.Where(a => a.DeviceId != null) : scoped.Where(a => a.DeviceId == null);
+        if (filter.HandledById is int handledBy)
+            scoped = scoped.Where(a => a.HandledById == handledBy);
+        if (filter.Automatic is bool automatic)
+            scoped = automatic ? scoped.Where(a => a.Code != null) : scoped.Where(a => a.Code == null);
+        if (!string.IsNullOrWhiteSpace(filter.Source))
+            scoped = scoped.Where(a => a.Source != null && a.Source.Contains(filter.Source.Trim()));
+        if (!string.IsNullOrWhiteSpace(filter.Code))
+            scoped = scoped.Where(a => a.Code != null && a.Code.Contains(filter.Code.Trim()));
         if (!string.IsNullOrWhiteSpace(filter.Query))
         {
             var q = filter.Query.Trim();
-            scoped = scoped.Where(a => a.Message.Contains(q) || db.Machines.Any(m => m.Id == a.MachineId && m.Name.Contains(q))
-                || db.NetworkDevices.Any(d => d.Id == a.DeviceId && d.Name.Contains(q)));
+            scoped = scoped.Where(a => a.Message.Contains(q) || (a.Machine != null && a.Machine.Contains(q)) || (a.Device != null && a.Device.Contains(q)));
         }
+        var (from, to) = Paging.DateRange(filter.From, filter.To);
+        if (from is not null)
+            scoped = scoped.Where(a => a.CreatedAt >= from);
+        if (to is not null)
+            scoped = scoped.Where(a => a.CreatedAt < to);
 
         var dayAgo = Now.AddDays(-1);
         var tally = await scoped
@@ -77,36 +93,15 @@ public sealed class AlertQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             query = query.Where(a => a.Level == level);
         }
 
-        var pageSize = Math.Clamp(filter.PageSize, 1, 200);
-        var page = Math.Max(filter.Page, 1);
-        var total = await query.CountAsync(ct);
+        var (page, limit) = Paging.Normalize(filter.Page, filter.Limit);
         var rows = await query
-            .OrderBy(a => a.Status == AlertStatus.Resolved).ThenByDescending(a => a.Level)
-            .ThenByDescending(a => a.ResolvedAt ?? a.CreatedAt)
-            .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(a => new
-            {
-                a.Id,
-                a.Level,
-                a.Status,
-                a.Message,
-                a.Source,
-                a.MachineId,
-                Machine = db.Machines.Where(m => m.Id == a.MachineId).Select(m => new { m.Name, m.BranchId, Branch = m.Branch!.Name }).FirstOrDefault(),
-                a.DeviceId,
-                Device = db.NetworkDevices.Where(d => d.Id == a.DeviceId)
-                    .Select(d => new { d.Name, d.BranchId, Branch = db.Branches.Where(b => b.Id == d.BranchId).Select(b => b.Name).First() }).FirstOrDefault(),
-                HandledBy = db.Users.Where(u => u.Id == a.HandledById).Select(u => u.Name).FirstOrDefault(),
-                a.CreatedAt,
-                a.ResolvedAt,
-                a.Code,
-            })
-            .ToListAsync(ct);
+            .OrderBy(a => a.IsResolved).ThenByDescending(a => a.LevelOrder).ThenByDescending(a => a.SortDate).ThenByDescending(a => a.Id)
+            .ToPageAsync(page, limit, ct);
 
-        var items = rows.Select(a => new AlertListItem(
-            a.Id, Text(a.Level), Text(a.Status), a.Message, a.Source, a.MachineId, a.Machine?.Name, a.Machine?.BranchId ?? a.Device?.BranchId,
-            a.Machine?.Branch ?? a.Device?.Branch, a.HandledBy, a.CreatedAt, a.ResolvedAt, a.Code is not null, a.DeviceId, a.Device?.Name)).ToList();
-        return new AlertList(new PagedResult<AlertListItem>(items, total, page, pageSize), counts);
+        var items = rows.Map(a => new AlertListItem(
+            a.Id, Text(a.Level), Text(a.Status), a.Message, a.Source, a.MachineId, a.Machine, a.BranchId, a.Branch, a.HandledBy,
+            a.CreatedAt, a.ResolvedAt, a.Code is not null, a.DeviceId, a.Device));
+        return new AlertList(items, counts);
     }
 
     public async Task<AlertDetail?> AlertAsync(long id, CancellationToken ct)

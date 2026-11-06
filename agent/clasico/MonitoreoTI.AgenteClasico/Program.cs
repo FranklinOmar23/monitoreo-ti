@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -11,7 +11,8 @@ using System.Threading.Tasks;
 namespace MonitoreoTI.AgenteClasico
 {
     // Uso:
-    //   MonitoreoTI.AgenteClasico.exe instalar /SERVER=https://servidor:5127 /TOKEN=<token>   (como administrador o SYSTEM)
+    //   MonitoreoTI.AgenteClasico.exe instalar /SERVER=https://servidor:5127 /TOKEN=<token> [/TIPO=servidor]   (como administrador o SYSTEM)
+    //   MonitoreoTI.AgenteClasico.exe instalar        (sin token: actualiza el programa de un equipo ya registrado)
     //   MonitoreoTI.AgenteClasico.exe desinstalar [/CONSERVAR]
     //   MonitoreoTI.AgenteClasico.exe consola        (corre en primer plano, para revisar)
     //   MonitoreoTI.AgenteClasico.exe diagnostico    (muestra lo que reportaría, sin conectarse)
@@ -26,7 +27,7 @@ namespace MonitoreoTI.AgenteClasico
                 switch (command)
                 {
                     case "instalar":
-                        return Setup.Install(Option(args, "SERVER"), Option(args, "TOKEN"));
+                        return Setup.Install(Option(args, "SERVER"), Option(args, "TOKEN"), Option(args, "TIPO"));
                     case "desinstalar":
                         return Setup.Uninstall(args.Any(a => a.Equals("/CONSERVAR", StringComparison.OrdinalIgnoreCase)));
                     case "consola":
@@ -44,8 +45,11 @@ namespace MonitoreoTI.AgenteClasico
                     case "servicio":
                         ServiceBase.Run(new AgentService());
                         return 0;
+                    case "asistente":
+                        // Lo lanza el servicio en la sesión del usuario para el escritorio remoto (decisión 84).
+                        return Assistant.Run();
                     default:
-                        Console.Error.WriteLine("Comandos: instalar /SERVER= /TOKEN=, desinstalar [/CONSERVAR], consola.");
+                        Console.Error.WriteLine("Comandos: instalar /SERVER= /TOKEN= [/TIPO=servidor], desinstalar [/CONSERVAR], consola, diagnostico.");
                         return 2;
                 }
             }
@@ -130,6 +134,7 @@ namespace MonitoreoTI.AgenteClasico
         private Timer _metrics;
         private Gateway _gateway;
         private Commands _commands;
+        private RemoteSessions _sessions;
 
         public void Start()
         {
@@ -138,6 +143,7 @@ namespace MonitoreoTI.AgenteClasico
             Log.Info($"Agente clásico {AgentInfo.Version} (equipo {config.MachineId}) iniciando.");
             _gateway = new Gateway(config, OnWelcome, OnMessage);
             _commands = new Commands(config, (tipo, datos) => _gateway.Enqueue(tipo, datos));
+            _sessions = new RemoteSessions(config, (tipo, datos) => _gateway.Enqueue(tipo, datos));
 
             Every("inventario_hardware", Collectors.Hardware, TimeSpan.FromSeconds(5), TimeSpan.FromHours(24));
             Every("inventario_software", Collectors.Software, TimeSpan.FromSeconds(15), TimeSpan.FromHours(24));
@@ -196,8 +202,22 @@ namespace MonitoreoTI.AgenteClasico
                         _gateway.Enqueue("inventario_software", Collectors.Software());
                     });
                     break;
+                case "abrir_sesion_remota":
+                {
+                    var datos = message.Obj("datos");
+                    if (datos != null)
+                        _sessions.Open(datos);
+                    break;
+                }
+                case "cerrar_sesion_remota":
+                {
+                    var id = message.Obj("datos")?.Int("sesion_id");
+                    if (id != null)
+                        _sessions.Close(id.Value);
+                    break;
+                }
                 default:
-                    // Escritorio remoto, terminal, archivos, recolector y actualizaciones: no existen en el agente clásico.
+                    // Recolector, respaldos y actualizaciones: no existen en el agente clásico.
                     break;
             }
         }
@@ -205,6 +225,7 @@ namespace MonitoreoTI.AgenteClasico
         public void Dispose()
         {
             _stop.Cancel();
+            _sessions?.Dispose();
             foreach (var t in _timers)
                 t.Dispose();
             Log.Info("Agente clásico detenido.");
@@ -217,15 +238,17 @@ namespace MonitoreoTI.AgenteClasico
     /// </summary>
     public static class Setup
     {
-        public static int Install(string server, string token)
+        public static int Install(string server, string token, string type = null)
         {
-            if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(token))
+            // Sin token y ya registrado: solo se actualiza el programa (instalador único y reinstalación remota, decisión 84).
+            var update = string.IsNullOrWhiteSpace(token) && AgentConfig.Load() != null;
+            if (!update && (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(token)))
                 throw new ArgumentException("Indique /SERVER=https://servidor:puerto y /TOKEN=<token de la sucursal>.");
             if (!new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent())
                     .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
                 throw new UnauthorizedAccessException("Ejecute la instalación como administrador.");
             Directory.CreateDirectory(Paths.DataDirectory);
-            Log.Info($"Instalando el agente clásico (servidor {server}).");
+            Log.Info(update ? $"Actualizando el agente clásico a {AgentInfo.Version}." : $"Instalando el agente clásico (servidor {server}).");
 
             var source = Assembly.GetExecutingAssembly().Location;
             var sourceDir = Path.GetDirectoryName(source);
@@ -235,10 +258,16 @@ namespace MonitoreoTI.AgenteClasico
             Tls.Configure();
 
             if (ServiceExists())
-                Run("sc.exe", "stop", Paths.ServiceName);
-            var config = Enrollment.Enroll(server.Trim(), token.Trim(), Identity.Current());
-            config.Save();
-            Log.Info($"Equipo registrado (máquina {config.MachineId}).");
+                StopService();
+            if (!update)
+            {
+                var identity = Identity.Current();
+                if (string.Equals(type, "servidor", StringComparison.OrdinalIgnoreCase))
+                    identity.MachineType = "servidor";
+                var config = Enrollment.Enroll(server.Trim(), token.Trim(), identity);
+                config.Save();
+                Log.Info($"Equipo registrado (máquina {config.MachineId}).");
+            }
 
             Directory.CreateDirectory(Paths.ProgramDirectory);
             var target = Path.Combine(Paths.ProgramDirectory, Paths.ExeName);
@@ -270,6 +299,21 @@ namespace MonitoreoTI.AgenteClasico
                 File.Delete(Paths.ConfigFile);
             Log.Info("Agente clásico desinstalado.");
             return 0;
+        }
+
+        /// <summary>Detiene el servicio y espera a que suelte el programa (para poder reemplazarlo).</summary>
+        private static void StopService()
+        {
+            Run("sc.exe", "stop", Paths.ServiceName);
+            try
+            {
+                using (var service = new ServiceController(Paths.ServiceName))
+                    service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+            }
+            catch (Exception)
+            {
+                // Si no se detuvo a tiempo, la copia lo dirá.
+            }
         }
 
         private static bool ServiceExists() => ServiceController.GetServices().Any(s => s.ServiceName == Paths.ServiceName);

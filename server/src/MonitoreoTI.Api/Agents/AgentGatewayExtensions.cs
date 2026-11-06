@@ -1,4 +1,4 @@
-using System.Threading.RateLimiting;
+﻿using System.Threading.RateLimiting;
 using FluentValidation;
 using MonitoreoTI.Api.Remote;
 using MonitoreoTI.Application.Agents;
@@ -51,12 +51,21 @@ public static class AgentGatewayExtensions
         services.AddSingleton<FortiGateApiTester>();
         services.AddSingleton<IFortiGateApiTester>(sp => sp.GetRequiredService<FortiGateApiTester>());
         services.AddSingleton<IAgentMessageHandler, ApiTestResultHandler>();
+        services.AddSingleton<IAgentMessageHandler, SwitchesDetectedHandler>();
         services.AddSingleton<IFortiGateData, FortiGateData>();
         services.AddSingleton<IAgentMessageHandler, FortiGateDataHandler>();
         services.AddSingleton<IRemoteInstallDispatcher, RemoteInstallDispatcher>();
         services.AddSingleton<IRemoteInstallStatus, RemoteInstallStatus>();
         services.AddSingleton<IAgentMessageHandler, RemoteInstallStatusHandler>();
         services.AddSingleton<NetworkAlertEngine>();
+        // Respaldos de servidores (decisión 82).
+        services.AddSingleton<MonitoreoTI.Application.Backups.IBackupStatusStore, MonitoreoTI.Infrastructure.Backups.BackupStatusStore>();
+        services.AddSingleton<BackupAgentLink>();
+        services.AddSingleton<MonitoreoTI.Application.Backups.IBackupAgentLink>(sp => sp.GetRequiredService<BackupAgentLink>());
+        services.AddSingleton<IAgentMessageHandler, BackupExploredHandler>();
+        services.AddSingleton<IAgentMessageHandler, BackupTestedHandler>();
+        services.AddSingleton<IAgentMessageHandler, BackupRunHandler>();
+        services.AddSingleton<IAgentMessageHandler, BackupScheduleHandler>();
         services.AddSingleton<AlertMailer>();
 
         // Comandos y scripts firmados (Fase 6).

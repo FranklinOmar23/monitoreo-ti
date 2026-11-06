@@ -704,8 +704,8 @@ export function PortAssignDialog({
   const [mode, setMode] = useState<'auto' | 'equipo' | 'troncal' | 'acceso'>(current);
   const [machineId, setMachineId] = useState(port.isManualAssignment && port.machineId ? String(port.machineId) : '');
   const machines = useQuery({
-    queryKey: ['maquinas', 'sucursal', device.branchId],
-    queryFn: () => api.machines({ sucursal: device.branchId, tamano: 200 }),
+    queryKey: ['maquinas', 'opciones', device.branchId],
+    queryFn: () => api.machineOptions(device.branchId),
     enabled: mode === 'equipo',
   });
   const save = useNetworkSave(
@@ -747,7 +747,7 @@ export function PortAssignDialog({
           <span>Equipo *</span>
           <select required value={machineId} onChange={(e) => setMachineId(e.target.value)}>
             <option value="">Elija…</option>
-            {(machines.data?.page.items ?? []).map((m) => (
+            {(machines.data ?? []).map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
                 {m.ipAddress ? ` · ${m.ipAddress}` : ''}

@@ -1,4 +1,6 @@
+
 /** Gestión remota (Fase 6): biblioteca de scripts (W-33), ejecuciones (W-32) y confirmación del 2FA. */
+import type { ListParams, Paged, PageParams } from './paging';
 
 export type ScriptLanguage = 'powershell' | 'cmd' | 'bash' | 'python';
 
@@ -105,11 +107,14 @@ export interface SessionOptions {
   pedirPermiso?: boolean;
 }
 
-export interface SessionPage {
-  items: SessionItem[];
-  total: number;
-  page: number;
-  pageSize: number;
+export type SessionPage = Paged<SessionItem>;
+
+export interface SessionFilter extends PageParams {
+  maquina?: number;
+  usuario?: number;
+  tipo?: SessionType;
+  soloVer?: boolean;
+  activa?: boolean;
 }
 
 export const SESSION_TYPE_LABELS: Record<SessionType, string> = {
@@ -196,19 +201,22 @@ export interface UpdateStatus {
 }
 
 export interface RemoteApi {
+  /** Todos (para elegir en Ejecutar y Tareas). */
   scripts(): Promise<ScriptItem[]>;
+  /** La biblioteca, de 10 en 10. */
+  scriptsPage(params?: ListParams): Promise<Paged<ScriptItem>>;
   saveScript(id: number | null, input: ScriptInput): Promise<{ id: number }>;
   deleteScript(id: number): Promise<{ id: number }>;
   /** 403 con código "2fa_requerido" si el último 2FA tiene más de 8 horas: confirmar el código y reintentar. */
   run(input: RunInput): Promise<{ batchId: string; count: number }>;
-  runs(machineId?: number): Promise<RunSummary[]>;
+  runs(params?: ListParams & { maquina?: number }): Promise<Paged<RunSummary>>;
   runDetail(batchId: string): Promise<RunDetail>;
   confirmTwoFactor(codigo: string): Promise<{ confirmado: string; vigenteHasta: string }>;
   /** 409 si el equipo no está conectado; 403 "2fa_requerido" como run(). */
   openSession(maquinaId: number, tipo: SessionType, opciones?: SessionOptions): Promise<SessionTicket>;
   closeSession(id: number): Promise<{ id: number }>;
-  sessions(filter?: { maquina?: number; pagina?: number; tamano?: number }): Promise<SessionPage>;
-  tasks(): Promise<ScheduledTaskItem[]>;
+  sessions(filter?: SessionFilter): Promise<SessionPage>;
+  tasks(params?: ListParams): Promise<Paged<ScheduledTaskItem>>;
   /** 403 "2fa_requerido" como run(). */
   saveTask(id: number | null, input: ScheduledTaskInput): Promise<{ id: number }>;
   deleteTask(id: number): Promise<{ id: number }>;
@@ -241,18 +249,19 @@ export function createRemoteApi(
   send: <T>(method: string, path: string, body?: unknown) => Promise<T>,
 ): RemoteApi {
   return {
-    scripts: () => get('/scripts'),
+    scripts: () => get('/scripts/opciones'),
+    scriptsPage: (params = {}) => get('/scripts', { ...params }),
     saveScript: (id, input) => (id === null ? send('POST', '/scripts', input) : send('PUT', `/scripts/${id}`, input)),
     deleteScript: (id) => send('DELETE', `/scripts/${id}`),
     run: (input) => send('POST', '/ejecuciones', input),
-    runs: (machineId) => get('/ejecuciones', { maquina: machineId }),
+    runs: (params = {}) => get('/ejecuciones', { ...params }),
     runDetail: (batchId) => get(`/ejecuciones/${batchId}`),
     confirmTwoFactor: (codigo) => send('POST', '/auth/confirmar-2fa', { codigo }),
     openSession: (maquinaId, tipo, opciones = {}) =>
       send('POST', '/sesiones-remotas', { maquinaId, tipo, ...opciones }),
     closeSession: (id) => send('POST', `/sesiones-remotas/${id}/cerrar`),
     sessions: (filter = {}) => get('/sesiones-remotas', { ...filter }),
-    tasks: () => get('/tareas-programadas'),
+    tasks: (params = {}) => get('/tareas-programadas', { ...params }),
     saveTask: (id, input) =>
       id === null ? send('POST', '/tareas-programadas', input) : send('PUT', `/tareas-programadas/${id}`, input),
     deleteTask: (id) => send('DELETE', `/tareas-programadas/${id}`),

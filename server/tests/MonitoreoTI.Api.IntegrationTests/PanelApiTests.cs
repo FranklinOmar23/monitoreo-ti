@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -50,7 +50,7 @@ public sealed class PanelApiTests(TestDatabase database) : IAsyncLifetime
     }
 
     private static IEnumerable<string> Names(JsonElement list) =>
-        list.GetProperty("page").GetProperty("items").EnumerateArray().Select(i => i.GetProperty("name").GetString()!);
+        list.GetProperty("data").GetProperty("data").EnumerateArray().Select(i => i.GetProperty("name").GetString()!);
 
     // ---------------------------------------------------------------- aislamiento entre empresas
 
@@ -60,15 +60,15 @@ public sealed class PanelApiTests(TestDatabase database) : IAsyncLifetime
         using var caribe = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));
         using var rafael = _api.ClientWith(await _api.TokenForAsync(Rafael, "Administrador"));
 
-        var caribeMachines = await JsonAsync(await caribe.GetAsync("/api/v1/maquinas"));
+        var caribeMachines = await JsonAsync(await caribe.GetAsync("/api/v1/maquinas?limit=100"));
         var rafaelMachines = await JsonAsync(await rafael.GetAsync("/api/v1/maquinas"));
 
         Names(caribeMachines).Should().Contain(["CAJA-01", "RRHH-02", "SERVIDOR-01"]).And.NotContain(n => n.StartsWith("PC-RAFAEL"));
         Names(rafaelMachines).Should().BeEquivalentTo("CONTA-03");
-        caribeMachines.GetProperty("page").GetProperty("total").GetInt32().Should().BeGreaterThan(1);
+        caribeMachines.GetProperty("data").GetProperty("total").GetInt32().Should().BeGreaterThan(1);
 
-        var caribeBranches = await JsonAsync(await caribe.GetAsync("/api/v1/sucursales"));
-        var rafaelBranches = await JsonAsync(await rafael.GetAsync("/api/v1/sucursales"));
+        var caribeBranches = (await JsonAsync(await caribe.GetAsync("/api/v1/sucursales?limit=100"))).GetProperty("data").GetProperty("data");
+        var rafaelBranches = (await JsonAsync(await rafael.GetAsync("/api/v1/sucursales?limit=100"))).GetProperty("data").GetProperty("data");
         caribeBranches.GetArrayLength().Should().Be(5);
         rafaelBranches.GetArrayLength().Should().Be(1);
     }
@@ -134,7 +134,7 @@ public sealed class PanelApiTests(TestDatabase database) : IAsyncLifetime
         var outside = await MachineIdAsync(Caribe, "CONTA-03");
         (await tech.GetAsync($"/api/v1/maquinas/{outside}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        var branches = await JsonAsync(await tech.GetAsync("/api/v1/sucursales"));
+        var branches = (await JsonAsync(await tech.GetAsync("/api/v1/sucursales?limit=100"))).GetProperty("data").GetProperty("data");
         branches.EnumerateArray().Select(b => b.GetProperty("name").GetString()).Should().BeEquivalentTo("Santiago");
     }
 
@@ -143,7 +143,7 @@ public sealed class PanelApiTests(TestDatabase database) : IAsyncLifetime
     {
         using var admin = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador", "Santiago"));
 
-        var machines = await JsonAsync(await admin.GetAsync("/api/v1/maquinas"));
+        var machines = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?limit=100"));
 
         Names(machines).Should().Contain(["CAJA-01", "CONTA-03"]);
     }
@@ -156,20 +156,50 @@ public sealed class PanelApiTests(TestDatabase database) : IAsyncLifetime
         using var admin = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));
 
         var critical = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?estado=critico"));
-        critical.GetProperty("page").GetProperty("items").EnumerateArray()
+        critical.GetProperty("data").GetProperty("data").EnumerateArray()
             .Should().OnlyContain(i => i.GetProperty("status").GetString() == "critico");
         critical.GetProperty("counts").GetProperty("total").GetInt32()
-            .Should().BeGreaterThan(critical.GetProperty("page").GetProperty("total").GetInt32(), "los chips cuentan sin el filtro de estado");
+            .Should().BeGreaterThan(critical.GetProperty("data").GetProperty("total").GetInt32(), "los chips cuentan sin el filtro de estado");
 
         var search = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?q=CAJA"));
         Names(search).Should().BeEquivalentTo("CAJA-01");
 
-        var page = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?pagina=2&tamano=2"));
-        page.GetProperty("page").GetProperty("items").GetArrayLength().Should().Be(2);
-        page.GetProperty("page").GetProperty("page").GetInt32().Should().Be(2);
+        // Decisión 83: página, límite, si hay siguiente y el total de páginas, todo en la respuesta.
+        var all = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?limit=100"));
+        var total = all.GetProperty("data").GetProperty("total").GetInt32();
+        var page = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?page=2&limit=2"));
+        var data = page.GetProperty("data");
+        data.GetProperty("data").GetArrayLength().Should().Be(2);
+        data.GetProperty("page").GetInt32().Should().Be(2);
+        data.GetProperty("limit").GetInt32().Should().Be(2);
+        data.GetProperty("total").GetInt32().Should().Be(total);
+        data.GetProperty("totalPages").GetInt32().Should().Be((total + 1) / 2);
+        data.GetProperty("isThereNextPage").GetBoolean().Should().Be(total > 4);
+        Names(page).Should().Equal(Names(all).Skip(2).Take(2), "el orden es estable entre páginas");
+
+        // Por defecto, 10 por página; un límite exagerado se corta en 100.
+        (await JsonAsync(await admin.GetAsync("/api/v1/maquinas"))).GetProperty("data").GetProperty("limit").GetInt32().Should().Be(10);
+        (await JsonAsync(await admin.GetAsync("/api/v1/maquinas?limit=5000"))).GetProperty("data").GetProperty("limit").GetInt32().Should().Be(100);
+        (await admin.GetAsync("/api/v1/maquinas?fechaDesde=2026-10-10&fechaHasta=2026-10-01")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        Names(await JsonAsync(await admin.GetAsync("/api/v1/maquinas?fechaHasta=2000-01-01"))).Should().BeEmpty();
+        Names(await JsonAsync(await admin.GetAsync("/api/v1/maquinas?serie=NO-EXISTE"))).Should().BeEmpty();
+
+        // Fase 2: los catálogos se paginan igual y filtran por cualquier campo con su nombre, por q y por fechas.
+        var branchPage = (await JsonAsync(await admin.GetAsync("/api/v1/sucursales?limit=1"))).GetProperty("data");
+        branchPage.GetProperty("data").GetArrayLength().Should().Be(1);
+        branchPage.GetProperty("totalPages").GetInt32().Should().Be(branchPage.GetProperty("total").GetInt32());
+        Names(await JsonAsync(await admin.GetAsync("/api/v1/sucursales?name=Santiago"))).Should().Equal("Santiago");
+        Names(await JsonAsync(await admin.GetAsync("/api/v1/sucursales?q=santiago"))).Should().Contain("Santiago");
+        Names(await JsonAsync(await admin.GetAsync("/api/v1/usuarios?fechaHasta=2000-01-01"))).Should().BeEmpty("los usuarios se filtran por su fecha de alta");
+        (await admin.GetAsync("/api/v1/sucursales?fechaDesde=2026-10-10&fechaHasta=2026-10-01")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await admin.GetFromJsonAsync<JsonElement>("/api/v1/sucursales/opciones")).GetArrayLength().Should().Be(branchPage.GetProperty("total").GetInt32());
+
+        // Las listas desplegables reciben todos los equipos, sin paginar.
+        var options = await admin.GetFromJsonAsync<JsonElement>("/api/v1/maquinas/opciones");
+        options.GetArrayLength().Should().Be(total);
 
         var withMetrics = await JsonAsync(await admin.GetAsync("/api/v1/maquinas?q=SERVIDOR-01"));
-        withMetrics.GetProperty("page").GetProperty("items")[0].GetProperty("metrics").GetProperty("cpu").ValueKind
+        withMetrics.GetProperty("data").GetProperty("data")[0].GetProperty("metrics").GetProperty("cpu").ValueKind
             .Should().Be(JsonValueKind.Number);
     }
 

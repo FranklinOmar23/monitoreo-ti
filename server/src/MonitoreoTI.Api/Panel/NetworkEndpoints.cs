@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Application.Network;
 using MonitoreoTI.Infrastructure.Network;
 using static MonitoreoTI.Api.Panel.PanelWriteEndpoints;
@@ -19,35 +19,49 @@ public static class NetworkEndpoints
         read.MapGet("/gabinetes", (NetworkQueries q, CancellationToken ct, int? sala) => q.RacksAsync(sala, ct));
         read.MapGet("/gabinetes/{id:int}", async (int id, NetworkQueries q, CancellationToken ct) =>
             await q.RackAsync(id, ct) is { } rack ? Results.Ok(rack) : Results.NotFound());
-        read.MapGet("/modelos", (NetworkQueries q, CancellationToken ct) => q.ModelsAsync(ct));
-        read.MapGet("/dispositivos", (NetworkQueries q, CancellationToken ct,
+        read.MapGet("/modelos", async (NetworkQueries q, HttpRequest request, CancellationToken ct) => ListPaging.Ok(await q.ModelsAsync(ct), request));
+        read.MapGet("/modelos/opciones", (NetworkQueries q, CancellationToken ct) => q.ModelsAsync(ct));
+        read.MapGet("/dispositivos", async (NetworkQueries q, HttpRequest request, CancellationToken ct,
+            [Microsoft.AspNetCore.Mvc.FromQuery(Name = "buscar")] string? search, string? tipo, int? sucursal, int? sala, int? gabinete) =>
+            ListPaging.Ok(await q.DevicesAsync(new DeviceFilter(search, tipo, sucursal, sala, gabinete), ct), request));
+        read.MapGet("/dispositivos/opciones", (NetworkQueries q, CancellationToken ct,
             [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search, string? tipo, int? sucursal, int? sala, int? gabinete) =>
             q.DevicesAsync(new DeviceFilter(search, tipo, sucursal, sala, gabinete), ct));
         read.MapGet("/dispositivos/{id:int}", async (int id, NetworkQueries q, CancellationToken ct) =>
             await q.DeviceAsync(id, ct) is { } device ? Results.Ok(device) : Results.NotFound());
-        read.MapGet("/rosetas", (NetworkQueries q, CancellationToken ct, int? sucursal,
+        read.MapGet("/rosetas", async (NetworkQueries q, HttpRequest request, CancellationToken ct, int? sucursal,
+            [Microsoft.AspNetCore.Mvc.FromQuery(Name = "buscar")] string? search) => ListPaging.Ok(await q.OutletsAsync(sucursal, search, ct), request));
+        read.MapGet("/rosetas/opciones", (NetworkQueries q, CancellationToken ct, int? sucursal,
             [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search) => q.OutletsAsync(sucursal, search, ct));
-        read.MapGet("/cables", (NetworkQueries q, CancellationToken ct, int? dispositivo) => q.CablesAsync(dispositivo, ct));
+        read.MapGet("/cables", async (NetworkQueries q, HttpRequest request, CancellationToken ct, int? dispositivo) =>
+            ListPaging.Ok(await q.CablesAsync(dispositivo, ct), request));
         read.MapGet("/ruta", async (NetworkQueries q, CancellationToken ct, int? roseta, int? puerto) =>
             await q.PathAsync(roseta, puerto, ct) is { } path ? Results.Ok(path) : Results.NotFound());
         // Recolector y correlación (Fase 4.2 y 4.3).
         read.MapGet("/resumen", (NetworkInsights i, CancellationToken ct) => i.SummaryAsync(ct));
         read.MapGet("/recolectores", (NetworkInsights i, CancellationToken ct, int? sucursal) => i.CollectorsAsync(sucursal, ct));
-        read.MapGet("/desconocidos", (NetworkInsights i, CancellationToken ct) => i.UnknownAsync(ct));
+        read.MapGet("/desconocidos", async (NetworkInsights i, HttpRequest request, CancellationToken ct) => ListPaging.Ok(await i.UnknownAsync(ct), request));
         read.MapGet("/topologia", (NetworkInsights i, CancellationToken ct) => i.TopologyAsync(ct));
-        read.MapGet("/diferencias", (NetworkInsights i, CancellationToken ct) => i.DifferencesAsync(ct));
+        read.MapGet("/diferencias", async (NetworkInsights i, HttpRequest request, CancellationToken ct) => ListPaging.Ok(await i.DifferencesAsync(ct), request));
         read.MapGet("/buscar", (NetworkInsights i, CancellationToken ct, [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search) =>
             i.SearchAsync(search ?? "", ct));
         // Direcciones IP (decisión 72).
         read.MapGet("/subredes", (IpAddresses ips, CancellationToken ct, int? sucursal) => ips.SubnetsAsync(sucursal, ct));
         read.MapGet("/subredes/{id:int}", async (int id, IpAddresses ips, CancellationToken ct) =>
             await ips.SubnetAsync(id, ct) is { } subnet ? Results.Ok(subnet) : Results.NotFound());
-        read.MapGet("/subredes/{id:int}/instalaciones", async (int id, RemoteInstalls installs, CancellationToken ct) =>
-            await installs.ListAsync(id, ct) is { } list ? Results.Ok(list) : Results.NotFound());
+        read.MapGet("/subredes/{id:int}/instalaciones", async (int id, RemoteInstalls installs, HttpRequest request, CancellationToken ct) =>
+            await installs.ListAsync(id, ct) is { } list ? ListPaging.Ok(list, request) : Results.NotFound());
         read.MapGet("/subredes/{id:int}/historial", async (int id, string ip, IpAddresses ips, CancellationToken ct, int? dias) =>
             await ips.HistoryAsync(id, ip, dias ?? 30, ct) is { } history ? Results.Ok(history) : Results.NotFound());
-        read.MapGet("/historial", (NetworkQueries q, CancellationToken ct, string? entidad, string? id, int? dias, int? pagina) =>
-            q.HistoryAsync(new HistoryFilter(entidad, id, dias ?? 30, pagina ?? 1), ct));
+        // Historial de cambios (decisión 83): 10 por página y rango de fechas.
+        read.MapGet("/historial", async (NetworkQueries q, CancellationToken ct, string? entidad, string? id, int? dias,
+            DateTime? fechaDesde, DateTime? fechaHasta, int? page, int? limit) =>
+        {
+            if (MonitoreoTI.Application.Panel.Paging.DateRangeError(fechaDesde, fechaHasta) is { } error)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["fechaHasta"] = [error] });
+            var (p, l) = MonitoreoTI.Application.Panel.Paging.Normalize(page, limit);
+            return Results.Ok(new { data = await q.HistoryAsync(new HistoryFilter(entidad, id, dias ?? 30, p, l, fechaDesde, fechaHasta), ct) });
+        });
 
         var edit = app.MapGroup("/api/v1/red").RequireAuthorization(PermissionPolicies.NetworkEdit);
         edit.MapPost("/salas", async (RoomInput input, IValidator<RoomInput> v, NetworkCommands c, CancellationToken ct) =>
@@ -74,6 +88,13 @@ public static class NetworkEndpoints
         edit.MapPut("/dispositivos/{id:int}/ubicacion", async (int id, DevicePlacementInput input, NetworkCommands c, CancellationToken ct) =>
             ToResult(await c.PlaceDeviceAsync(id, input, ct)));
         edit.MapPost("/dispositivos/{id:int}/sondear", async (int id, NetworkCommands c, CancellationToken ct) => ToResult(await c.PollNowAsync(id, ct)));
+        edit.MapPost("/dispositivos/{id:int}/detectar-switches", async (int id, NetworkCommands c, CancellationToken ct) =>
+        {
+            var (error, result) = await c.DetectSwitchesAsync(id, ct);
+            return error is not null ? ToResult(error) : Results.Ok(result);
+        });
+        edit.MapPost("/dispositivos/{id:int}/switches", async (int id, RegisterSwitchesInput input, IValidator<RegisterSwitchesInput> v, NetworkCommands c, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await c.RegisterSwitchesAsync(id, input, ct), created: true));
         edit.MapPost("/dispositivos/{id:int}/probar-api", async (int id, ApiTestInput input, IValidator<ApiTestInput> v, NetworkCommands c, CancellationToken ct) =>
         {
             if (await ValidateAsync(input, v, ct) is { } invalid)

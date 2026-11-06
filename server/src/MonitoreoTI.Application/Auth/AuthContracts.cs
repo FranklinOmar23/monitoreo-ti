@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 
 namespace MonitoreoTI.Application.Auth;
 
@@ -25,6 +25,7 @@ public static class PermissionKeys
     public const string RemoteFiles = "remoto.archivos";
     public const string ScriptsRun = "scripts.ejecutar";
     public const string ScriptsEdit = "scripts.editar";
+    public const string BackupsManage = "respaldos.gestionar";
 
     /// <summary>Permisos que dan control de equipos ajenos: exigen 2FA (sección 7.1).</summary>
     public static readonly IReadOnlySet<string> RequiringTwoFactor = new HashSet<string>(StringComparer.Ordinal)

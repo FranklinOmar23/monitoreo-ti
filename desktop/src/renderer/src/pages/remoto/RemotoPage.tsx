@@ -1,3 +1,5 @@
+import { Pager } from '@components/Pager';
+import { usePaged } from '../../data/usePaged';
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -109,11 +111,11 @@ export function RemotoPage({
 
 function RunsList({ onOpen }: { onOpen: (batchId: string) => void }) {
   const api = usePanelApi();
-  const runs = useQuery({ queryKey: ['ejecuciones'], queryFn: () => api.remoto.runs() });
+  const { query: runs, data: runsPage, items: runItems, setPage } = usePaged(['ejecuciones'], (p) => api.remoto.runs(p));
 
   if (runs.isPending) return <Loading variant="table" columns={6} />;
   if (runs.isError) return <ErrorState error={runs.error} onRetry={() => void runs.refetch()} />;
-  if (runs.data.length === 0)
+  if (runItems.length === 0)
     return <EmptyState title="Todavía no se ha ejecutado nada">Use "Ejecutar script" para lanzar uno.</EmptyState>;
 
   return (
@@ -128,7 +130,7 @@ function RunsList({ onOpen }: { onOpen: (batchId: string) => void }) {
           </tr>
         </thead>
         <tbody>
-          {runs.data.map((r) => (
+          {runItems.map((r) => (
             <tr key={r.batchId}>
               <td>
                 <button type="button" className="link-quiet" onClick={() => onOpen(r.batchId)}>
@@ -145,6 +147,7 @@ function RunsList({ onOpen }: { onOpen: (batchId: string) => void }) {
           ))}
         </tbody>
       </table>
+      <Pager data={runsPage} noun="ejecuciones" onPage={setPage} />
     </div>
   );
 }
@@ -308,11 +311,11 @@ function duration(seconds: number | null): string {
 function SessionHistory({ onOpenEquipo }: { onOpenEquipo: (id: number) => void }) {
   const api = usePanelApi();
   const [page, setPage] = useState(1);
-  const sessions = useQuery({ queryKey: ['sesiones', page], queryFn: () => api.remoto.sessions({ pagina: page }) });
+  const sessions = useQuery({ queryKey: ['sesiones', page], queryFn: () => api.remoto.sessions({ page, limit: 10 }) });
 
   if (sessions.isPending) return <Loading variant="table" columns={6} />;
   if (sessions.isError) return <ErrorState error={sessions.error} onRetry={() => void sessions.refetch()} />;
-  const { items, total, pageSize } = sessions.data;
+  const items = sessions.data.data.data;
   if (items.length === 0)
     return (
       <EmptyState title="No hay sesiones todavía">Aquí queda cada terminal, archivo o escritorio abierto.</EmptyState>
@@ -359,24 +362,7 @@ function SessionHistory({ onOpenEquipo }: { onOpenEquipo: (id: number) => void }
           ))}
         </tbody>
       </table>
-      {total > pageSize && (
-        <div className="pager">
-          <button type="button" className="btn btn-outline" disabled={page === 1} onClick={() => setPage(page - 1)}>
-            Anterior
-          </button>
-          <span className="muted">
-            Página {page} de {Math.ceil(total / pageSize)}
-          </span>
-          <button
-            type="button"
-            className="btn btn-outline"
-            disabled={page * pageSize >= total}
-            onClick={() => setPage(page + 1)}
-          >
-            Siguiente
-          </button>
-        </div>
-      )}
+      <Pager data={sessions.data.data} noun="sesiones" onPage={setPage} />
     </div>
   );
 }
@@ -386,7 +372,9 @@ function SessionHistory({ onOpenEquipo }: { onOpenEquipo: (id: number) => void }
 function ScriptLibrary({ canEdit, onRun }: { canEdit: boolean; onRun?: (scriptId: number) => void }) {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const scripts = useQuery({ queryKey: ['scripts'], queryFn: () => api.remoto.scripts() });
+  const { query: scripts, data: scriptsPage, items: scriptItems, setPage: setScriptsPage } = usePaged(['scripts', 'biblioteca'], (p) =>
+    api.remoto.scriptsPage(p),
+  );
   const [editing, setEditing] = useState<ScriptItem | 'nuevo' | null>(null);
   const remove = useMutation({
     mutationFn: (id: number) => api.remoto.deleteScript(id),
@@ -405,13 +393,14 @@ function ScriptLibrary({ canEdit, onRun }: { canEdit: boolean; onRun?: (scriptId
           </button>
         </div>
       )}
-      {scripts.data.length === 0 ? (
+      {scriptItems.length === 0 ? (
         <EmptyState title="La biblioteca está vacía">
           Guarde aquí los scripts que usa a menudo: quedan firmados y listos para ejecutar.
         </EmptyState>
       ) : (
+        <>
         <ul className="script-list">
-          {scripts.data.map((s) => (
+          {scriptItems.map((s) => (
             <li key={s.id} className="script-card">
               <div>
                 <strong>{s.name}</strong>
@@ -453,6 +442,8 @@ function ScriptLibrary({ canEdit, onRun }: { canEdit: boolean; onRun?: (scriptId
             </li>
           ))}
         </ul>
+        <Pager data={scriptsPage} noun="scripts" onPage={setScriptsPage} />
+        </>
       )}
       {editing && <ScriptForm script={editing === 'nuevo' ? null : editing} onClose={() => setEditing(null)} />}
     </section>

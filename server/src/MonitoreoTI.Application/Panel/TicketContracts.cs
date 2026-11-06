@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 
 namespace MonitoreoTI.Application.Panel;
 
@@ -6,16 +6,24 @@ namespace MonitoreoTI.Application.Panel;
 
 /// <param name="Status">activos (por defecto: todo menos cerrado), abierto, en_proceso, en_espera, resuelto, cerrado o todos.</param>
 /// <param name="Assignee">"yo", "sin" (sin asignar) o el id de un usuario.</param>
-public sealed record TicketFilter(
-    string? Query = null,
-    string? Status = null,
-    string? Priority = null,
-    string? Assignee = null,
-    int? BranchId = null,
-    int? MachineId = null,
-    long? AlertId = null,
-    int Page = 1,
-    int PageSize = 100);
+public sealed record TicketFilter
+{
+    public string? Query { get; init; }
+    public string? Title { get; init; }
+    public string? Status { get; init; }
+    public string? Priority { get; init; }
+    public string? Assignee { get; init; }
+    public int? CreatedById { get; init; }
+    public int? BranchId { get; init; }
+    public int? MachineId { get; init; }
+    public long? AlertId { get; init; }
+
+    /// <summary>Fecha en que se abrió el ticket.</summary>
+    public DateTime? From { get; init; }
+    public DateTime? To { get; init; }
+    public int Page { get; init; } = 1;
+    public int Limit { get; init; } = Paging.DefaultLimit;
+}
 
 public sealed record TicketCounts(int Open, int InProgress, int OnHold, int Resolved, int Closed, int Mine, int Unassigned);
 
@@ -35,7 +43,7 @@ public sealed record TicketListItem(
     DateTime? ClosedAt,
     int CommentCount);
 
-public sealed record TicketList(PagedResult<TicketListItem> Page, TicketCounts Counts);
+public sealed record TicketList(PagedResult<TicketListItem> Data, TicketCounts Counts);
 
 public sealed record TicketCommentItem(int Id, string UserName, string Text, DateTime At);
 

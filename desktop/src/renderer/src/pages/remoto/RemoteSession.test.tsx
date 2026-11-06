@@ -1,7 +1,7 @@
 import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type SessionTicket } from '@monitoreoti/shared';
-import { fakePanelApi, fakeRemoteApi, renderWithPanel } from '../../test/fakes';
+import { fakePanelApi, fakeRemoteApi, renderWithPanel, pageOf } from '../../test/fakes';
 import { relayUrl, RemoteSessionDialog } from './RemoteSession';
 import { RemotoPage } from './RemotoPage';
 
@@ -152,7 +152,7 @@ describe('historial de sesiones (W-34)', () => {
         remoto: fakeRemoteApi({
           sessions: () =>
             Promise.resolve({
-              items: [
+              data: pageOf([
                 {
                   id: 12,
                   type: 'terminal',
@@ -169,10 +169,7 @@ describe('historial de sesiones (W-34)', () => {
                   reason: 'Revisar impresora',
                   viewOnly: false,
                 },
-              ],
-              total: 1,
-              page: 1,
-              pageSize: 50,
+              ]),
             }),
         }),
       }),

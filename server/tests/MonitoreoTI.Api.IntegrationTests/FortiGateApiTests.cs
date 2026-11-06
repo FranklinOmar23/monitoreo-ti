@@ -199,4 +199,83 @@ public sealed class FortiGateApiTests(TestDatabase database) : IAsyncLifetime
         (await admin.PostAsJsonAsync($"/api/v1/red/dispositivos/{deviceId}/probar-api", new { apiUrl = (string?)null, apiToken = (string?)null }))
             .StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
+
+    /// <summary>FortiSwitch por la API (decisión 80): se detectan, se registran y sus sondeos llegan por el recolector del FortiGate.</summary>
+    [DatabaseFact]
+    public async Task Managed_switches_are_detected_registered_and_polled_through_the_fortigate()
+    {
+        var admin = _api.ClientWith(await _api.TokenForAsync(Company, "Administrador"));
+        var branch = await SantiagoAsync();
+        var collector = await _api.RegisterNewAgentAsync(Company, "Santiago");
+        await _api.ExecuteAsync("UPDATE dbo.agentes SET version = '0.3.13' WHERE id = @id", ("@id", collector.AgentId));
+        var suffix = Random.Shared.Next(100000);
+        var fortigate = (await JsonAsync(await admin.PostAsJsonAsync("/api/v1/red/dispositivos", new
+        {
+            nombre = $"PRUEBA-FGT-{suffix}",
+            modeloId = await ModelAsync(),
+            sucursalId = branch,
+            ipGestion = "10.99.0.3",
+            snmpUsuario = "Centinela",
+            snmpClaveAutenticacion = "auth-secreta-123",
+            snmpClavePrivacidad = "priv-secreta-456",
+            recolectorId = collector.AgentId,
+            apiUrl = "https://10.99.0.3:12443",
+            apiToken = Token,
+        }), HttpStatusCode.Created)).GetProperty("id").GetInt32();
+
+        using var socket = await ConnectAsync(_api, collector.Credential);
+        await SendAsync(socket, "hola", new { version = "0.3.13", hostname = "RECOLECTOR", so = "Windows", es_recolector = true });
+        await ReceiveAsync(socket); // ack
+        await ReceiveAsync(socket); // bienvenida
+
+        var serial = $"S108PR{suffix:D6}";
+        var detect = admin.PostAsync($"/api/v1/red/dispositivos/{fortigate}/detectar-switches", null);
+        var asked = await NextOfTypeAsync(socket, "detectar_switches");
+        await SendAsync(socket, "switches_detectados", new
+        {
+            solicitudId = asked.GetProperty("solicitud_id").GetString(),
+            ok = true,
+            campos = new[] { "serial", "ports" },
+            switches = new[] { new { serie = serial, nombre = "SW-PISO1", modelo = "S108PR", ip = "10.255.1.2", conectado = true, puertos = 8 } },
+        });
+        var detected = await JsonAsync(await detect);
+        var found = detected.GetProperty("switches").EnumerateArray().Single();
+        found.GetProperty("serial").GetString().Should().Be(serial);
+        found.GetProperty("deviceId").ValueKind.Should().Be(JsonValueKind.Null);
+
+        var name = $"PRUEBA-FSW-{suffix}";
+        var register = new { switches = new[] { new { serie = serial, nombre = name, modelo = "S108PR", puertos = 8, ip = "10.255.1.2" } } };
+        var switchId = (await JsonAsync(await admin.PostAsJsonAsync($"/api/v1/red/dispositivos/{fortigate}/switches", register), HttpStatusCode.Created))
+            .GetProperty("id").GetInt32();
+        (await admin.PostAsJsonAsync($"/api/v1/red/dispositivos/{fortigate}/switches", register)).StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        // El recolector recibe la lista con el switch bajo la API del FortiGate.
+        var update = await NextOfTypeAsync(socket, "config_actualizada");
+        var api = update.GetProperty("recolector").GetProperty("dispositivos").EnumerateArray()
+            .Single(d => d.GetProperty("id").GetInt32() == fortigate).GetProperty("api");
+        api.GetProperty("switches").EnumerateArray().Single().GetProperty("serie").GetString().Should().Be(serial);
+
+        // Un sondeo del switch (armado con la API) lo deja en línea con su puerto conectado.
+        await SendAckedAsync(socket, "snmp_resultado", new
+        {
+            dispositivoId = switchId,
+            ok = true,
+            sistema = new { descripcion = "S108PR-v7.2.5", nombre = "SW-PISO1", uptimeSegundos = (long?)null },
+            interfaces = Enumerable.Range(1, 8).Select(i => new
+            {
+                indice = i, tipo = 6, nombre = $"port{i}", admin = "up", operativo = i == 1 ? "up" : "down", velocidadMbps = 1000,
+                entradaBytes = 10, salidaBytes = 20, erroresEntrada = 0, erroresSalida = 0, descartes = 0,
+            }),
+            mac = new[] { new { ifIndex = 1, mac = "3C:52:82:AA:00:01", vlan = 4 } },
+            arp = Array.Empty<object>(),
+            lldp = Array.Empty<object>(),
+        });
+        var sw = await JsonAsync(await admin.GetAsync($"/api/v1/red/dispositivos/{switchId}"));
+        sw.GetProperty("fortiGateName").GetString().Should().Be($"PRUEBA-FGT-{suffix}");
+        sw.GetProperty("serialNumber").GetString().Should().Be(serial);
+        sw.GetProperty("status").GetString().Should().Be("en_linea");
+        var port1 = sw.GetProperty("ports").EnumerateArray().Single(p => p.GetProperty("number").GetInt32() == 1);
+        port1.GetProperty("status").GetString().Should().Be("conectado");
+        port1.GetProperty("name").GetString().Should().Be("port1");
+    }
 }

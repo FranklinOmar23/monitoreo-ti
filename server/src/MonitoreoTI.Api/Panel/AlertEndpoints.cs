@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Infrastructure.Panel;
 using static MonitoreoTI.Api.Panel.PanelWriteEndpoints;
@@ -42,7 +42,8 @@ public static class AlertEndpoints
             ToResult(await commands.DeleteRuleAsync(id, ct)));
     }
 
-    private static Task<AlertList> ListAsync(
+    /// <summary>Alertas (decisión 83): 10 por página, un filtro por campo y rango de fechas de creación.</summary>
+    private static async Task<IResult> ListAsync(
         AlertQueries queries,
         CancellationToken ct,
         [Microsoft.AspNetCore.Mvc.FromQuery(Name = "q")] string? search = null,
@@ -50,8 +51,25 @@ public static class AlertEndpoints
         string? nivel = null,
         int? sucursal = null,
         int? maquina = null,
+        int? dispositivo = null,
         bool? red = null,
-        int pagina = 1,
-        int tamano = 50) =>
-        queries.AlertsAsync(new AlertFilter(search, estado, nivel, sucursal, maquina, red, pagina, tamano), ct);
+        string? origen = null,
+        string? codigo = null,
+        int? atendidaPor = null,
+        bool? automatica = null,
+        DateTime? fechaDesde = null,
+        DateTime? fechaHasta = null,
+        int? page = null,
+        int? limit = null)
+    {
+        if (Paging.DateRangeError(fechaDesde, fechaHasta) is { } error)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["fechaHasta"] = [error] });
+        var (p, l) = Paging.Normalize(page, limit);
+        return Results.Ok(await queries.AlertsAsync(new AlertFilter
+        {
+            Query = search, Status = estado, Level = nivel, BranchId = sucursal, MachineId = maquina, DeviceId = dispositivo,
+            Network = red, Source = origen, Code = codigo, HandledById = atendidaPor, Automatic = automatica,
+            From = fechaDesde, To = fechaHasta, Page = p, Limit = l,
+        }, ct));
+    }
 }

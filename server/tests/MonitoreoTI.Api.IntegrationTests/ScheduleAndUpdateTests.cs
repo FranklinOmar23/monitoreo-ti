@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -81,7 +81,7 @@ public sealed class ScheduleAndUpdateTests(TestDatabase database) : IAsyncLifeti
         created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
         var taskId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
-        var list = await (await admin.GetAsync("/api/v1/tareas-programadas")).Content.ReadFromJsonAsync<JsonElement>();
+        var list = (await (await admin.GetAsync("/api/v1/tareas-programadas?limit=100")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("data");
         var item = list.EnumerateArray().Single(t => t.GetProperty("id").GetInt32() == taskId);
         item.GetProperty("nextRunAt").GetDateTime().Should().Be(tomorrow.ToDateTime(new TimeOnly(7, 0)));
         item.GetProperty("description").GetString().Should().StartWith("Una vez");
@@ -100,7 +100,7 @@ public sealed class ScheduleAndUpdateTests(TestDatabase database) : IAsyncLifeti
         message.GetProperty("tipo").GetString().Should().Be("ejecutar_comando");
         message.GetProperty("datos").GetProperty("contenido").GetString().Should().Be("Clear-RecycleBin -Force");
 
-        var row = await (await admin.GetAsync("/api/v1/tareas-programadas")).Content.ReadFromJsonAsync<JsonElement>();
+        var row = (await (await admin.GetAsync("/api/v1/tareas-programadas?limit=100")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("data");
         var ran = row.EnumerateArray().Single(t => t.GetProperty("id").GetInt32() == taskId);
         ran.GetProperty("active").GetBoolean().Should().BeFalse();
         ran.GetProperty("lastBatchId").ValueKind.Should().Be(JsonValueKind.String);

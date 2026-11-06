@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -319,7 +319,7 @@ public sealed class NetworkApiTests(TestDatabase database) : IAsyncLifetime
         (await admin.PutAsJsonAsync($"/api/v1/red/puertos/{port}", new { nombre = "Gi1/0/3", tipo = "rj45", vlan = 30, esHostVm = false })).EnsureSuccessStatusCode();
 
         var history = await JsonAsync(await admin.GetAsync($"/api/v1/red/historial?entidad=dispositivos_red&id={sw}"));
-        var items = history.GetProperty("items").EnumerateArray().ToList();
+        var items = history.GetProperty("data").GetProperty("data").EnumerateArray().ToList();
         items.Select(i => i.GetProperty("title").GetString()).Should().Equal("Puerto editado", "Dispositivo movido", "Dispositivo registrado");
         items[0].GetProperty("subject").GetString().Should().Be("PRUEBA-HIST Gi1/0/3");
         var moved = items[1].GetProperty("changes").EnumerateArray().Single();
@@ -331,6 +331,6 @@ public sealed class NetworkApiTests(TestDatabase database) : IAsyncLifetime
         // Quien solo ve Santo Domingo no ve lo de Santiago.
         var other = await ClientAsync("Red", "Santo Domingo");
         var hidden = await JsonAsync(await other.GetAsync($"/api/v1/red/historial?entidad=dispositivos_red&id={sw}"));
-        hidden.GetProperty("total").GetInt32().Should().Be(0);
+        hidden.GetProperty("data").GetProperty("total").GetInt32().Should().Be(0);
     }
 }

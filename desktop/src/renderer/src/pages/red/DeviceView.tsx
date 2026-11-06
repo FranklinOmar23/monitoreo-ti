@@ -17,6 +17,7 @@ import {
   portTone,
 } from './netLabels';
 import { ApiTestButton, apiStatusText, offersApi } from './FortiGateApi';
+import { ManagedSwitches } from './ManagedSwitches';
 import { NetworkHistory } from './NetworkHistory';
 
 interface DeviceViewProps {
@@ -24,10 +25,12 @@ interface DeviceViewProps {
   canEdit: boolean;
   onBack: () => void;
   onOpenEquipo: (id: number) => void;
+  /** Abrir otro dispositivo (un FortiSwitch desde su FortiGate). */
+  onOpenDevice?: (id: number) => void;
 }
 
 /** W-46 Detalle de switch (o de cualquier dispositivo) y W-47 panel de puerto. */
-export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceViewProps) {
+export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo, onOpenDevice }: DeviceViewProps) {
   const api = usePanelApi();
   // "Sondear ahora": lo que había antes del pedido; mientras no cambie, se vuelve a mirar cada pocos segundos.
   const [polling, setPolling] = useState<{ polled: string | null; error: string | null } | null>(null);
@@ -98,6 +101,7 @@ export function DeviceView({ deviceId, canEdit, onBack, onOpenEquipo }: DeviceVi
           <div className="ficha-grid device-grid">
             <div className="ficha-main">
               <PortGrid device={query.data} selected={selected} onSelect={setSelected} />
+              <ManagedSwitches device={query.data} canEdit={canEdit} onOpenDevice={onOpenDevice} />
               <NetworkHistory entity="dispositivos_red" entityId={deviceId} cardTitle="Historial" />
             </div>
             <div className="ficha-side">
@@ -174,7 +178,11 @@ function DeviceHeader({
           )}
           {device.isActiveDevice && (
             <li>
-              {device.collectorName ? (
+              {device.fortiGateName ? (
+                <>
+                  Datos del FortiGate <strong className="mono">{device.fortiGateName}</strong>
+                </>
+              ) : device.collectorName ? (
                 <>
                   Lo consulta <strong className="mono">{device.collectorName}</strong>
                 </>
@@ -330,13 +338,21 @@ function DeviceInfo({ device, canEdit }: { device: DeviceDetail; canEdit: boolea
     ],
     ['IP de gestión', device.managementIp],
     ['Firmware', device.firmware],
+    ...(device.fortiGateId
+      ? ([
+          ['Datos', `Por la API de ${device.fortiGateName ?? 'su FortiGate'}`],
+          ['Serie', device.serialNumber ?? null],
+        ] as [string, string | null][])
+      : []),
     [
       'SNMPv3',
-      device.isActiveDevice
-        ? device.snmpUser
-          ? `${device.snmpUser}${device.hasSnmpCredential ? ' · claves guardadas' : ' · sin claves'}`
-          : 'Sin configurar'
-        : 'No aplica (pasivo)',
+      device.fortiGateId
+        ? 'No hace falta (datos del FortiGate)'
+        : device.isActiveDevice
+          ? device.snmpUser
+            ? `${device.snmpUser}${device.hasSnmpCredential ? ' · claves guardadas' : ' · sin claves'}`
+            : 'Sin configurar'
+          : 'No aplica (pasivo)',
     ],
     ...(device.isActiveDevice && offersApi(device.type, device.apiUrl)
       ? ([['API REST', apiStatusText(device)]] as [string, string | null][])

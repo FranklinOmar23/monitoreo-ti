@@ -1,4 +1,4 @@
-/* =====================================================================
+﻿/* =====================================================================
    SISTEMA DE MONITOREO DE MÁQUINAS, RED Y DATA CENTER (MULTIEMPRESA)
    Script de creación del esquema — SQL Server 2019 o superior
    ---------------------------------------------------------------------
@@ -269,6 +269,7 @@ CREATE TABLE dbo.maquinas (
     nombre              NVARCHAR(100) NOT NULL,
     tipo                VARCHAR(20) NOT NULL DEFAULT 'computadora'
                         CHECK (tipo IN ('computadora','laptop','servidor','impresora','otro')),
+    tipo_fijo           BIT NOT NULL DEFAULT 0,       -- elegido a mano: el inventario no lo cambia (decisión 82)
     marca               NVARCHAR(100) NULL,
     modelo              NVARCHAR(100) NULL,
     serie               NVARCHAR(100) NULL,
@@ -486,10 +487,14 @@ CREATE TABLE dbo.dispositivos_red (
     api_aceptar_certificado BIT NOT NULL DEFAULT 1,   -- certificado propio (autofirmado) del equipo
     api_ultimo_ok           DATETIME2(0) NULL,
     api_ultimo_error        NVARCHAR(300) NULL,
+    fortigate_id            INT NULL,                 -- FortiSwitch administrado: sus datos llegan por la API de ese FortiGate
+    serie                   NVARCHAR(50) NULL,        -- número de serie (así lo reconoce el FortiGate)
     creado                  DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CHECK (gabinete_id IS NULL OR posicion_u IS NOT NULL),
     CONSTRAINT UQ_dispositivos_red_empresa_nombre UNIQUE (empresa_id, nombre),
     CONSTRAINT UQ_dispositivos_red_empresa_id UNIQUE (empresa_id, id),
+    CONSTRAINT FK_dispositivos_red_fortigate FOREIGN KEY (empresa_id, fortigate_id)
+        REFERENCES dbo.dispositivos_red(empresa_id, id),
     CONSTRAINT FK_dispositivos_red_sucursal FOREIGN KEY (empresa_id, sucursal_id)
         REFERENCES dbo.sucursales(empresa_id, id),
     CONSTRAINT FK_dispositivos_red_gabinete FOREIGN KEY (empresa_id, gabinete_id)
@@ -708,6 +713,72 @@ CREATE TABLE dbo.instalaciones_remotas (
     actualizado         DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CONSTRAINT FK_instalaciones_remotas_subred FOREIGN KEY (empresa_id, subred_id)
         REFERENCES dbo.subredes(empresa_id, id) ON DELETE CASCADE
+);
+GO
+
+-- Respaldos de servidores (decisión 82): los ejecuta el agente del servidor en su horario.
+-- La clave de la carpeta de red va cifrada por la aplicación y solo viaja sellada para ese agente.
+CREATE TABLE dbo.respaldo_trabajos (
+    id                      INT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id              INT NOT NULL REFERENCES dbo.empresas(id),
+    maquina_id              INT NOT NULL,
+    nombre                  NVARCHAR(100) NOT NULL,
+    origen                  VARCHAR(10) NOT NULL CHECK (origen IN ('sql','carpetas')),
+    instancia_sql           NVARCHAR(128) NULL,
+    elementos               NVARCHAR(MAX) NOT NULL,
+    modo                    VARCHAR(8) NOT NULL DEFAULT 'caliente' CHECK (modo IN ('caliente','frio')),
+    servicios_detener       NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+    frio_max_minutos        INT NOT NULL DEFAULT 60,
+    estrategia              VARCHAR(12) NOT NULL DEFAULT 'incremental' CHECK (estrategia IN ('completo','incremental')),
+    completo_cada_dias      INT NOT NULL DEFAULT 7,
+    destino_tipo            VARCHAR(14) NOT NULL CHECK (destino_tipo IN ('disco_externo','red','local')),
+    destino_ruta            NVARCHAR(400) NOT NULL,
+    discos                  NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+    expulsar                BIT NOT NULL DEFAULT 0,
+    red_usuario             NVARCHAR(150) NULL,
+    red_clave_cifrada       VARBINARY(MAX) NULL,
+    frecuencia              VARCHAR(8) NOT NULL DEFAULT 'diario' CHECK (frecuencia IN ('diario','semanal')),
+    dias_semana             VARCHAR(20) NULL,
+    hora                    VARCHAR(5) NOT NULL,
+    retener_diarios         INT NOT NULL DEFAULT 7,
+    retener_mensuales       INT NOT NULL DEFAULT 3,
+    verificar               BIT NOT NULL DEFAULT 1,
+    activo                  BIT NOT NULL DEFAULT 1,
+    creado_por              INT NOT NULL REFERENCES dbo.usuarios(id),
+    creado                  DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    actualizado             DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    ultima_ejecucion        DATETIME2(0) NULL,
+    ultimo_estado           VARCHAR(12) NULL,
+    ultimo_correcto         DATETIME2(0) NULL,
+    ultimo_error            NVARCHAR(400) NULL,
+    proxima_ejecucion       DATETIME2(0) NULL,
+    sin_disco_desde         DATETIME2(0) NULL,
+    servicios_sin_arrancar  NVARCHAR(400) NULL,
+    CONSTRAINT UQ_respaldo_trabajos_empresa UNIQUE (empresa_id, id),
+    CONSTRAINT FK_respaldo_trabajos_maquina FOREIGN KEY (empresa_id, maquina_id) REFERENCES dbo.maquinas(empresa_id, id)
+);
+GO
+
+CREATE TABLE dbo.respaldo_ejecuciones (
+    id                  BIGINT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id          INT NOT NULL REFERENCES dbo.empresas(id),
+    trabajo_id          INT NOT NULL,
+    maquina_id          INT NOT NULL,
+    ejecucion_uid       UNIQUEIDENTIFIER NOT NULL,
+    disparo             VARCHAR(10) NOT NULL DEFAULT 'programado' CHECK (disparo IN ('programado','manual')),
+    pedido_por          INT NULL REFERENCES dbo.usuarios(id),
+    estado              VARCHAR(12) NOT NULL CHECK (estado IN ('en_curso','correcto','advertencia','error')),
+    tipo                VARCHAR(12) NULL CHECK (tipo IN ('completo','incremental','diferencial')),
+    inicio              DATETIME2(0) NOT NULL,
+    fin                 DATETIME2(0) NULL,
+    bytes_copiados      BIGINT NOT NULL DEFAULT 0,
+    bytes_totales       BIGINT NOT NULL DEFAULT 0,
+    archivos            INT NULL,
+    destino             NVARCHAR(300) NULL,
+    conjunto            NVARCHAR(200) NULL,
+    detalle             NVARCHAR(1000) NULL,
+    CONSTRAINT FK_respaldo_ejecuciones_trabajo FOREIGN KEY (empresa_id, trabajo_id)
+        REFERENCES dbo.respaldo_trabajos(empresa_id, id) ON DELETE CASCADE
 );
 GO
 
@@ -1092,11 +1163,17 @@ CREATE INDEX IX_direcciones_ip_mac       ON dbo.direcciones_ip (empresa_id, mac)
 CREATE INDEX IX_reservas_ip_subred       ON dbo.reservas_ip (empresa_id, subred_id);
 CREATE INDEX IX_instalaciones_subred     ON dbo.instalaciones_remotas (empresa_id, subred_id, creado DESC);
 CREATE INDEX IX_instalaciones_token      ON dbo.instalaciones_remotas (token_id) WHERE token_id IS NOT NULL;
+CREATE INDEX IX_respaldo_trabajos_maquina ON dbo.respaldo_trabajos (empresa_id, maquina_id);
+CREATE UNIQUE INDEX UX_respaldo_ejecuciones_uid ON dbo.respaldo_ejecuciones (ejecucion_uid);
+CREATE INDEX IX_respaldo_ejecuciones_maquina ON dbo.respaldo_ejecuciones (empresa_id, maquina_id, inicio DESC);
 CREATE INDEX IX_historial_ip_ip          ON dbo.historial_ip (empresa_id, subred_id, ip, hasta);
 
 -- Soporte y auditoría
 CREATE INDEX IX_tickets_estado           ON dbo.tickets (empresa_id, estado, prioridad) INCLUDE (asignado_a, maquina_id);
 CREATE INDEX IX_tickets_asignado         ON dbo.tickets (empresa_id, asignado_a, estado);
+-- Listados paginados (decisión 83): tickets por fecha y comentarios por ticket.
+CREATE INDEX IX_tickets_creado            ON dbo.tickets (empresa_id, creado DESC);
+CREATE INDEX IX_ticket_comentarios_ticket ON dbo.ticket_comentarios (empresa_id, ticket_id);
 CREATE INDEX IX_mantenimientos_maquina   ON dbo.mantenimientos (empresa_id, maquina_id, fecha_programada);
 CREATE INDEX IX_comandos_maquina_estado  ON dbo.comandos (empresa_id, maquina_id, estado);
 CREATE INDEX IX_comandos_lote            ON dbo.comandos (empresa_id, lote_id);
@@ -1158,6 +1235,125 @@ SELECT
     det.ultima_vez
 FROM dbo.maquinas m
 JOIN detecciones det ON det.empresa_id = m.empresa_id AND det.maquina_id = m.id AND det.orden = 1;
+GO
+
+/* Decisión 83: vistas de los listados. Juntan en una consulta lo que antes eran varias (nombres de sucursal, equipo,
+   usuario, última métrica, conteos). Son vistas normales: SQL Server no permite vistas indexadas sobre tablas con
+   seguridad por empresa (RLS); la política sigue aplicando a través de ellas. */
+
+-- Equipos: datos de la lista, la última métrica, la versión del agente y las alertas abiertas.
+CREATE OR ALTER VIEW dbo.vw_maquinas_lista
+AS
+SELECT
+    m.empresa_id, m.id, m.nombre, m.tipo, m.marca, m.modelo, m.serie, m.sistema_operativo, m.ip, m.mac, m.responsable,
+    m.codigo_qr, m.estado, m.ultimo_reporte, m.creado, m.sucursal_id, s.nombre AS sucursal, m.departamento_id,
+    d.nombre AS departamento,
+    CASE m.estado WHEN 'critico' THEN 0 WHEN 'advertencia' THEN 1 WHEN 'desconectado' THEN 2 ELSE 3 END AS orden_estado,
+    um.fecha_hora AS metrica_fecha, um.cpu, um.ram, um.disco, um.temperatura,
+    ag.version AS version_agente,
+    (SELECT COUNT(*) FROM dbo.alertas al
+      WHERE al.empresa_id = m.empresa_id AND al.maquina_id = m.id AND al.estado <> 'resuelta') AS alertas_abiertas
+FROM dbo.maquinas m
+JOIN dbo.sucursales s ON s.empresa_id = m.empresa_id AND s.id = m.sucursal_id
+LEFT JOIN dbo.departamentos d ON d.empresa_id = m.empresa_id AND d.id = m.departamento_id
+LEFT JOIN dbo.agentes ag ON ag.empresa_id = m.empresa_id AND ag.maquina_id = m.id
+OUTER APPLY (
+    SELECT TOP (1) x.fecha_hora, x.cpu, x.ram, x.disco, x.temperatura
+    FROM dbo.metricas x
+    WHERE x.empresa_id = m.empresa_id AND x.maquina_id = m.id
+    ORDER BY x.fecha_hora DESC
+) um;
+GO
+
+-- Dashboard: conteos por sucursal (estados, nuevos en 7 días, críticos con ticket abierto, desconectados hace más de 24 h).
+CREATE OR ALTER VIEW dbo.vw_estado_flota
+AS
+WITH equipos AS (
+    SELECT
+        m.empresa_id, m.sucursal_id, m.estado,
+        CASE WHEN m.creado >= DATEADD(DAY, -7, SYSUTCDATETIME()) THEN 1 ELSE 0 END AS nuevo,
+        CASE WHEN m.estado = 'critico' AND EXISTS (
+            SELECT 1 FROM dbo.tickets t
+            WHERE t.empresa_id = m.empresa_id AND t.maquina_id = m.id AND t.estado NOT IN ('resuelto', 'cerrado'))
+            THEN 1 ELSE 0 END AS critico_con_ticket,
+        CASE WHEN m.estado = 'desconectado' AND m.ultimo_reporte < DATEADD(HOUR, -24, SYSUTCDATETIME()) THEN 1 ELSE 0 END AS desconectado_24h
+    FROM dbo.maquinas m
+    WHERE m.estado <> 'baja'
+)
+SELECT
+    s.empresa_id, s.id AS sucursal_id, s.nombre AS sucursal, s.provincia, s.activa,
+    COUNT(e.estado) AS total,
+    ISNULL(SUM(CASE WHEN e.estado = 'sano' THEN 1 ELSE 0 END), 0) AS sanos,
+    ISNULL(SUM(CASE WHEN e.estado = 'advertencia' THEN 1 ELSE 0 END), 0) AS advertencias,
+    ISNULL(SUM(CASE WHEN e.estado = 'critico' THEN 1 ELSE 0 END), 0) AS criticos,
+    ISNULL(SUM(CASE WHEN e.estado = 'desconectado' THEN 1 ELSE 0 END), 0) AS desconectados,
+    ISNULL(SUM(e.nuevo), 0) AS nuevos_7d,
+    ISNULL(SUM(e.critico_con_ticket), 0) AS criticos_con_ticket,
+    ISNULL(SUM(e.desconectado_24h), 0) AS desconectados_24h
+FROM dbo.sucursales s
+LEFT JOIN equipos e ON e.empresa_id = s.empresa_id AND e.sucursal_id = s.id
+GROUP BY s.empresa_id, s.id, s.nombre, s.provincia, s.activa;
+GO
+
+-- Alertas con el equipo o dispositivo, la sucursal (la del dispositivo si es de red) y quién la atiende.
+CREATE OR ALTER VIEW dbo.vw_alertas_lista
+AS
+SELECT
+    a.empresa_id, a.id, a.nivel, a.estado, a.mensaje, a.origen, a.codigo, a.maquina_id, m.nombre AS maquina,
+    a.dispositivo_id, dv.nombre AS dispositivo,
+    CASE WHEN a.dispositivo_id IS NOT NULL THEN dv.sucursal_id ELSE m.sucursal_id END AS sucursal_id,
+    s.nombre AS sucursal, a.atendida_por, u.nombre AS atendida_por_nombre, a.creada, a.resuelta,
+    CASE a.nivel WHEN 'critico' THEN 2 ELSE 1 END AS orden_nivel,
+    CASE WHEN a.estado = 'resuelta' THEN 1 ELSE 0 END AS es_resuelta,
+    COALESCE(a.resuelta, a.creada) AS fecha_orden
+FROM dbo.alertas a
+LEFT JOIN dbo.maquinas m ON m.empresa_id = a.empresa_id AND m.id = a.maquina_id
+LEFT JOIN dbo.dispositivos_red dv ON dv.empresa_id = a.empresa_id AND dv.id = a.dispositivo_id
+LEFT JOIN dbo.sucursales s ON s.empresa_id = a.empresa_id
+    AND s.id = CASE WHEN a.dispositivo_id IS NOT NULL THEN dv.sucursal_id ELSE m.sucursal_id END
+LEFT JOIN dbo.usuarios u ON u.id = a.atendida_por;
+GO
+
+-- Tickets con el equipo, la sucursal, las personas y los comentarios; la prioridad como número para ordenar bien.
+CREATE OR ALTER VIEW dbo.vw_tickets_lista
+AS
+SELECT
+    t.empresa_id, t.id, t.titulo, t.prioridad,
+    CASE t.prioridad WHEN 'urgente' THEN 4 WHEN 'alta' THEN 3 WHEN 'media' THEN 2 ELSE 1 END AS orden_prioridad,
+    t.estado, t.maquina_id, m.nombre AS maquina, m.sucursal_id, s.nombre AS sucursal, t.alerta_id,
+    t.asignado_a, ua.nombre AS asignado_nombre, t.creado_por, uc.nombre AS creado_por_nombre, t.creado, t.cerrado,
+    (SELECT COUNT(*) FROM dbo.ticket_comentarios c WHERE c.empresa_id = t.empresa_id AND c.ticket_id = t.id) AS comentarios
+FROM dbo.tickets t
+LEFT JOIN dbo.maquinas m ON m.empresa_id = t.empresa_id AND m.id = t.maquina_id
+LEFT JOIN dbo.sucursales s ON s.empresa_id = t.empresa_id AND s.id = m.sucursal_id
+LEFT JOIN dbo.usuarios ua ON ua.id = t.asignado_a
+LEFT JOIN dbo.usuarios uc ON uc.id = t.creado_por;
+GO
+
+-- Dashboard: equipos con errores en 7 días o alertas abiertas, con el resumen de lo último.
+CREATE OR ALTER VIEW dbo.vw_problemas_7d
+AS
+SELECT
+    m.empresa_id, m.id AS maquina_id, m.nombre, m.estado, m.sucursal_id,
+    ev.eventos, ult.resumen, al.mensaje AS alerta
+FROM dbo.maquinas m
+OUTER APPLY (
+    SELECT COUNT(*) AS eventos FROM dbo.eventos_error e
+    WHERE e.empresa_id = m.empresa_id AND e.maquina_id = m.id AND e.fecha_hora >= DATEADD(DAY, -7, SYSUTCDATETIME())
+      AND e.nivel IN ('error', 'critico')
+) ev
+OUTER APPLY (
+    SELECT TOP (1) COALESCE(e.mensaje_simple, e.origen) AS resumen FROM dbo.eventos_error e
+    WHERE e.empresa_id = m.empresa_id AND e.maquina_id = m.id AND e.fecha_hora >= DATEADD(DAY, -7, SYSUTCDATETIME())
+      AND e.nivel IN ('error', 'critico')
+    ORDER BY e.fecha_hora DESC
+) ult
+OUTER APPLY (
+    SELECT TOP (1) a.mensaje FROM dbo.alertas a
+    WHERE a.empresa_id = m.empresa_id AND a.maquina_id = m.id AND a.estado <> 'resuelta'
+    ORDER BY CASE a.nivel WHEN 'critico' THEN 2 ELSE 1 END DESC
+) al
+WHERE m.estado <> 'baja' AND (ev.eventos > 0 OR al.mensaje IS NOT NULL);
 GO
 
 
@@ -1299,7 +1495,8 @@ INSERT INTO dbo.permisos (clave, descripcion) VALUES
     (N'reportes.ver',           N'Ver y exportar reportes'),
     (N'usuarios.administrar',   N'Administrar usuarios, roles y permisos'),
     (N'auditoria.ver',          N'Ver la bitácora de auditoría'),
-    (N'configuracion.editar',   N'Cambiar la configuración general');
+    (N'configuracion.editar',   N'Cambiar la configuración general'),
+    (N'respaldos.gestionar',    N'Configurar y lanzar respaldos de servidores');
 
 -- Administrador: todos los permisos
 INSERT INTO dbo.rol_permiso (rol_id, permiso_id)

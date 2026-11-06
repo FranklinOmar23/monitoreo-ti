@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -158,13 +158,13 @@ public sealed class NetworkSnmpTests(TestDatabase database) : IAsyncLifetime
         location.GetProperty("connection").GetProperty("portLabel").GetString().Should().Be("Gi1/0/1");
         location.GetProperty("connection").GetProperty("vlan").GetInt32().Should().Be(20);
 
-        var unknown = (await JsonAsync(await lab.Admin.GetAsync("/api/v1/red/desconocidos"))).EnumerateArray()
+        var unknown = ((await JsonAsync(await lab.Admin.GetAsync("/api/v1/red/desconocidos?limit=100"))).GetProperty("data").GetProperty("data")).EnumerateArray()
             .Where(u => u.GetProperty("deviceId").GetInt32() == lab.Switch).ToList();
         unknown.Single(u => !u.GetProperty("isRandom").GetBoolean()).GetProperty("ip").GetString().Should().Be("10.30.20.50");
         unknown.Single(u => u.GetProperty("isRandom").GetBoolean()).GetProperty("count").GetInt32().Should().Be(2);
         unknown.Should().NotContain(u => u.GetProperty("mac").GetString()!.StartsWith("00:11:22"), "las MAC de una troncal no ubican equipos");
 
-        var differences = (await JsonAsync(await lab.Admin.GetAsync("/api/v1/red/diferencias"))).EnumerateArray()
+        var differences = ((await JsonAsync(await lab.Admin.GetAsync("/api/v1/red/diferencias?limit=100"))).GetProperty("data").GetProperty("data")).EnumerateArray()
             .Where(d => d.GetProperty("deviceId").GetInt32() == lab.Switch).Select(d => d.GetProperty("kind").GetString()).ToList();
         differences.Should().Contain("equipo_sin_cable").And.Contain("enlace_sin_cable");
 
@@ -208,7 +208,7 @@ public sealed class NetworkSnmpTests(TestDatabase database) : IAsyncLifetime
         await EvaluateNetworkAsync();
 
         var alerts = await JsonAsync(await lab.Admin.GetAsync("/api/v1/alertas?red=true"));
-        var alert = alerts.GetProperty("page").GetProperty("items").EnumerateArray()
+        var alert = alerts.GetProperty("data").GetProperty("data").EnumerateArray()
             .Single(a => a.GetProperty("deviceId").GetInt32() == lab.Switch);
         alert.GetProperty("level").GetString().Should().Be("critico");
         alert.GetProperty("machineId").GetInt32().Should().Be(lab.Pc.MachineId);

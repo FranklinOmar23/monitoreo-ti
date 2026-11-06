@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using MonitoreoTI.Api.Auth;
 using MonitoreoTI.Application.Auth;
@@ -127,4 +127,5 @@ public static class PermissionPolicies
     public static readonly string ScriptsView = AuthExtensions.Permission($"{PermissionKeys.ScriptsRun}|{PermissionKeys.ScriptsEdit}");
     public static readonly string ScriptsRun = AuthExtensions.Permission(PermissionKeys.ScriptsRun);
     public static readonly string ScriptsEdit = AuthExtensions.Permission(PermissionKeys.ScriptsEdit);
+    public static readonly string BackupsManage = AuthExtensions.Permission(PermissionKeys.BackupsManage);
 }

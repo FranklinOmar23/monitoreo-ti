@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PermissionItem, RoleItem, UserItem } from '@monitoreoti/shared';
-import { counts, fakePanelApi, fakeUsersApi, renderWithPanel } from '../../test/fakes';
+import { counts, fakePanelApi, fakeUsersApi, renderWithPanel, pageFrom } from '../../test/fakes';
 import { PerfilPage } from '../PerfilPage';
 import { UsuariosPage } from './UsuariosPage';
 
@@ -101,7 +101,7 @@ describe('Usuarios (W-36, W-37)', () => {
           isSelf: true,
         }),
       ]);
-    renderWithPanel(<UsuariosPage />, fakePanelApi({ usuarios: fakeUsersApi({ list }) }));
+    renderWithPanel(<UsuariosPage />, fakePanelApi({ usuarios: fakeUsersApi({ list: pageFrom(list) }) }));
 
     const row = (await screen.findByText('Luis Peña')).closest('tr')!;
     expect(within(row).getByText('Sin contraseña')).toBeTruthy();
@@ -109,8 +109,9 @@ describe('Usuarios (W-36, W-37)', () => {
     expect(within(row).getByText('Todas')).toBeTruthy();
     expect(screen.getByText('(usted)')).toBeTruthy();
 
+    // El servidor filtra (decisión 83): la búsqueda viaja como q.
     fireEvent.change(screen.getByLabelText('Buscar por nombre o correo'), { target: { value: 'admin@' } });
-    expect(screen.queryByText('Luis Peña')).toBeNull();
+    await waitFor(() => expect(screen.queryByText('Luis Peña')).toBeNull());
   });
 
   it('crea el usuario con sus sucursales y muestra el enlace para entregarlo a mano', async () => {
@@ -136,7 +137,7 @@ describe('Usuarios (W-36, W-37)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Agregar usuario/ }));
     fireEvent.change(screen.getByLabelText('Nombre *'), { target: { value: ' Rosa Díaz ' } });
     fireEvent.change(screen.getByLabelText('Correo *'), { target: { value: 'rosa@caribe.test' } });
-    await screen.findByRole('option', { name: 'Tecnico' });
+    await within(await screen.findByRole('dialog')).findByRole('option', { name: 'Tecnico' });
     fireEvent.change(screen.getByLabelText('Rol *'), { target: { value: '2' } });
     expect(screen.getByText(/Da acceso remoto/)).toBeTruthy();
     fireEvent.click(await screen.findByLabelText('Santiago'));
@@ -167,7 +168,7 @@ describe('Usuarios (W-36, W-37)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Agregar usuario/ }));
     fireEvent.change(screen.getByLabelText('Nombre *'), { target: { value: 'Pedro' } });
     fireEvent.change(screen.getByLabelText('Correo *'), { target: { value: 'pedro@otra.test' } });
-    await screen.findByRole('option', { name: 'Administrador' });
+    await within(await screen.findByRole('dialog')).findByRole('option', { name: 'Administrador' });
     fireEvent.change(screen.getByLabelText('Rol *'), { target: { value: '1' } });
     expect(screen.getByText('El Administrador ve todas las sucursales.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Crear y enviar enlace' }));
@@ -180,7 +181,7 @@ describe('Usuarios (W-36, W-37)', () => {
     const list = () => Promise.resolve([user({ shared: true, pending: false })]);
     renderWithPanel(
       <UsuariosPage />,
-      fakePanelApi({ usuarios: fakeUsersApi({ list, roles: () => Promise.resolve(roles) }) }),
+      fakePanelApi({ usuarios: fakeUsersApi({ list: pageFrom(list), roles: () => Promise.resolve(roles) }) }),
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /Luis Peña/ }));
@@ -197,7 +198,7 @@ describe('Usuarios (W-36, W-37)', () => {
       <UsuariosPage />,
       fakePanelApi({
         usuarios: fakeUsersApi({
-          list: () => Promise.resolve([user({})]),
+          list: pageFrom(() => Promise.resolve([user({})])),
           roles: () => Promise.resolve(roles),
           setActive,
         }),
@@ -304,7 +305,7 @@ describe('Mi perfil (W-41)', () => {
       ]);
     renderWithPanel(
       <PerfilPage companyName="Caribe Tours" roleName="Administrador" />,
-      fakePanelApi({ usuarios: fakeUsersApi({ profile, sessions, closeSession }) }),
+      fakePanelApi({ usuarios: fakeUsersApi({ profile, sessions: pageFrom(sessions), closeSession }) }),
     );
 
     const current = (await screen.findByText(/PC-042076/)).closest('tr')!;

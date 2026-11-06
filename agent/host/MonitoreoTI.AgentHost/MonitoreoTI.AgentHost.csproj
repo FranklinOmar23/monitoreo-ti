@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <!--
     Anfitrión del servicio de Windows del agente: Windows lo controla (iniciar, detener, reiniciar si falla)
@@ -14,7 +14,9 @@
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- SQL Server (respaldos, decisión 82) no funciona en modo invariante; Windows trae ICU/NLS. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>none</DebugType>
     <!-- Captura de pantalla (asistente de sesión): copia de memoria entre el mapa de bits y los búferes. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -22,6 +24,9 @@
 
   <ItemGroup>
     <PackageReference Include="Lextm.SharpSnmpLib" Version="12.5.7" />
+    <!-- Respaldos de servidores (decisión 82): BACKUP DATABASE y VSS/discos por WMI (lista §4.3). -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />

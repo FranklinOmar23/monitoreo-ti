@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -56,7 +56,7 @@ public sealed class AlertApiTests(TestDatabase database) : IAsyncLifetime
     }
 
     private static long AlertIdOf(JsonElement list, int machineId) =>
-        list.GetProperty("page").GetProperty("items").EnumerateArray()
+        list.GetProperty("data").GetProperty("data").EnumerateArray()
             .Single(a => a.GetProperty("machineId").GetInt32() == machineId).GetProperty("id").GetInt64();
 
     [DatabaseFact]
@@ -116,8 +116,8 @@ public sealed class AlertApiTests(TestDatabase database) : IAsyncLifetime
         (await otherBranch.GetAsync($"/api/v1/alertas/{id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await otherBranch.PostAsJsonAsync($"/api/v1/alertas/{id}/atender", new { nota = (string?)null }))
             .StatusCode.Should().Be(HttpStatusCode.NotFound);
-        var list = await JsonAsync(await otherBranch.GetAsync("/api/v1/alertas?estado=todas&tamano=200"));
-        list.GetProperty("page").GetProperty("items").EnumerateArray()
+        var list = await JsonAsync(await otherBranch.GetAsync("/api/v1/alertas?estado=todas&limit=100"));
+        list.GetProperty("data").GetProperty("data").EnumerateArray()
             .Should().OnlyContain(a => a.GetProperty("branchName").GetString() == "Santo Domingo");
     }
 
@@ -140,7 +140,7 @@ public sealed class AlertApiTests(TestDatabase database) : IAsyncLifetime
         // 55 % no alcanza la regla de la empresa (80 %) pero sí la de Santiago (50 %).
         var agent = await MachineWithDiskAsync(55);
         var alerts = await JsonAsync(await admin.GetAsync($"/api/v1/alertas?maquina={agent.MachineId}"));
-        var alert = alerts.GetProperty("page").GetProperty("items").EnumerateArray().Single();
+        var alert = alerts.GetProperty("data").GetProperty("data").EnumerateArray().Single();
         alert.GetProperty("level").GetString().Should().Be("advertencia");
 
         rules = await JsonAsync(await admin.GetAsync("/api/v1/reglas-alerta"));
@@ -150,7 +150,7 @@ public sealed class AlertApiTests(TestDatabase database) : IAsyncLifetime
         (await admin.DeleteAsync($"/api/v1/reglas-alerta/{ruleId}")).EnsureSuccessStatusCode();
         await EvaluateAsync(agent);
         (await JsonAsync(await admin.GetAsync($"/api/v1/alertas?maquina={agent.MachineId}")))
-            .GetProperty("page").GetProperty("total").GetInt32().Should().Be(0, "sin el ajuste vuelve a la regla de la empresa y se resuelve sola");
+            .GetProperty("data").GetProperty("total").GetInt32().Should().Be(0, "sin el ajuste vuelve a la regla de la empresa y se resuelve sola");
     }
 
     [DatabaseFact]

@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Panel;
 using MonitoreoTI.Domain.Entities.Inventory;
 using MonitoreoTI.Domain.Enums;
@@ -71,22 +71,21 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
 
     public async Task<DashboardData> DashboardAsync(CancellationToken ct)
     {
-        var machines = await VisibleMachinesAsync(ct);
-        var counts = await CountAsync(machines, ct);
-        var weekAgo = Now.AddDays(-7);
-
+        // Decisión 83: los conteos por sucursal (estados y los tres indicadores) salen de una sola vista.
+        var allowed = await user.AllowedBranchIdsAsync(ct);
+        var fleet = await db.FleetStatusView.AsNoTracking()
+            .Where(b => allowed == null || allowed.Contains(b.BranchId))
+            .ToListAsync(ct);
+        var counts = new StatusCounts(
+            fleet.Sum(b => b.Total), fleet.Sum(b => b.Healthy), fleet.Sum(b => b.Warning), fleet.Sum(b => b.Critical), fleet.Sum(b => b.Disconnected));
         var kpis = new DashboardKpis(
-            counts,
-            await machines.CountAsync(m => m.CreatedAt >= weekAgo, ct),
-            await machines.CountAsync(m => m.Status == MachineStatus.Critical
-                && db.Tickets.Any(t => t.MachineId == m.Id && t.Status != TicketStatus.Resolved && t.Status != TicketStatus.Closed), ct),
-            await machines.CountAsync(m => m.Status == MachineStatus.Disconnected && m.LastReportAt < Now.AddHours(-24), ct));
+            counts, fleet.Sum(b => b.NewLast7Days), fleet.Sum(b => b.CriticalWithTicket), fleet.Sum(b => b.DisconnectedOver24h));
 
         // Historial de 7 días. Hoy se calcula en vivo; los días anteriores salen de estado_diario
         // (con sucursales restringidas no hay foto por sucursal: se muestra solo hoy).
         var today = DateOnly.FromDateTime(Now);
         var history = new List<DailyHealth>();
-        if (await user.AllowedBranchIdsAsync(ct) is null)
+        if (allowed is null)
         {
             history = await db.DailyFleetStatus.AsNoTracking()
                 .Where(d => d.Date >= today.AddDays(-6) && d.Date < today)
@@ -96,55 +95,20 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         }
         history.Add(new DailyHealth(today, counts.Healthy, counts.Warning, counts.Critical, counts.Disconnected));
 
-        var branchRows = await (await VisibleBranchesAsync(ct))
-            .Where(b => b.IsActive)
-            .Select(b => new
-            {
-                b.Id,
-                b.Name,
-                b.Province,
-                Statuses = machines.Where(m => m.BranchId == b.Id).Select(m => m.Status).ToList(),
-            })
-            .ToListAsync(ct);
-        var branches = branchRows
-            .Select(b => new BranchSummary(b.Id, b.Name, b.Province, Tally(b.Statuses)))
+        var branches = fleet.Where(b => b.IsActive)
+            .Select(b => new BranchSummary(b.BranchId, b.Branch, b.Province, new StatusCounts(b.Total, b.Healthy, b.Warning, b.Critical, b.Disconnected)))
             .OrderByDescending(b => b.Counts.Critical).ThenByDescending(b => b.Counts.Warning).ThenByDescending(b => b.Counts.Total)
             .ToList();
 
-        var visibleIds = machines.Select(m => m.Id);
-        var alerts = await db.Alerts.AsNoTracking()
-            .Where(a => a.Status != AlertStatus.Resolved && a.MachineId != null && visibleIds.Contains(a.MachineId.Value))
-            .OrderByDescending(a => a.Level).ThenByDescending(a => a.CreatedAt)
+        var alerts = await db.AlertListView.AsNoTracking()
+            .Where(a => a.Status != AlertStatus.Resolved && a.MachineId != null && (allowed == null || allowed.Contains(a.BranchId!.Value)))
+            .OrderByDescending(a => a.LevelOrder).ThenByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)
             .Take(5)
-            .Select(a => new
-            {
-                a.Id,
-                a.Message,
-                a.Level,
-                a.MachineId,
-                Machine = db.Machines.Where(m => m.Id == a.MachineId).Select(m => new { m.Name, Branch = m.Branch!.Name }).FirstOrDefault(),
-                a.CreatedAt,
-            })
             .ToListAsync(ct);
 
-        var since = Now.AddDays(-7);
-        var problems = await machines
-            .Select(m => new
-            {
-                m.Id,
-                m.Name,
-                m.Status,
-                Events = db.ErrorEvents.Count(e => e.MachineId == m.Id && e.Timestamp >= since
-                    && (e.Level == EventLevel.Error || e.Level == EventLevel.Critical)),
-                Summary = db.ErrorEvents.Where(e => e.MachineId == m.Id && e.Timestamp >= since
-                        && (e.Level == EventLevel.Error || e.Level == EventLevel.Critical))
-                    .OrderByDescending(e => e.Timestamp)
-                    .Select(e => e.SimpleMessage ?? e.Source).FirstOrDefault(),
-                OpenAlert = db.Alerts.Where(a => a.MachineId == m.Id && a.Status != AlertStatus.Resolved)
-                    .OrderByDescending(a => a.Level).Select(a => a.Message).FirstOrDefault(),
-            })
-            .Where(m => m.Events > 0 || m.OpenAlert != null)
-            .OrderByDescending(m => m.Events)
+        var problems = await db.ProblemsView.AsNoTracking()
+            .Where(p => allowed == null || allowed.Contains(p.BranchId))
+            .OrderByDescending(p => p.Events).ThenBy(p => p.Name)
             .Take(5)
             .ToListAsync(ct);
 
@@ -152,8 +116,8 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             kpis,
             history,
             branches,
-            alerts.Select(a => new RecentAlert(a.Id, a.Message, Text(a.Level), a.MachineId, a.Machine?.Name, a.Machine?.Branch, a.CreatedAt)).ToList(),
-            problems.Select(p => new ProblemMachine(p.Id, p.Name, Text(p.Status), p.OpenAlert ?? p.Summary ?? "Errores del sistema", p.Events)).ToList());
+            alerts.Select(a => new RecentAlert(a.Id, a.Message, Text(a.Level), a.MachineId, a.Machine, a.Branch, a.CreatedAt)).ToList(),
+            problems.Select(p => new ProblemMachine(p.MachineId, p.Name, Text(p.Status), p.Alert ?? p.Summary ?? "Errores del sistema", p.Events)).ToList());
     }
 
     private static StatusCounts Tally(IReadOnlyCollection<MachineStatus> statuses) => new(
@@ -167,7 +131,11 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
 
     public async Task<MachineList> MachinesAsync(MachineFilter filter, CancellationToken ct)
     {
-        var visible = await VisibleMachinesAsync(ct);
+        // Decisión 83: la vista trae sucursal, departamento, la última métrica y las alertas en la misma consulta.
+        var allowed = await user.AllowedBranchIdsAsync(ct);
+        var visible = db.MachineListView.AsNoTracking().Where(m => m.Status != MachineStatus.Retired);
+        if (allowed is not null)
+            visible = visible.Where(m => allowed.Contains(m.BranchId));
         var query = visible;
 
         if (!string.IsNullOrWhiteSpace(filter.Query))
@@ -177,56 +145,65 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             query = query.Where(m => m.Name.Contains(q) || (m.IpAddress != null && m.IpAddress.Contains(q))
                 || (m.MacAddress != null && m.MacAddress.Contains(q)) || (qr != null && m.QrCode == qr));
         }
+        if (Has(filter.Name))
+            query = query.Where(m => m.Name.Contains(filter.Name!.Trim()));
         if (filter.BranchId is int branchId)
             query = query.Where(m => m.BranchId == branchId);
         if (filter.DepartmentId is int departmentId)
             query = query.Where(m => m.DepartmentId == departmentId);
         if (TryParseText<MachineType>(filter.Type, out var type))
             query = query.Where(m => m.Type == type);
-        if (!string.IsNullOrWhiteSpace(filter.OperatingSystem))
-            query = query.Where(m => m.OperatingSystem != null && m.OperatingSystem.Contains(filter.OperatingSystem));
+        if (Has(filter.OperatingSystem))
+            query = query.Where(m => m.OperatingSystem != null && m.OperatingSystem.Contains(filter.OperatingSystem!.Trim()));
+        if (Has(filter.Brand))
+            query = query.Where(m => m.Brand != null && m.Brand.Contains(filter.Brand!.Trim()));
+        if (Has(filter.Model))
+            query = query.Where(m => m.Model != null && m.Model.Contains(filter.Model!.Trim()));
+        if (Has(filter.SerialNumber))
+            query = query.Where(m => m.SerialNumber != null && m.SerialNumber.Contains(filter.SerialNumber!.Trim()));
+        if (Has(filter.IpAddress))
+            query = query.Where(m => m.IpAddress != null && m.IpAddress.Contains(filter.IpAddress!.Trim()));
+        if (Has(filter.MacAddress))
+            query = query.Where(m => m.MacAddress != null && m.MacAddress.Contains(filter.MacAddress!.Trim()));
+        if (Has(filter.AssignedTo))
+            query = query.Where(m => m.AssignedTo != null && m.AssignedTo.Contains(filter.AssignedTo!.Trim()));
+        var (from, to) = Paging.DateRange(filter.From, filter.To);
+        if (from is not null)
+            query = query.Where(m => m.CreatedAt >= from);
+        if (to is not null)
+            query = query.Where(m => m.CreatedAt < to);
 
         // Los conteos (chips) respetan los demás filtros pero no el de estado, para que se vea cuánto hay de cada uno.
-        var counts = await CountAsync(query, ct);
+        var tally = await query.GroupBy(m => m.Status).Select(g => new { Status = g.Key, Count = g.Count() }).ToListAsync(ct);
+        int Of(MachineStatus s) => tally.Where(t => t.Status == s).Sum(t => t.Count);
+        var counts = new StatusCounts(tally.Sum(t => t.Count), Of(MachineStatus.Healthy), Of(MachineStatus.Warning),
+            Of(MachineStatus.Critical), Of(MachineStatus.Disconnected));
         if (TryParseText<MachineStatus>(filter.Status, out var status))
             query = query.Where(m => m.Status == status);
 
-        var pageSize = Math.Clamp(filter.PageSize, 1, 200);
-        var page = Math.Max(1, filter.Page);
-        var total = await query.CountAsync(ct);
-
-        var rows = await query
-            // Primero lo que necesita atención: crítico, advertencia, desconectado, sano.
-            .OrderBy(m => m.Status == MachineStatus.Critical ? 0 : m.Status == MachineStatus.Warning ? 1 : m.Status == MachineStatus.Disconnected ? 2 : 3)
-            .ThenBy(m => m.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(m => new
-            {
-                m.Id,
-                m.Name,
-                m.OperatingSystem,
-                m.Model,
-                m.BranchId,
-                Branch = m.Branch!.Name,
-                m.Type,
-                m.IpAddress,
-                m.Status,
-                m.LastReportAt,
-                Metric = db.Metrics.Where(x => x.MachineId == m.Id).OrderByDescending(x => x.Timestamp)
-                    .Select(x => new LatestMetrics(x.Timestamp, x.Cpu, x.Ram, x.Disk, x.Temperature)).FirstOrDefault(),
-            })
-            .ToListAsync(ct);
-
+        var (page, limit) = Paging.Normalize(filter.Page, filter.Limit);
+        // Primero lo que necesita atención: crítico, advertencia, desconectado, sano.
+        var rows = await query.OrderBy(m => m.StatusOrder).ThenBy(m => m.Name).ThenBy(m => m.Id).ToPageAsync(page, limit, ct);
         var systems = await visible.Where(m => m.OperatingSystem != null).Select(m => m.OperatingSystem!).Distinct().OrderBy(s => s).ToListAsync(ct);
 
-        var items = rows.Select(m => new MachineListItem(
+        var items = rows.Map(m => new MachineListItem(
             m.Id, m.Name, m.OperatingSystem ?? m.Model, m.BranchId, m.Branch, Text(m.Type), m.IpAddress, Text(m.Status),
             // Un equipo desconectado no muestra métricas viejas como si fueran actuales.
-            m.Status == MachineStatus.Disconnected ? null : m.Metric,
-            m.LastReportAt)).ToList();
+            m.Status == MachineStatus.Disconnected || m.MetricAt is null ? null : new LatestMetrics(m.MetricAt.Value, m.Cpu, m.Ram, m.Disk, m.Temperature),
+            m.LastReportAt));
+        return new MachineList(items, counts, systems);
+    }
 
-        return new MachineList(new PagedResult<MachineListItem>(items, total, page, pageSize), counts, systems);
+    private static bool Has(string? text) => !string.IsNullOrWhiteSpace(text);
+
+    /// <summary>Para listas desplegables (decisión 83): todos los equipos visibles, solo id, nombre y sucursal.</summary>
+    public async Task<IReadOnlyList<MachineOption>> MachineOptionsAsync(int? branchId, CancellationToken ct)
+    {
+        var query = await VisibleMachinesAsync(ct);
+        if (branchId is int branch)
+            query = query.Where(m => m.BranchId == branch);
+        return await query.OrderBy(m => m.Name).Take(5000)
+            .Select(m => new MachineOption(m.Id, m.Name, m.BranchId, m.IpAddress)).ToListAsync(ct);
     }
 
     // ------------------------------------------------------------------ ficha
@@ -410,7 +387,7 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         (await BranchesAsync(ct)).FirstOrDefault(b => b.Id == id);
 
     // No se llama TryParse: Minimal API tomaría a PanelQueries por un tipo enlazable desde la URL.
-    private static bool TryParseText<TEnum>(string? value, out TEnum result) where TEnum : struct, Enum
+    public static bool TryParseText<TEnum>(string? value, out TEnum result) where TEnum : struct, Enum
     {
         result = default;
         if (string.IsNullOrWhiteSpace(value))

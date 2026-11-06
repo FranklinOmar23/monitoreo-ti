@@ -5,6 +5,8 @@ import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
 import { FilterSelect } from '@components/FilterSelect';
 import { Icon } from '@components/Icon';
+import { countActive, MoreFilters } from '@components/MoreFilters';
+import { Pager } from '@components/Pager';
 import { Modal } from '@components/Modal';
 import { PageHeader } from '@components/PageHeader';
 import { StatusBadge } from '@components/StatusBadge';
@@ -16,7 +18,20 @@ import { useDebounced } from '../data/useDebounced';
 import { ReglasPage } from './ReglasPage';
 import { serviceFromAlertCode, StartServiceButton } from './remoto/StartServiceButton';
 
-const PAGE_SIZE = 50;
+/** Decisión 83: 10 alertas por página. */
+const PAGE_SIZE = 10;
+
+const NO_EXTRA = { origen: '', tipo: '', desde: '', hasta: '' };
+
+const ORIGINS = [
+  { value: 'equipos', label: 'Equipos' },
+  { value: 'red', label: 'Red' },
+];
+
+const KINDS = [
+  { value: 'auto', label: 'Automáticas' },
+  { value: 'manual', label: 'Creadas a mano' },
+];
 
 const STATUS_FILTERS = [
   { value: 'nueva', label: 'Nuevas' },
@@ -100,9 +115,20 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
   const [nivel, setNivel] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [page, setPage] = useState(1);
+  const [extra, setExtra] = useState(NO_EXTRA);
   const search = useDebounced(query.trim());
+  const datesValid = !(extra.desde && extra.hasta && extra.desde > extra.hasta);
 
-  const filters = { q: search, estado: estado || 'abiertas', nivel, sucursal: sucursal ? Number(sucursal) : null };
+  const filters = {
+    q: search,
+    estado: estado || 'abiertas',
+    nivel,
+    sucursal: sucursal ? Number(sucursal) : null,
+    red: extra.origen === '' ? undefined : extra.origen === 'red',
+    automatica: extra.tipo === '' ? undefined : extra.tipo === 'auto',
+    fechaDesde: (datesValid && extra.desde) || undefined,
+    fechaHasta: (datesValid && extra.hasta) || undefined,
+  };
   const filterKey = JSON.stringify(filters);
   const [lastFilterKey, setLastFilterKey] = useState(filterKey);
   if (filterKey !== lastFilterKey) {
@@ -112,17 +138,15 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
 
   const list = useQuery({
     queryKey: ['alertas', filters, page],
-    queryFn: () => api.alerts({ ...filters, pagina: page, tamano: PAGE_SIZE }),
+    queryFn: () => api.alerts({ ...filters, page, limit: PAGE_SIZE }),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
 
   const counts = list.data?.counts;
-  const items = list.data?.page.items ?? [];
+  const items = list.data?.data.data ?? [];
   const rows = useLeaving(items, (alert) => alert.id);
-  const total = list.data?.page.total ?? 0;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const chip = (label: string, count: number, status: string, onClick: () => void, pressed: boolean) => (
     <button type="button" className="chip" data-status={status} aria-pressed={pressed} onClick={onClick}>
@@ -152,6 +176,29 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
           allLabel="Todas"
           onChange={setSucursal}
         />
+        <MoreFilters
+          active={countActive(...Object.values(extra).map((v) => v || null))}
+          onClear={() => setExtra(NO_EXTRA)}
+          dateLabel="Creada"
+          from={extra.desde}
+          to={extra.hasta}
+          onDates={(desde, hasta) => setExtra({ ...extra, desde, hasta })}
+        >
+          <FilterSelect
+            label="De"
+            value={extra.origen}
+            options={ORIGINS}
+            allLabel="Equipos y red"
+            onChange={(origen) => setExtra({ ...extra, origen })}
+          />
+          <FilterSelect
+            label="Origen"
+            value={extra.tipo}
+            options={KINDS}
+            allLabel="Todas"
+            onChange={(tipo) => setExtra({ ...extra, tipo })}
+          />
+        </MoreFilters>
       </div>
 
       {counts && (
@@ -229,24 +276,7 @@ function AlertList({ onOpen, onOpenEquipo }: { onOpen: (id: number) => void; onO
               {estado === '' && 'Los equipos están dentro de los umbrales de sus reglas.'}
             </EmptyState>
           )}
-          {pages > 1 && (
-            <div className="pager">
-              <span className="muted">
-                Página {page} de {pages} · {total} alertas
-              </span>
-              <button type="button" className="btn btn-outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-                Anterior
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                disabled={page >= pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Siguiente
-              </button>
-            </div>
-          )}
+          <Pager data={list.data?.data} noun="alertas" onPage={setPage} />
         </div>
       )}
     </>
@@ -368,10 +398,10 @@ function AlertDetailBody({
   const api = usePanelApi();
   const linked = useQuery({
     queryKey: ['tickets', { alerta: alert.id }],
-    queryFn: () => api.tickets({ alerta: alert.id, estado: 'todos' }),
+    queryFn: () => api.tickets({ alerta: alert.id, estado: 'todos', limit: 100 }),
     enabled: tickets !== undefined,
   });
-  const linkedTickets = linked.data?.page.items ?? [];
+  const linkedTickets = linked.data?.data.data ?? [];
   const hasActiveTicket = linkedTickets.some((t) => t.status !== 'resuelto' && t.status !== 'cerrado');
   const open = alert.status !== 'resuelta';
   return (

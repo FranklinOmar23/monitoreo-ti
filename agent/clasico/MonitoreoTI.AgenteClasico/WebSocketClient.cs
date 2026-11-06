@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -12,7 +12,8 @@ namespace MonitoreoTI.AgenteClasico
 {
     /// <summary>
     /// Cliente WebSocket mínimo (RFC 6455) sobre TCP + TLS 1.2: el ClientWebSocket del Framework no funciona en
-    /// Windows 7. Solo mensajes de texto (el protocolo del agente es JSON), con ping/pong y cierre.
+    /// Windows 7. Texto (el protocolo del agente es JSON) y binario (pantalla y archivos de las sesiones remotas), con
+    /// ping/pong y cierre.
     /// </summary>
     public sealed class WebSocketClient : IDisposable
     {
@@ -70,7 +71,8 @@ namespace MonitoreoTI.AgenteClasico
             _random.GetBytes(keyBytes);
             var key = Convert.ToBase64String(keyBytes);
             var request = $"GET {uri.PathAndQuery} HTTP/1.1\r\nHost: {uri.Host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-                $"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Bearer {bearer}\r\n\r\n";
+                $"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n" +
+                (string.IsNullOrEmpty(bearer) ? "" : $"Authorization: Bearer {bearer}\r\n") + "\r\n";
             var bytes = Encoding.ASCII.GetBytes(request);
             await _stream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
 
@@ -101,6 +103,8 @@ namespace MonitoreoTI.AgenteClasico
         }
 
         public Task SendTextAsync(string text) => SendFrameAsync(0x1, Encoding.UTF8.GetBytes(text));
+
+        public Task SendBinaryAsync(byte[] data) => SendFrameAsync(0x2, data);
 
         private async Task SendFrameAsync(byte opcode, byte[] payload)
         {
@@ -151,10 +155,18 @@ namespace MonitoreoTI.AgenteClasico
             return frame;
         }
 
-        /// <summary>El siguiente mensaje de texto; null si el servidor cerró.</summary>
+        /// <summary>El siguiente mensaje de texto; null si el servidor cerró (los binarios se leen como texto).</summary>
         public async Task<string> ReceiveTextAsync()
         {
+            var received = await ReceiveAsync().ConfigureAwait(false);
+            return received == null ? null : Encoding.UTF8.GetString(received.Data);
+        }
+
+        /// <summary>El siguiente mensaje (texto o binario); null si el servidor cerró.</summary>
+        public async Task<WebSocketMessage> ReceiveAsync()
+        {
             var message = new MemoryStream();
+            var binary = false;
             while (true)
             {
                 var head = await ReadExactAsync(2).ConfigureAwait(false);
@@ -215,9 +227,11 @@ namespace MonitoreoTI.AgenteClasico
                     case 0x1:
                     case 0x0:
                     case 0x2:
+                        if (opcode == 0x2)
+                            binary = true;
                         message.Write(payload, 0, payload.Length);
                         if (fin)
-                            return Encoding.UTF8.GetString(message.ToArray());
+                            return new WebSocketMessage(binary, message.ToArray());
                         continue;
                     default:
                         throw new IOException($"Marco WebSocket desconocido ({opcode}).");
@@ -263,5 +277,19 @@ namespace MonitoreoTI.AgenteClasico
             }
             _tcp?.Close();
         }
+    }
+
+    /// <summary>Un mensaje recibido: binario (opcode 2) o texto en UTF-8.</summary>
+    public sealed class WebSocketMessage
+    {
+        public WebSocketMessage(bool binary, byte[] data)
+        {
+            Binary = binary;
+            Data = data;
+        }
+
+        public bool Binary { get; }
+        public byte[] Data { get; }
+        public string Text => Encoding.UTF8.GetString(Data);
     }
 }

@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 
 namespace MonitoreoTI.Application.Network;
 
@@ -56,7 +56,9 @@ public sealed record DeviceDetail(
     /// <summary>Agente que lo consulta por SNMP y por qué falló el último sondeo (null si respondió).</summary>
     int? CollectorId = null, string? CollectorName = null, string? LastError = null,
     /// <summary>API REST (decisión 76): si tiene token, su dirección, la última lectura buena y el último error.</summary>
-    string? ApiUrl = null, bool HasApiToken = false, bool ApiAcceptSelfSigned = true, DateTime? ApiLastOkAt = null, string? ApiLastError = null);
+    string? ApiUrl = null, bool HasApiToken = false, bool ApiAcceptSelfSigned = true, DateTime? ApiLastOkAt = null, string? ApiLastError = null,
+    /// <summary>FortiSwitch administrado (decisión 80): el FortiGate que da sus datos y su número de serie.</summary>
+    int? FortiGateId = null, string? FortiGateName = null, string? SerialNumber = null);
 
 /// <summary>Un agente que puede consultar por SNMP los equipos de su sucursal (W-49).</summary>
 public sealed record CollectorItem(int AgentId, int MachineId, string MachineName, int BranchId, string? IpAddress, bool Online, DateTime? LastContactAt, int DeviceCount);
@@ -159,7 +161,8 @@ public sealed record PortAssignmentInput(int? MaquinaId, bool? Troncal);
 // ------------------------------------------------------------------ historial (W-69)
 
 /// <summary>Historial del data center: todo, o solo un objeto (entidad + id). Por defecto, los últimos 30 días.</summary>
-public sealed record HistoryFilter(string? Entity = null, string? EntityId = null, int Days = 30, int Page = 1, int PageSize = 50);
+public sealed record HistoryFilter(string? Entity = null, string? EntityId = null, int Days = 30, int Page = 1, int Limit = Panel.Paging.DefaultLimit,
+    DateTime? From = null, DateTime? To = null);
 
 public sealed record HistoryChange(string Field, string? Before, string? After);
 

@@ -88,6 +88,8 @@ internal sealed class NetworkDeviceConfiguration : IEntityTypeConfiguration<Netw
         b.Property(x => x.ApiAcceptSelfSigned).HasColumnName("api_aceptar_certificado");
         b.Property(x => x.ApiLastOkAt).HasColumnName("api_ultimo_ok");
         b.Property(x => x.ApiLastError).HasColumnName("api_ultimo_error").HasMaxLength(300);
+        b.Property(x => x.FortiGateId).HasColumnName("fortigate_id");
+        b.Property(x => x.SerialNumber).HasColumnName("serie").HasMaxLength(50);
         b.Property(x => x.Firmware).HasColumnName("firmware").HasMaxLength(100);
         b.Property(x => x.Status).HasColumnName("estado");
         b.Property(x => x.LastPolledAt).HasColumnName("ultimo_sondeo");

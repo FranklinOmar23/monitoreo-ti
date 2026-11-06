@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../data/usePaged';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BranchItem, DepartmentItem } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
@@ -22,10 +24,9 @@ export function BranchDepartments({
 }) {
   const api = usePanelApi();
   const queries = useQueryClient();
-  const list = useQuery({
-    queryKey: ['sucursales', branch.id, 'departamentos'],
-    queryFn: () => api.branchDepartments(branch.id),
-  });
+  const { query: list, data: page, items, setPage } = usePaged(['sucursales', branch.id, 'departamentos'], (p) =>
+    api.branchDepartments(branch.id, p),
+  );
   const [editing, setEditing] = useState<DepartmentItem | 'new' | null>(null);
   const refresh = () => {
     void queries.invalidateQueries({ queryKey: ['sucursales', branch.id, 'departamentos'] });
@@ -58,7 +59,7 @@ export function BranchDepartments({
         <Loading />
       ) : list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
-      ) : list.data.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyState title={`${branch.name} todavía no tiene departamentos`} />
       ) : (
         <table className="data-table">
@@ -71,7 +72,7 @@ export function BranchDepartments({
             </tr>
           </thead>
           <tbody>
-            {list.data.map((d) => (
+            {items.map((d) => (
               <tr key={d.id}>
                 <td>{d.name}</td>
                 <td>{d.responsibleName ?? '—'}</td>
@@ -117,6 +118,7 @@ export function BranchDepartments({
           </tbody>
         </table>
       )}
+      <Pager data={page} noun="departamentos" onPage={setPage} />
       {editing && (
         <DepartmentForm
           branch={branch}

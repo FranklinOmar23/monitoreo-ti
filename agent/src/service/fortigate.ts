@@ -12,6 +12,8 @@ export interface FortiApiConfig {
   /** Token sellado para este agente ({token}). */
   token: string;
   acceptSelfSigned: boolean;
+  /** FortiSwitch registrados en Centinela que dependen de este FortiGate (decisión 80). */
+  switches?: { id: number; serie: string }[];
 }
 
 export interface FortiHttpRequest {
@@ -310,5 +312,258 @@ export function parseApiConfig(value: unknown): FortiApiConfig | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const v = value as Record<string, unknown>;
   if (typeof v['url'] !== 'string' || typeof v['token'] !== 'string') return undefined;
-  return { url: v['url'], token: v['token'], acceptSelfSigned: v['aceptar_certificado'] !== false };
+  const switches = Array.isArray(v['switches'])
+    ? (v['switches'] as unknown[]).filter(
+        (s): s is { id: number; serie: string } =>
+          !!s &&
+          typeof s === 'object' &&
+          typeof (s as { id?: unknown }).id === 'number' &&
+          typeof (s as { serie?: unknown }).serie === 'string',
+      )
+    : [];
+  return {
+    url: v['url'],
+    token: v['token'],
+    acceptSelfSigned: v['aceptar_certificado'] !== false,
+    ...(switches.length > 0 ? { switches } : {}),
+  };
+}
+
+// ------------------------------------------------------------------ FortiSwitch administrados (decisión 80)
+
+export interface FortiSwitchPort {
+  numero: number;
+  nombre: string;
+  arriba: boolean;
+  deshabilitado: boolean;
+  velocidad?: number;
+  bytesIn?: number;
+  bytesOut?: number;
+  erroresIn?: number;
+  erroresOut?: number;
+  descartes?: number;
+  /** Enlace con otro FortiSwitch (ISL): su nombre y puerto. */
+  isl?: { equipo: string; puerto?: string };
+  /** Puerto que sube al FortiGate (FortiLink). */
+  fortilink: boolean;
+}
+
+export interface FortiSwitchInfo {
+  serie: string;
+  nombre: string;
+  modelo?: string;
+  ip?: string;
+  conectado: boolean;
+  firmware?: string;
+  puertos: FortiSwitchPort[];
+  macs: { puerto: number; mac: string; vlan?: number }[];
+}
+
+export interface FortiSwitchesResult {
+  ok: boolean;
+  error?: string;
+  switches: FortiSwitchInfo[];
+  /** Campos que trajo la API (para diagnosticar otra versión de FortiOS). */
+  campos: string[];
+}
+
+const num = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim())) return Number(value.trim());
+  return undefined;
+};
+
+/** El primer campo presente entre varios nombres posibles (cambian entre versiones: "rx-bytes" o "rx_bytes"). */
+const pick = (o: JsonValue, ...keys: string[]): unknown => {
+  for (const key of keys) {
+    if (o[key] !== undefined && o[key] !== null) return o[key];
+    const alt = key.includes('-') ? key.replaceAll('-', '_') : key.replaceAll('_', '-');
+    if (o[alt] !== undefined && o[alt] !== null) return o[alt];
+  }
+  return undefined;
+};
+
+/** "port12" → 12; los puertos que no se llaman así (internal, mgmt) no cuentan. */
+export function portNumber(name: string): number | undefined {
+  const match = /^port(\d{1,3})$/i.exec(name.trim());
+  return match ? Number(match[1]) : undefined;
+}
+
+/** "S248EP-v7.2.5-build0453,230227 (GA)" → "S248EP". */
+function modelFrom(row: JsonValue, serial: string): string | undefined {
+  const explicit = text(pick(row, 'model', 'model_name', 'platform'));
+  if (explicit) return explicit;
+  const version = text(pick(row, 'os_version', 'version'));
+  const prefix = version?.split('-v')[0];
+  if (prefix && /^S\d/i.test(prefix)) return prefix;
+  return /^S\d{3}/i.test(serial) ? serial.slice(0, 6) : undefined;
+}
+
+function parsePort(p: JsonValue): FortiSwitchPort | undefined {
+  const name = text(pick(p, 'interface', 'port', 'port_name', 'name'));
+  const numero = name ? portNumber(name) : undefined;
+  if (!name || numero === undefined) return undefined;
+  const status = (text(pick(p, 'status', 'link_status', 'state')) ?? '').toLowerCase();
+  const peer = text(pick(p, 'isl_peer_device_name', 'isl-peer-device-name'));
+  const speedText = pick(p, 'speed');
+  const speed = num(speedText) ?? (typeof speedText === 'string' ? num(/^(\d+)/.exec(speedText)?.[1]) : undefined);
+  return {
+    numero,
+    nombre: name,
+    arriba: status === 'up' || status === 'connected',
+    deshabilitado: status === 'disabled' || status === 'admin-down' || pick(p, 'admin_status') === 'down',
+    velocidad: speed,
+    isl: peer ? { equipo: peer, puerto: text(pick(p, 'isl_peer_port_name', 'isl-peer-port-name')) } : undefined,
+    fortilink:
+      pick(p, 'fortilink_port', 'fgt_peer_port_name', 'fgt-peer-port-name') !== undefined &&
+      pick(p, 'fortilink_port') !== false,
+  };
+}
+
+/** Lo que devuelve managed-switch/status (una fila por switch, con sus puertos). */
+export function parseSwitchStatus(json: JsonValue): FortiSwitchInfo[] {
+  const switches: FortiSwitchInfo[] = [];
+  for (const r of rows(json)) {
+    const serial = text(pick(r, 'serial', 'switch-id', 'sn', 'name'));
+    if (!serial) continue;
+    const state = (text(pick(r, 'status', 'state', 'connection_status')) ?? '').toLowerCase();
+    const ports = Array.isArray(r['ports']) ? (r['ports'] as JsonValue[]) : [];
+    switches.push({
+      serie: serial,
+      nombre: text(pick(r, 'switch-id', 'name')) ?? serial,
+      modelo: modelFrom(r, serial),
+      ip: text(pick(r, 'connecting_from', 'connecting-from', 'ip', 'mgmt_ip')),
+      conectado: /connected|online|up|authorized/.test(state) && !/disconnected|offline|down/.test(state),
+      firmware: text(pick(r, 'os_version', 'version')),
+      puertos: ports
+        .map((p) => (p && typeof p === 'object' ? parsePort(p) : undefined))
+        .filter((p): p is FortiSwitchPort => !!p)
+        .sort((a, b) => a.numero - b.numero),
+      macs: [],
+    });
+  }
+  return switches;
+}
+
+/** managed-switch/port-stats: contadores por puerto. Lista de {serial, ports: {port1: {...}}} u objeto por serie. */
+export function applyPortStats(switches: FortiSwitchInfo[], json: JsonValue): void {
+  const results = json['results'];
+  const entries: [string | undefined, unknown][] = Array.isArray(results)
+    ? results.map((r: unknown) => [
+        text(pick((r ?? {}) as JsonValue, 'serial', 'switch-id', 'name')),
+        (r as JsonValue)?.['ports'],
+      ])
+    : results && typeof results === 'object'
+      ? Object.entries(results as JsonValue).map(([k, v]) => [k, (v as JsonValue)?.['ports'] ?? v])
+      : [];
+  for (const [serial, ports] of entries) {
+    const sw = switches.find((s) => s.serie === serial || s.nombre === serial);
+    if (!sw || !ports || typeof ports !== 'object') continue;
+    for (const [name, stats] of Object.entries(ports as JsonValue)) {
+      const port = sw.puertos.find((p) => p.nombre === name);
+      if (!port || !stats || typeof stats !== 'object') continue;
+      const st = stats as JsonValue;
+      port.bytesIn = num(pick(st, 'rx-bytes'));
+      port.bytesOut = num(pick(st, 'tx-bytes'));
+      port.erroresIn = num(pick(st, 'rx-errors'));
+      port.erroresOut = num(pick(st, 'tx-errors'));
+      const drops = (num(pick(st, 'rx-drops')) ?? 0) + (num(pick(st, 'tx-drops')) ?? 0);
+      port.descartes = pick(st, 'rx-drops') === undefined && pick(st, 'tx-drops') === undefined ? undefined : drops;
+    }
+  }
+}
+
+/** detected-device: qué MAC vio cada switch en cada puerto. */
+export function applyDetectedDevices(switches: FortiSwitchInfo[], json: JsonValue): void {
+  for (const r of rows(json)) {
+    const mac = text(pick(r, 'mac'));
+    const switchId = text(pick(r, 'switch_id', 'switch-id', 'serial'));
+    const portName = text(pick(r, 'port_name', 'port-name', 'port'));
+    const sw = switches.find((s) => s.serie === switchId || s.nombre === switchId);
+    const numero = portName ? portNumber(portName) : undefined;
+    if (!mac || !sw || numero === undefined) continue;
+    sw.macs.push({ puerto: numero, mac, vlan: num(pick(r, 'vlan_id', 'vlan')) });
+  }
+}
+
+/** Lee los FortiSwitch: el estado es obligatorio; contadores y MAC por puerto, si el permiso y la versión los dan. */
+export async function readFortiSwitches(
+  fetch: FortiHttp,
+  config: { url: string; token: string; acceptSelfSigned: boolean },
+): Promise<FortiSwitchesResult> {
+  const timeout = 20_000;
+  let status = await getJson(fetch, config, '/api/v2/monitor/switch-controller/managed-switch/status', timeout);
+  if (!status.ok && status.status === 404)
+    status = await getJson(fetch, config, '/api/v2/monitor/switch-controller/managed-switch', timeout);
+  if (!status.ok) return { ok: false, error: status.error, switches: [], campos: [] };
+
+  const switches = parseSwitchStatus(status.json);
+  const first = rows(status.json)[0];
+  const firstPort = first && Array.isArray(first['ports']) ? (first['ports'][0] as JsonValue | undefined) : undefined;
+  const campos = [
+    ...Object.keys(first ?? {}),
+    ...Object.keys(firstPort && typeof firstPort === 'object' ? firstPort : {}).map((k) => `puerto.${k}`),
+  ];
+
+  const [stats, detected] = await Promise.all([
+    getJson(fetch, config, '/api/v2/monitor/switch-controller/managed-switch/port-stats', timeout),
+    getJson(fetch, config, '/api/v2/monitor/switch-controller/detected-device', timeout),
+  ]);
+  if (stats.ok) applyPortStats(switches, stats.json);
+  if (detected.ok) applyDetectedDevices(switches, detected.json);
+  const missing = [!stats.ok ? 'contadores de puertos' : null, !detected.ok ? 'MAC por puerto' : null].filter(Boolean);
+  return {
+    ok: true,
+    error: missing.length > 0 ? `El FortiGate no dio: ${missing.join(' ni ')}.` : undefined,
+    switches,
+    campos,
+  };
+}
+
+/**
+ * El "resultado de sondeo" de un FortiSwitch, con el mismo formato que uno por SNMP: así el servidor guarda puertos,
+ * errores, MAC por puerto, enlaces y alertas igual que para cualquier switch.
+ */
+export function switchToSnmpResult(
+  deviceId: number,
+  serial: string,
+  sw: FortiSwitchInfo | undefined,
+  fortigateName: string,
+  readError?: string,
+): Record<string, unknown> {
+  if (readError) return { dispositivoId: deviceId, ok: false, error: `No se pudo leer el FortiGate: ${readError}` };
+  if (!sw)
+    return { dispositivoId: deviceId, ok: false, error: `El FortiGate no administra un switch con serie ${serial}.` };
+  if (!sw.conectado)
+    return { dispositivoId: deviceId, ok: false, error: 'El FortiGate dice que el switch está desconectado.' };
+  return {
+    dispositivoId: deviceId,
+    ok: true,
+    sistema: { descripcion: sw.firmware ?? null, nombre: sw.nombre, uptimeSegundos: null },
+    interfaces: sw.puertos.map((p) => ({
+      indice: p.numero,
+      tipo: 6,
+      nombre: p.nombre,
+      alias: null,
+      admin: p.deshabilitado ? 'down' : 'up',
+      operativo: p.arriba ? 'up' : 'down',
+      velocidadMbps: p.velocidad ?? null,
+      entradaBytes: p.bytesIn ?? null,
+      salidaBytes: p.bytesOut ?? null,
+      erroresEntrada: p.erroresIn ?? null,
+      erroresSalida: p.erroresOut ?? null,
+      descartes: p.descartes ?? null,
+    })),
+    mac: sw.macs.map((m) => ({ ifIndex: m.puerto, mac: m.mac, vlan: m.vlan ?? null })),
+    arp: [],
+    // Enlaces: otro FortiSwitch por ISL, y el FortiGate por el puerto FortiLink.
+    lldp: [
+      ...sw.puertos
+        .filter((p) => p.isl)
+        .map((p) => ({ puertoLocal: p.numero, sistema: p.isl!.equipo, puerto: p.isl!.puerto ?? null })),
+      ...sw.puertos
+        .filter((p) => p.fortilink && !p.isl)
+        .map((p) => ({ puertoLocal: p.numero, sistema: fortigateName, puerto: null })),
+    ],
+  };
 }

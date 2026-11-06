@@ -4,8 +4,10 @@
  */
 import type { MachineStatus } from '../status';
 import { createHttp, type FetchLike } from './http';
+import type { ListParams, Page, PageParams, Paged } from './paging';
 import { createNetworkApi, type MachineNetworkInfo, type NetworkApi } from './network';
 import { createRemoteApi, type RemoteApi } from './remote';
+import { createBackupsApi, type BackupsApi } from './backups';
 import { createReportsApi, type ReportsApi } from './reports';
 import { createSettingsApi, type DepartmentInput, type DepartmentItem, type SettingsApi } from './settings';
 import { createUsersApi, type UsersApi } from './users';
@@ -64,20 +66,34 @@ export interface MachineListItem {
 }
 
 export interface MachineList {
-  page: { items: MachineListItem[]; total: number; page: number; pageSize: number };
+  data: Page<MachineListItem>;
   counts: StatusCounts;
   operatingSystems: string[];
 }
 
-export interface MachineFilter {
+/** Todos los campos filtran; las fechas son de alta del equipo. */
+export interface MachineFilter extends PageParams {
   q?: string;
+  nombre?: string;
   sucursal?: number | null;
+  departamento?: number | null;
   tipo?: string;
   estado?: string;
   so?: string;
-  pagina?: number;
-  tamano?: number;
-  departamento?: number | null;
+  marca?: string;
+  modelo?: string;
+  serie?: string;
+  ip?: string;
+  mac?: string;
+  responsable?: string;
+}
+
+/** Para listas desplegables: todos los equipos visibles, sin paginar. */
+export interface MachineOption {
+  id: number;
+  name: string;
+  branchId: number;
+  ipAddress: string | null;
 }
 
 export interface MachineDetail {
@@ -388,7 +404,8 @@ export interface PendingAgent {
 export type AlertLevel = 'advertencia' | 'critico';
 export type AlertStatus = 'nueva' | 'en_proceso' | 'resuelta';
 
-export interface AlertFilter {
+/** Las fechas son de creación de la alerta. */
+export interface AlertFilter extends PageParams {
   q?: string;
   /** abiertas (por defecto), nueva, en_proceso, resuelta o todas. */
   estado?: string;
@@ -397,8 +414,12 @@ export interface AlertFilter {
   maquina?: number | null;
   /** true = solo las de red; false = solo las de equipos. */
   red?: boolean | null;
-  pagina?: number;
-  tamano?: number;
+  dispositivo?: number | null;
+  origen?: string;
+  codigo?: string;
+  atendidaPor?: number | null;
+  /** true = las del motor de alertas; false = las creadas a mano. */
+  automatica?: boolean | null;
 }
 
 export interface AlertListItem {
@@ -431,7 +452,7 @@ export interface AlertCounts {
 }
 
 export interface AlertList {
-  page: { items: AlertListItem[]; total: number; page: number; pageSize: number };
+  data: Page<AlertListItem>;
   counts: AlertCounts;
 }
 
@@ -514,8 +535,10 @@ export interface RuleInput {
 export type TicketPriority = 'baja' | 'media' | 'alta' | 'urgente';
 export type TicketStatus = 'abierto' | 'en_proceso' | 'en_espera' | 'resuelto' | 'cerrado';
 
-export interface TicketFilter {
+/** Las fechas son de apertura del ticket. */
+export interface TicketFilter extends PageParams {
   q?: string;
+  titulo?: string;
   /** activos (por defecto: todo menos cerrado), un estado o todos. */
   estado?: string;
   prioridad?: string;
@@ -524,8 +547,7 @@ export interface TicketFilter {
   sucursal?: number | null;
   maquina?: number | null;
   alerta?: number | null;
-  pagina?: number;
-  tamano?: number;
+  creadoPor?: number | null;
 }
 
 export interface TicketListItem {
@@ -556,7 +578,7 @@ export interface TicketCounts {
 }
 
 export interface TicketList {
-  page: { items: TicketListItem[]; total: number; page: number; pageSize: number };
+  data: Page<TicketListItem>;
   counts: TicketCounts;
 }
 
@@ -597,6 +619,7 @@ export interface TicketInput {
 export interface PanelApi {
   dashboard(): Promise<DashboardData>;
   machines(filter?: MachineFilter): Promise<MachineList>;
+  machineOptions(sucursal?: number | null): Promise<MachineOption[]>;
   machine(id: number): Promise<MachineDetail>;
   metrics(id: number, range: MetricRange): Promise<MetricPoint[]>;
   software(id: number): Promise<SoftwareItem[]>;
@@ -614,7 +637,10 @@ export interface PanelApi {
   networkConnection(id: number): Promise<MachineNetworkInfo | null>;
   history(id: number): Promise<AuditItem[]>;
   qr(id: number): Promise<MachineQr>;
+  /** Todas (para listas desplegables). */
   branches(): Promise<BranchItem[]>;
+  /** La pantalla de sucursales, de 10 en 10. */
+  branchesPage(params?: ListParams): Promise<Paged<BranchItem>>;
   branch(id: number): Promise<BranchItem>;
   createMachine(input: MachineInput): Promise<{ id: number }>;
   updateMachine(id: number, input: MachineInput): Promise<{ id: number }>;
@@ -625,19 +651,19 @@ export interface PanelApi {
   /** Para el equipo: los departamentos de esa sucursal (sin sucursal, todos). */
   departments(branchId?: number | null): Promise<DepartmentOption[]>;
   /** Departamentos de una sucursal, con equipos y responsable (decisión 79). */
-  branchDepartments(branchId: number): Promise<DepartmentItem[]>;
+  branchDepartments(branchId: number, params?: ListParams): Promise<Paged<DepartmentItem>>;
   saveDepartment(branchId: number, id: number | null, input: DepartmentInput): Promise<{ id: number }>;
   deleteDepartment(branchId: number, id: number): Promise<{ id: number }>;
   companyUsers(): Promise<Option[]>;
   createBranch(input: BranchInput): Promise<{ id: number }>;
   updateBranch(id: number, input: BranchInput): Promise<{ id: number }>;
-  installers(): Promise<InstallerToken[]>;
+  installers(params?: ListParams): Promise<Paged<InstallerToken>>;
   createInstaller(input: InstallerTokenInput): Promise<CreatedInstallerToken>;
   revokeInstaller(id: number): Promise<{ id: number }>;
   deleteInstaller(id: number): Promise<{ id: number }>;
   /** Vuelve a mostrar el token y el comando de instalación (409 si ya no está activo). */
   installerCommand(id: number): Promise<CreatedInstallerToken>;
-  pendingAgents(): Promise<PendingAgent[]>;
+  pendingAgents(params?: ListParams): Promise<Paged<PendingAgent>>;
   approveAgent(agentId: number): Promise<{ id: number }>;
   rejectAgent(agentId: number): Promise<{ id: number }>;
   alerts(filter?: AlertFilter): Promise<AlertList>;
@@ -669,6 +695,8 @@ export interface PanelApi {
   configuracion: SettingsApi;
   /** Reportes (W-35). */
   reportes: ReportsApi;
+  /** Respaldos de servidores (decisión 82). */
+  respaldos: BackupsApi;
 }
 
 /** El token de acceso se pide en cada llamada: se renueva solo y no debe quedar fijado en el cliente. */
@@ -682,6 +710,7 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
   return {
     dashboard: () => get('/dashboard'),
     machines: (filter = {}) => get('/maquinas', { ...filter }),
+    machineOptions: (sucursal) => get('/maquinas/opciones', { sucursal: sucursal ?? undefined }),
     machine: (id) => get(`/maquinas/${id}`),
     metrics: (id, range) => get(`/maquinas/${id}/metricas`, { rango: range }),
     software: (id) => get(`/maquinas/${id}/software`),
@@ -701,7 +730,8 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
       get<{ connection: MachineNetworkInfo | null }>(`/maquinas/${id}/conexion-red`).then((r) => r.connection),
     history: (id) => get(`/maquinas/${id}/historial`),
     qr: (id) => get(`/maquinas/${id}/qr`),
-    branches: () => get('/sucursales'),
+    branches: () => get('/sucursales/opciones'),
+    branchesPage: (params = {}) => get('/sucursales', { ...params }),
     branch: (id) => get(`/sucursales/${id}`),
     createMachine: (input) => send('POST', '/maquinas', input),
     updateMachine: (id, input) => send('PUT', `/maquinas/${id}`, input),
@@ -709,7 +739,7 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     qrLabels: (ids) => get('/maquinas/qr', { ids: ids.join(',') }),
     resolveQr: (code) => get(`/qr/${encodeURIComponent(code)}`),
     departments: (branchId) => get('/departamentos', { sucursal: branchId ?? undefined }),
-    branchDepartments: (branchId) => get(`/sucursales/${branchId}/departamentos`),
+    branchDepartments: (branchId, params = {}) => get(`/sucursales/${branchId}/departamentos`, { ...params }),
     saveDepartment: (branchId, id, input) =>
       id === null
         ? send('POST', `/sucursales/${branchId}/departamentos`, input)
@@ -718,12 +748,12 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     companyUsers: () => get('/usuarios/empresa'),
     createBranch: (input) => send('POST', '/sucursales', input),
     updateBranch: (id, input) => send('PUT', `/sucursales/${id}`, input),
-    installers: () => get('/instaladores'),
+    installers: (params = {}) => get('/instaladores', { ...params }),
     createInstaller: (input) => send('POST', '/instaladores', input),
     revokeInstaller: (id) => send('POST', `/instaladores/${id}/revocar`),
     installerCommand: (id) => get(`/instaladores/${id}/comando`),
     deleteInstaller: (id) => send('DELETE', `/instaladores/${id}`),
-    pendingAgents: () => get('/equipos-pendientes'),
+    pendingAgents: (params = {}) => get('/equipos-pendientes', { ...params }),
     approveAgent: (id) => send('POST', `/equipos-pendientes/${id}/aprobar`),
     rejectAgent: (id) => send('POST', `/equipos-pendientes/${id}/rechazar`),
     alerts: (filter = {}) => get('/alertas', { ...filter }),
@@ -749,5 +779,6 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     usuarios: createUsersApi(get, send),
     configuracion: createSettingsApi(get, send),
     reportes: createReportsApi(get),
+    respaldos: createBackupsApi(get, send),
   };
 }

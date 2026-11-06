@@ -2,6 +2,7 @@
  * Cliente del data center (/api/v1/red, Fase 4). Tipos espejo de Application/Network/NetworkContracts.cs.
  */
 import type { PortStatus } from '../status';
+import type { ListParams, Paged, PageParams } from './paging';
 
 export type DeviceType =
   | 'switch'
@@ -151,6 +152,35 @@ export interface DeviceDetail {
   apiAcceptSelfSigned?: boolean;
   apiLastOkAt?: string | null;
   apiLastError?: string | null;
+  /** FortiSwitch administrado (decisión 80): el FortiGate que da sus datos y su número de serie. */
+  fortiGateId?: number | null;
+  fortiGateName?: string | null;
+  serialNumber?: string | null;
+}
+
+/** Un FortiSwitch que administra el FortiGate y, si ya está en Centinela, cuál es. */
+export interface DetectedSwitch {
+  serial: string;
+  name: string | null;
+  model: string | null;
+  ip: string | null;
+  connected: boolean;
+  portCount: number;
+  firmware: string | null;
+  deviceId: number | null;
+  deviceName: string | null;
+}
+
+export interface DetectSwitchesResult {
+  ok: boolean;
+  error: string | null;
+  switches: DetectedSwitch[];
+  /** Campos que trajo la API (diagnóstico de otra versión de FortiOS). */
+  fields: string[];
+}
+
+export interface RegisterSwitchesInput {
+  switches: { serie: string; nombre: string; modelo: string | null; puertos: number; ip: string | null }[];
 }
 
 /** "Probar API": la dirección y el token del formulario; sin token se prueba el guardado. */
@@ -463,18 +493,12 @@ export interface HistoryItem {
   changes: HistoryChange[];
 }
 
-export interface HistoryPage {
-  items: HistoryItem[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
+export type HistoryPage = Paged<HistoryItem>;
 
-export interface HistoryFilter {
+export interface HistoryFilter extends PageParams {
   entidad?: string | null;
   id?: string | null;
   dias?: number;
-  pagina?: number;
 }
 
 export type ImportType = 'dispositivos' | 'rosetas' | 'cables';
@@ -669,11 +693,17 @@ export interface NetworkApi {
   rooms(): Promise<RoomItem[]>;
   racks(roomId?: number | null): Promise<RackItem[]>;
   rack(id: number): Promise<RackDetail>;
+  /** Todos (para listas desplegables). */
   models(): Promise<DeviceModelItem[]>;
+  modelsPage(params?: ListParams): Promise<Paged<DeviceModelItem>>;
+  /** Todos los que cumplen el filtro (para listas desplegables y vistas completas). */
   devices(filter?: DeviceFilter): Promise<DeviceListItem[]>;
+  /** La lista de dispositivos, de 10 en 10. */
+  devicesPage(filter?: DeviceFilter, params?: ListParams): Promise<Paged<DeviceListItem>>;
   device(id: number): Promise<DeviceDetail>;
   outlets(branchId?: number | null, q?: string): Promise<OutletItem[]>;
-  cables(deviceId?: number | null): Promise<CableItem[]>;
+  outletsPage(branchId?: number | null, params?: ListParams): Promise<Paged<OutletItem>>;
+  cables(deviceId?: number | null, params?: ListParams): Promise<Paged<CableItem>>;
   path(from: { roseta?: number; puerto?: number }): Promise<PathHop[]>;
   saveRoom(id: number | null, input: RoomInput): Promise<Id>;
   deleteRoom(id: number): Promise<Id>;
@@ -687,6 +717,10 @@ export interface NetworkApi {
   pollDevice(id: number): Promise<Id>;
   /** "Probar API": el recolector consulta el FortiGate con esa dirección y token; 409 si no está conectado. */
   testDeviceApi(id: number, input: ApiTestInput): Promise<ApiTestResult>;
+  /** "Detectar": los FortiSwitch que administra ese FortiGate (decisión 80). */
+  detectSwitches(fortigateId: number): Promise<DetectSwitchesResult>;
+  /** Registra los elegidos en la sucursal del FortiGate. */
+  registerSwitches(fortigateId: number, input: RegisterSwitchesInput): Promise<Id>;
   savePort(id: number, input: PortInput): Promise<Id>;
   saveOutlet(id: number | null, input: OutletInput): Promise<Id>;
   deleteOutlet(id: number): Promise<Id>;
@@ -695,8 +729,8 @@ export interface NetworkApi {
   history(filter?: HistoryFilter): Promise<HistoryPage>;
   summary(): Promise<NetworkSummary>;
   collectors(branchId?: number | null): Promise<CollectorItem[]>;
-  unknown(): Promise<UnknownDeviceItem[]>;
-  differences(): Promise<DifferenceItem[]>;
+  unknown(params?: ListParams): Promise<Paged<UnknownDeviceItem>>;
+  differences(params?: ListParams): Promise<Paged<DifferenceItem>>;
   topology(): Promise<Topology>;
   search(q: string): Promise<NetworkSearchResult[]>;
   assignPort(id: number, input: PortAssignmentInput): Promise<Id>;
@@ -715,7 +749,7 @@ export interface NetworkApi {
   /** Instala el agente en esas IP con el recolector de la subred; 403 con código 2fa_requerido sin 2FA reciente. */
   installAgents(subnetId: number, input: RemoteInstallInput): Promise<Id>;
   /** Instalaciones de las últimas 24 h de la subred. */
-  remoteInstalls(subnetId: number): Promise<RemoteInstallItem[]>;
+  remoteInstalls(subnetId: number, params?: ListParams): Promise<Paged<RemoteInstallItem>>;
 }
 
 export function createNetworkApi(
@@ -729,11 +763,14 @@ export function createNetworkApi(
     rooms: () => get('/red/salas'),
     racks: (roomId) => get('/red/gabinetes', { sala: roomId }),
     rack: (id) => get(`/red/gabinetes/${id}`),
-    models: () => get('/red/modelos'),
-    devices: (filter = {}) => get('/red/dispositivos', { ...filter }),
+    models: () => get('/red/modelos/opciones'),
+    modelsPage: (params = {}) => get('/red/modelos', { ...params }),
+    devices: (filter = {}) => get('/red/dispositivos/opciones', { ...filter }),
+    devicesPage: (filter = {}, params = {}) => get('/red/dispositivos', { ...filter, buscar: filter.q, q: undefined, ...params }),
     device: (id) => get(`/red/dispositivos/${id}`),
-    outlets: (branchId, q) => get('/red/rosetas', { sucursal: branchId, q }),
-    cables: (deviceId) => get('/red/cables', { dispositivo: deviceId }),
+    outlets: (branchId, q) => get('/red/rosetas/opciones', { sucursal: branchId, q }),
+    outletsPage: (branchId, params = {}) => get('/red/rosetas', { sucursal: branchId, ...params }),
+    cables: (deviceId, params = {}) => get('/red/cables', { dispositivo: deviceId, ...params }),
     path: (from) => get('/red/ruta', from),
     saveRoom: (id, input) => save('/red/salas', id, input),
     deleteRoom: (id) => send('DELETE', `/red/salas/${id}`),
@@ -746,6 +783,8 @@ export function createNetworkApi(
     retireDevice: (id) => send('POST', `/red/dispositivos/${id}/baja`),
     pollDevice: (id) => send('POST', `/red/dispositivos/${id}/sondear`),
     testDeviceApi: (id, input) => send('POST', `/red/dispositivos/${id}/probar-api`, input),
+    detectSwitches: (id) => send('POST', `/red/dispositivos/${id}/detectar-switches`),
+    registerSwitches: (id, input) => send('POST', `/red/dispositivos/${id}/switches`, input),
     savePort: (id, input) => send('PUT', `/red/puertos/${id}`, input),
     saveOutlet: (id, input) => save('/red/rosetas', id, input),
     deleteOutlet: (id) => send('DELETE', `/red/rosetas/${id}`),
@@ -754,8 +793,8 @@ export function createNetworkApi(
     history: (filter = {}) => get('/red/historial', { ...filter }),
     summary: () => get('/red/resumen'),
     collectors: (branchId) => get('/red/recolectores', { sucursal: branchId }),
-    unknown: () => get('/red/desconocidos'),
-    differences: () => get('/red/diferencias'),
+    unknown: (params = {}) => get('/red/desconocidos', { ...params }),
+    differences: (params = {}) => get('/red/diferencias', { ...params }),
     topology: () => get('/red/topologia'),
     search: (q) => get('/red/buscar', { q }),
     assignPort: (id, input) => send('PUT', `/red/puertos/${id}/asignacion`, input),
@@ -769,7 +808,7 @@ export function createNetworkApi(
     deleteReservation: (subnetId, id) => send('DELETE', `/red/subredes/${subnetId}/reservas/${id}`),
     sweepSubnet: (id) => send('POST', `/red/subredes/${id}/escanear`),
     installAgents: (subnetId, input) => send('POST', `/red/subredes/${subnetId}/instalar-agente`, input),
-    remoteInstalls: (subnetId) => get(`/red/subredes/${subnetId}/instalaciones`),
+    remoteInstalls: (subnetId, params = {}) => get(`/red/subredes/${subnetId}/instalaciones`, { ...params }),
     ipHistory: (subnetId, ip, days) => get(`/red/subredes/${subnetId}/historial`, { ip, dias: days }),
   };
 }

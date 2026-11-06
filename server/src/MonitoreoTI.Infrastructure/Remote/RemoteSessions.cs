@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MonitoreoTI.Application.Abstractions;
@@ -28,10 +28,16 @@ public sealed class RemoteSessions(MonitoreoDbContext db, ICurrentUser user, IAu
         var machine = await db.Machines.AsNoTracking()
             .Where(m => m.Id == input.MaquinaId && m.Status != MachineStatus.Retired && (allowed == null || allowed.Contains(m.BranchId)))
             .Where(m => db.Agents.Any(a => a.MachineId == m.Id && !a.IsRevoked && a.IsApproved))
-            .Select(m => new { m.Id, m.Name })
+            .Select(m => new { m.Id, m.Name, AgentVersion = db.Agents.Where(a => a.MachineId == m.Id && !a.IsRevoked).Select(a => a.Version).FirstOrDefault() })
             .FirstOrDefaultAsync(ct);
         if (machine is null)
             return (null, CommandResult.Invalid("El equipo no existe, no tiene agente o no tiene acceso a él."));
+        // El agente clásico anterior a la 0.2.0 (decisiones 78 y 84) no tiene sesiones remotas: ignoraría la orden y el
+        // panel se quedaría esperando. Se dice claro antes de abrir nada.
+        if (SessionRules.IsClassicWithoutSessions(machine.AgentVersion))
+            return (null, CommandResult.Conflict(
+                $"{machine.Name} tiene el agente clásico {machine.AgentVersion}, sin escritorio remoto, terminal ni explorador de archivos. " +
+                "Reinstálele el agente (instalación remota o manual) para pasarlo a la versión 0.2.0 o posterior, que sí los tiene."));
 
         var session = db.RemoteSessions.Add(new RemoteSession
         {
@@ -81,15 +87,27 @@ public sealed class RemoteSessions(MonitoreoDbContext db, ICurrentUser user, IAu
         return CommandResult.Ok(id);
     }
 
-    public async Task<SessionPage> ListAsync(int? machineId, int page, int pageSize, CancellationToken ct)
+    public async Task<PagedResult<SessionItem>> ListAsync(SessionFilter filter, CancellationToken ct)
     {
         var query = await VisibleAsync(ct);
-        if (machineId is int machine)
+        if (filter.MachineId is int machine)
             query = query.Where(s => s.MachineId == machine);
+        if (filter.UserId is int userId)
+            query = query.Where(s => s.UserId == userId);
+        if (TryParseText<RemoteSessionType>(filter.Type, out var type))
+            query = query.Where(s => s.Type == type);
+        if (filter.ViewOnly is bool viewOnly)
+            query = query.Where(s => s.ViewOnly == viewOnly);
+        if (filter.Active is bool active)
+            query = active ? query.Where(s => s.EndedAt == null) : query.Where(s => s.EndedAt != null);
+        var (from, to) = Paging.DateRange(filter.From, filter.To);
+        if (from is not null)
+            query = query.Where(s => s.StartedAt >= from);
+        if (to is not null)
+            query = query.Where(s => s.StartedAt < to);
 
-        var total = await query.CountAsync(ct);
+        var (page, limit) = Paging.Normalize(filter.Page, filter.Limit);
         var rows = await query.OrderByDescending(s => s.StartedAt).ThenByDescending(s => s.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(s => new
             {
                 s.Id,
@@ -104,13 +122,12 @@ public sealed class RemoteSessions(MonitoreoDbContext db, ICurrentUser user, IAu
                 Machine = db.Machines.Where(m => m.Id == s.MachineId).Select(m => new { m.Name, Branch = m.Branch!.Name }).First(),
                 UserName = db.Users.Where(u => u.Id == s.UserId).Select(u => u.Name).FirstOrDefault(),
             })
-            .ToListAsync(ct);
+            .ToPageAsync(page, limit, ct);
 
-        var items = rows.Select(s => new SessionItem(
+        return rows.Map(s => new SessionItem(
             s.Id, Text(s.Type), s.MachineId, s.Machine.Name, s.Machine.Branch, s.UserId, s.UserName ?? "", s.StartedAt, s.EndedAt,
             s.EndedAt is DateTime end ? (int)(end - s.StartedAt).TotalSeconds : null, s.SourceIp,
-            s.EndedAt is null && relay.IsActive(s.Id), s.Reason, s.ViewOnly)).ToList();
-        return new SessionPage(items, total, page, pageSize);
+            s.EndedAt is null && relay.IsActive(s.Id), s.Reason, s.ViewOnly));
     }
 
     private async Task<IQueryable<RemoteSession>> VisibleAsync(CancellationToken ct)

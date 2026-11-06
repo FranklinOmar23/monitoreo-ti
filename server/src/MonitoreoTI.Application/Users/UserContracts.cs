@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using MonitoreoTI.Application.Auth;
 
 namespace MonitoreoTI.Application.Users;
@@ -81,7 +81,7 @@ public static class PermissionGroups
     public static string Of(string key) => key.Split('.')[0] switch
     {
         "dashboard" or "reportes" => "General",
-        "equipos" or "sucursales" or "instaladores" => "Equipos",
+        "equipos" or "sucursales" or "instaladores" or "respaldos" => "Equipos",
         "alertas" or "tickets" => "Alertas y tickets",
         "remoto" or "scripts" => "Acceso remoto",
         "red" => "Red",

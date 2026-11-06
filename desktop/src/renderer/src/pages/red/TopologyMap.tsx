@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { EndpointCategory, Topology, TopologyEndpoint, TopologyNode } from '@monitoreoti/shared';
 import { Card } from '@components/Card';
@@ -10,18 +10,17 @@ import { DEVICE_STATUS_LABEL, DEVICE_TYPE_LABEL } from './netLabels';
 
 // ------------------------------------------------------------------ medidas del mapa
 
-const NODE_W = 196;
+const NODE_W = 200;
 const NODE_H = 58;
-const GAP_X = 44;
-const GAP_Y = 96;
-const EP_W = 172;
-const EP_H = 68;
-const EP_GAP_X = 22;
-const EP_GAP_Y = 18;
+const GAP_X = 36;
+const GAP_Y = 84;
+const EP_W = 158;
+const EP_H = 56;
+const EP_GAP_X = 18;
+const EP_GAP_Y = 10;
 /** Columnas de equipos finales bajo un switch, y cuántos se muestran antes de "ver los N". */
-const EP_COLS = 4;
-const EP_SHOWN = 11;
-const CLUSTER_GAP = 56;
+const EP_COLS = 2;
+const EP_SHOWN = 7;
 const MARGIN = 28;
 
 export interface PlacedNode extends TopologyNode {
@@ -147,6 +146,8 @@ function speed(mbps: number | null): string | null {
   return mbps >= 1000 ? `${mbps / 1000} Gbps` : `${mbps} Mbps`;
 }
 
+// ------------------------------------------------------------------ árbol (rediseño)
+
 interface PlacedEndpoint extends TopologyEndpoint {
   key: string;
   x: number;
@@ -155,6 +156,7 @@ interface PlacedEndpoint extends TopologyEndpoint {
 
 interface Cluster {
   switchId: number;
+  /** Altura de la barra que reparte el cable a los equipos (en el hueco sobre el grupo). */
   busY: number;
   endpoints: PlacedEndpoint[];
   /** "Ver los N": cuántos quedan ocultos y dónde va su botón. */
@@ -162,54 +164,210 @@ interface Cluster {
   more: { x: number; y: number } | null;
 }
 
-/** Ubica los equipos finales debajo de la última fila, agrupados por el switch donde están. */
-function layoutEndpoints(
-  nodes: PlacedNode[],
+export interface TreeLayout {
+  nodes: PlacedNode[];
+  clusters: Cluster[];
+  /** Padre de cada equipo de red en el árbol (hacia el core); los sueltos no tienen. */
+  parent: Map<number, number>;
+  width: number;
+  height: number;
+}
+
+/** Clave de un enlace sin importar el sentido. */
+export const linkKey = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+
+/**
+ * El mapa como árbol: el core arriba y, debajo de cada equipo, sus equipos hijos y el grupo de equipos finales de sus
+ * puertos, cada rama en su propia columna (nada cuelga lejos de su switch). Los equipos sin enlaces van al final.
+ */
+export function layoutTree(
+  topology: Pick<Topology, 'nodes' | 'links'>,
   endpoints: TopologyEndpoint[],
   expanded: ReadonlySet<number>,
-  networkHeight: number,
-): { clusters: Cluster[]; width: number; height: number } {
+): TreeLayout {
+  const { nodes: leveled } = layoutTopology(topology);
+  const level = new Map(leveled.map((n) => [n.id, n.level]));
+  const byId = new Map(leveled.map((n) => [n.id, n]));
+  const linked = new Set(topology.links.flatMap((l) => [l.sourceId, l.targetId]));
+
+  // Padre: un vecino de la capa de arriba (mejor por LLDP que por cableado documentado).
+  const parent = new Map<number, number>();
+  const sortedLinks = [...topology.links].sort((a, b) => (a.kind === 'lldp' ? 0 : 1) - (b.kind === 'lldp' ? 0 : 1));
+  for (const n of leveled) {
+    if (n.level === 0 || !linked.has(n.id)) continue;
+    for (const l of sortedLinks) {
+      const other = l.sourceId === n.id ? l.targetId : l.targetId === n.id ? l.sourceId : null;
+      if (other !== null && level.get(other) === n.level - 1) {
+        parent.set(n.id, other);
+        break;
+      }
+    }
+  }
+  const children = new Map<number, number[]>();
+  for (const [child, p] of parent) children.set(p, [...(children.get(p) ?? []), child]);
+  for (const list of children.values()) list.sort((a, b) => byId.get(a)!.name.localeCompare(byId.get(b)!.name));
+
+  // Grupos de equipos finales por switch.
   const bySwitch = new Map<number, TopologyEndpoint[]>();
   for (const e of endpoints) bySwitch.set(e.deviceId, [...(bySwitch.get(e.deviceId) ?? []), e]);
-  const owners = nodes.filter((n) => bySwitch.has(n.id)).sort((a, b) => a.x - b.x || a.y - b.y);
-  const top = MARGIN + networkHeight;
-  let x = MARGIN;
-  let bottom = top;
-  const clusters: Cluster[] = owners.map((owner) => {
-    const all = bySwitch.get(owner.id)!;
-    const shown = expanded.has(owner.id) || all.length <= EP_SHOWN + 1 ? all : all.slice(0, EP_SHOWN);
-    const hidden = all.length - shown.length;
-    const slots = shown.length + (hidden > 0 ? 1 : 0);
-    const cols = Math.min(EP_COLS, Math.max(1, slots));
-    const placed = shown.map((e, i) => ({
-      ...e,
-      key: `${e.portId}-${e.mac ?? e.machineId}`,
-      x: x + EP_GAP_X + (i % cols) * (EP_W + EP_GAP_X),
-      y: top + 40 + Math.floor(i / cols) * (EP_H + EP_GAP_Y),
-    }));
-    const more =
-      hidden > 0
-        ? {
-            x: x + EP_GAP_X + (shown.length % cols) * (EP_W + EP_GAP_X),
-            y: top + 40 + Math.floor(shown.length / cols) * (EP_H + EP_GAP_Y),
-          }
-        : null;
+  const clusterSize = (id: number) => {
+    const all = bySwitch.get(id);
+    if (!all?.length) return null;
+    const shown = expanded.has(id) || all.length <= EP_SHOWN + 1 ? all.length : EP_SHOWN;
+    const slots = shown + (shown < all.length ? 1 : 0);
+    const cols = Math.min(EP_COLS, slots);
     const rows = Math.ceil(slots / cols);
-    bottom = Math.max(bottom, top + 40 + rows * (EP_H + EP_GAP_Y));
-    const cluster = { switchId: owner.id, busY: top + 14, endpoints: placed, hidden, more };
-    x += EP_GAP_X + cols * (EP_W + EP_GAP_X) + CLUSTER_GAP;
-    return cluster;
-  });
-  return { clusters, width: x + MARGIN, height: bottom + MARGIN };
+    return {
+      shown,
+      cols,
+      w: cols * EP_W + (cols - 1) * EP_GAP_X + EP_GAP_X,
+      h: rows * EP_H + (rows - 1) * EP_GAP_Y,
+    };
+  };
+
+  // Ancho de cada rama: el del equipo o la suma de lo que cuelga de él.
+  const widths = new Map<number, number>();
+  const widthOf = (id: number): number => {
+    if (widths.has(id)) return widths.get(id)!;
+    const items = [...(children.get(id) ?? []).map(widthOf), clusterSize(id)?.w ?? 0].filter((w) => w > 0);
+    const inner = items.reduce((sum, w) => sum + w, 0) + Math.max(0, items.length - 1) * GAP_X;
+    const w = Math.max(NODE_W, inner);
+    widths.set(id, w);
+    return w;
+  };
+
+  // Filas: profundidad del equipo en el árbol; su grupo va en la fila siguiente.
+  const depth = new Map<number, number>();
+  const setDepth = (id: number, d: number) => {
+    depth.set(id, d);
+    for (const c of children.get(id) ?? []) setDepth(c, d + 1);
+  };
+  const roots = leveled.filter((n) => !parent.has(n.id) && linked.has(n.id)).map((n) => n.id);
+  const loose = leveled.filter((n) => !linked.has(n.id)).map((n) => n.id);
+  roots.forEach((r) => setDepth(r, 0));
+  const mainDepth = Math.max(-1, ...[...depth.entries()].map(([id, d]) => d + (clusterSize(id) ? 1 : 0)));
+  loose.forEach((r) => setDepth(r, mainDepth + 1));
+
+  const rowHeight = new Map<number, number>();
+  const grow = (d: number, h: number) => rowHeight.set(d, Math.max(rowHeight.get(d) ?? 0, h));
+  for (const [id, d] of depth) {
+    grow(d, NODE_H);
+    const c = clusterSize(id);
+    if (c) grow(d + 1, c.h);
+  }
+  const rowTop = new Map<number, number>();
+  let y = MARGIN;
+  for (const d of [...rowHeight.keys()].sort((a, b) => a - b)) {
+    rowTop.set(d, y);
+    y += rowHeight.get(d)! + GAP_Y;
+  }
+
+  const placed: PlacedNode[] = [];
+  const clusters: Cluster[] = [];
+  const place = (id: number, left: number) => {
+    const w = widthOf(id);
+    const d = depth.get(id)!;
+    const kids = children.get(id) ?? [];
+    const c = clusterSize(id);
+    const items = [
+      ...kids.map((k) => ({ kind: 'node' as const, id: k, w: widthOf(k) })),
+      ...(c ? [{ kind: 'cluster' as const, id, w: c.w }] : []),
+    ];
+    const inner = items.reduce((sum, i) => sum + i.w, 0) + Math.max(0, items.length - 1) * GAP_X;
+    let x = left + (w - inner) / 2;
+    const centers: number[] = [];
+    for (const item of items) {
+      if (item.kind === 'node') {
+        place(item.id, x);
+        const child = placed.find((p) => p.id === item.id)!;
+        centers.push(child.x + NODE_W / 2);
+      } else {
+        const all = bySwitch.get(id)!;
+        const shown = all.slice(0, c!.shown);
+        const top = rowTop.get(d + 1)!;
+        const ex = x + EP_GAP_X;
+        clusters.push({
+          switchId: id,
+          busY: top - Math.min(26, GAP_Y / 2),
+          endpoints: shown.map((e, i) => ({
+            ...e,
+            key: `${e.portId}-${e.mac ?? e.machineId}`,
+            x: ex + (i % c!.cols) * (EP_W + EP_GAP_X),
+            y: top + Math.floor(i / c!.cols) * (EP_H + EP_GAP_Y),
+          })),
+          hidden: all.length - shown.length,
+          more:
+            shown.length < all.length
+              ? {
+                  x: ex + (shown.length % c!.cols) * (EP_W + EP_GAP_X),
+                  y: top + Math.floor(shown.length / c!.cols) * (EP_H + EP_GAP_Y),
+                }
+              : null,
+        });
+        centers.push(x + c!.w / 2);
+      }
+      x += item.w + GAP_X;
+    }
+    // El equipo queda centrado sobre lo que cuelga de él.
+    const center = centers.length > 0 ? (Math.min(...centers) + Math.max(...centers)) / 2 : left + w / 2;
+    placed.push({ ...byId.get(id)!, x: center - NODE_W / 2, y: rowTop.get(d)! });
+  };
+
+  let left = MARGIN;
+  for (const r of roots) {
+    place(r, left);
+    left += widthOf(r) + GAP_X * 2;
+  }
+  let width = left;
+  left = MARGIN;
+  for (const r of loose) {
+    place(r, left);
+    left += widthOf(r) + GAP_X;
+  }
+  width = Math.max(width, left) + MARGIN;
+  return { nodes: placed, clusters, parent, width, height: y - GAP_Y + MARGIN };
+}
+
+/** La ruta de un equipo de red hasta el core (él primero). */
+export function pathToRoot(id: number, parent: ReadonlyMap<number, number>): number[] {
+  const path = [id];
+  const seen = new Set(path);
+  let current = parent.get(id);
+  while (current !== undefined && !seen.has(current)) {
+    path.push(current);
+    seen.add(current);
+    current = parent.get(current);
+  }
+  return path;
 }
 
 // ------------------------------------------------------------------ vista
 
 type Selection = { kind: 'node'; id: number } | { kind: 'endpoint'; key: string } | null;
 
+interface ViewBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Escala mínima al abrir: más chico no se lee (se recorre arrastrando o con el zoom). */
+const READABLE_SCALE = 0.55;
+const MIN_SCALE = 0.12;
+const MAX_SCALE = 2.5;
+const CANVAS_HEIGHT = 560;
+
+/** Paso de la ruta para el detalle: equipo y, si se conoce, por qué puerto sale hacia el siguiente. */
+export interface RouteStep {
+  name: string;
+  port: string | null;
+}
+
 /**
- * W-51 Topología (decisión 74): los equipos de red en capas (core arriba) y, debajo de cada switch, los equipos
- * conectados a sus puertos (PC, impresoras, teléfonos, cámaras…), con el detalle de cada uno al tocarlo.
+ * W-51 Topología (decisiones 74 y 81): un árbol con el core arriba y, debajo de cada equipo de red, sus equipos y los
+ * equipos finales de sus puertos. Se acerca con la rueda, se recorre arrastrando, y al elegir algo se resalta su ruta
+ * hasta el core (lo demás se atenúa).
  */
 export function TopologyMap({
   onOpenDevice,
@@ -224,10 +382,16 @@ export function TopologyMap({
   const [vlan, setVlan] = useState('');
   const [category, setCategory] = useState('');
   const [withEndpoints, setWithEndpoints] = useState(true);
-  const [fit, setFit] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
+  const [box, setBox] = useState<ViewBox | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; box: ViewBox; moved: boolean } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [showingAll, setShowingAll] = useState(false);
+  /** Tamaño del lienzo en pantalla (para encuadrar y para el zoom). */
+  const [size, setSize] = useState({ w: 1000, h: CANVAS_HEIGHT });
 
   const data = query.data;
   const branches = useMemo(() => {
@@ -253,27 +417,77 @@ export function TopologyMap({
           (e) => ids.has(e.deviceId) && (!vlan || String(e.vlan) === vlan) && (!category || e.category === category),
         )
       : [];
-    const network = layoutTopology({ nodes, links });
-    const eps = layoutEndpoints(network.nodes, endpoints, expanded, network.height);
-    const width = Math.max(network.width, eps.width);
-    // Centra la parte más angosta.
-    const shiftNet = (width - network.width) / 2;
-    const shiftEp = (width - eps.width) / 2;
-    const placedNodes = network.nodes.map((n) => ({ ...n, x: n.x + shiftNet }));
-    const clusters = eps.clusters.map((c) => ({
-      ...c,
-      endpoints: c.endpoints.map((e) => ({ ...e, x: e.x + shiftEp })),
-      more: c.more ? { x: c.more.x + shiftEp, y: c.more.y } : null,
-    }));
-    return {
-      nodes: placedNodes,
-      links,
-      clusters,
-      width,
-      height: Math.max(network.height + MARGIN, eps.height),
-      total: endpoints.length,
-    };
+    const tree = layoutTree({ nodes, links }, endpoints, expanded);
+    return { ...tree, links, total: endpoints.length };
   }, [data, branch, vlan, category, withEndpoints, expanded]);
+
+  /** Encuadre: todo el mapa a lo ancho, pero sin bajar de un tamaño legible (arriba y al centro). */
+  const fitBox = (all: boolean): ViewBox | null => {
+    if (!view) return null;
+    const { w: width, h: height } = size;
+    const scale = Math.min(width / view.width, height / view.height);
+    const s = all ? Math.max(MIN_SCALE, scale) : Math.max(Math.min(scale, 1), READABLE_SCALE);
+    const w = width / s;
+    const h = height / s;
+    return { x: (view.width - w) / 2, y: s === scale || all ? (view.height - h) / 2 : 0, w, h };
+  };
+  // Al cambiar lo que se muestra (filtros, ver más), se vuelve a encuadrar.
+  const layoutKey = view ? `${view.width}x${view.height}@${size.w}x${size.h}` : '';
+  const [framedKey, setFramedKey] = useState('');
+  if (view && framedKey !== layoutKey) {
+    setFramedKey(layoutKey);
+    setBox(fitBox(false));
+    setShowingAll(false);
+  }
+
+  const zoom = (factor: number, cx?: number, cy?: number) =>
+    setBox((b) => {
+      if (!b) return b;
+      const scale = size.w / b.w;
+      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+      const w = b.w * (scale / next);
+      const h = b.h * (scale / next);
+      const px = cx ?? b.x + b.w / 2;
+      const py = cy ?? b.y + b.h / 2;
+      return { x: px - ((px - b.x) * w) / b.w, y: py - ((py - b.y) * h) / b.h, w, h };
+    });
+
+  // Mide el lienzo al abrir y cuando cambia de tamaño (ventana o panel de detalle).
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (el.clientWidth > 0) setSize({ w: el.clientWidth, h: el.clientHeight || CANVAS_HEIGHT });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [query.isSuccess]);
+
+  // La rueda acerca o aleja donde está el puntero (sin desplazar la página).
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      setBox((b) => {
+        if (!b || rect.width === 0) return b;
+        const px = b.x + ((event.clientX - rect.left) / rect.width) * b.w;
+        const py = b.y + ((event.clientY - rect.top) / rect.height) * b.h;
+        const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+        const scale = rect.width / b.w;
+        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+        const w = b.w * (scale / next);
+        const h = b.h * (scale / next);
+        return { x: px - ((px - b.x) * w) / b.w, y: py - ((py - b.y) * h) / b.h, w, h };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [query.isSuccess]);
 
   if (query.isPending) return <Loading variant="block" />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
@@ -286,8 +500,35 @@ export function TopologyMap({
     selection?.kind === 'endpoint' ? allEndpoints.find((e) => e.key === selection.key) : undefined;
   const nodeName = (id: number) => data.nodes.find((n) => n.id === id)?.name ?? `#${id}`;
 
+  // Ruta resaltada: del equipo elegido (o del switch del equipo final) hasta el core.
+  const startId = selectedNode?.id ?? selectedEndpoint?.deviceId;
+  const pathIds = startId !== undefined ? pathToRoot(startId, view.parent) : [];
+  const onPath = new Set(pathIds);
+  const pathLinks = new Set(pathIds.slice(1).map((id, i) => linkKey(pathIds[i]!, id)));
+  const focused = pathIds.length > 0;
+  const route: RouteStep[] = [
+    ...(selectedEndpoint ? [{ name: endpointName(selectedEndpoint), port: null }] : []),
+    ...pathIds.map((id, i) => {
+      const next = pathIds[i + 1];
+      const link =
+        next === undefined ? undefined : view.links.find((l) => linkKey(l.sourceId, l.targetId) === linkKey(id, next));
+      const port = link ? (link.sourceId === id ? link.sourcePort : link.targetPort) : null;
+      return { name: nodeName(id), port: i === 0 && selectedEndpoint ? selectedEndpoint.portLabel : port };
+    }),
+  ];
+
   const exportPng = () => {
     if (svgRef.current) void exportSvgAsPng(svgRef.current, view.width, view.height, 'topologia.png');
+  };
+
+  const linkPath = (a: PlacedNode, b: PlacedNode) => {
+    const [top, bottom] = a.y <= b.y ? [a, b] : [b, a];
+    const x1 = top.x + NODE_W / 2;
+    const x2 = bottom.x + NODE_W / 2;
+    const y1 = top.y + NODE_H;
+    const y2 = bottom.y;
+    const mid = y2 - GAP_Y * 0.62;
+    return { d: `M${x1} ${y1} V${mid} H${x2} V${y2}`, labelX: x2 + 6, labelY: mid - 6, top };
   };
 
   return (
@@ -322,9 +563,6 @@ export function TopologyMap({
             'Sin sondeos SNMP todavía'
           )}
         </span>
-        <button type="button" className="btn btn-outline" aria-pressed={fit} onClick={() => setFit(!fit)}>
-          {fit ? 'Tamaño real' : 'Ajustar'}
-        </button>
         <button type="button" className="btn btn-outline" onClick={exportPng}>
           Exportar PNG
         </button>
@@ -340,35 +578,109 @@ export function TopologyMap({
             </span>
           }
         >
-          <div className="topology-canvas" data-fit={fit || undefined}>
+          <div
+            ref={canvasRef}
+            className="topology-canvas"
+            data-dragging={dragging || undefined}
+            style={{ height: CANVAS_HEIGHT }}
+            onPointerDown={(event) => {
+              if (!box || event.button !== 0) return;
+              drag.current = { x: event.clientX, y: event.clientY, box, moved: false };
+            }}
+            onPointerMove={(event) => {
+              const d = drag.current;
+              const el = canvasRef.current;
+              if (!d || !el) return;
+              const dx = event.clientX - d.x;
+              const dy = event.clientY - d.y;
+              if (!d.moved && Math.hypot(dx, dy) < 4) return;
+              if (!d.moved) {
+                el.setPointerCapture?.(event.pointerId);
+                setDragging(true);
+              }
+              d.moved = true;
+              const scale = el.clientWidth / d.box.w;
+              setBox({ ...d.box, x: d.box.x - dx / scale, y: d.box.y - dy / scale });
+            }}
+            onPointerUp={() => {
+              // Un arrastre no cuenta como clic sobre lo que quedó debajo.
+              const moved = drag.current?.moved;
+              setDragging(false);
+              setTimeout(() => {
+                if (drag.current?.moved === moved) drag.current = null;
+              }, 0);
+            }}
+            onClickCapture={(event) => {
+              if (drag.current?.moved) {
+                event.stopPropagation();
+                drag.current = null;
+              }
+            }}
+          >
+            <div className="topology-zoom" role="group" aria-label="Zoom">
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                aria-label="Acercar"
+                onClick={() => {
+                  zoom(1.25);
+                  setShowingAll(false);
+                }}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                aria-label="Alejar"
+                onClick={() => zoom(1 / 1.25)}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                aria-pressed={showingAll}
+                onClick={() => {
+                  setBox(fitBox(!showingAll));
+                  setShowingAll(!showingAll);
+                }}
+              >
+                {showingAll ? 'Tamaño legible' : 'Ver todo'}
+              </button>
+            </div>
             <svg
               ref={svgRef}
-              viewBox={`0 0 ${view.width} ${view.height}`}
-              width={fit ? '100%' : view.width}
-              height={fit ? undefined : view.height}
+              viewBox={box ? `${box.x} ${box.y} ${box.w} ${box.h}` : `0 0 ${view.width} ${view.height}`}
+              width="100%"
+              height="100%"
+              preserveAspectRatio="xMidYMin meet"
               role="group"
               aria-label="Mapa de topología"
+              data-focus={focused || undefined}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) setSelection(null);
+              }}
             >
-              {/* Enlaces entre equipos de red: codo a media altura. */}
+              {/* Enlaces entre equipos de red. */}
               {view.links.map((l) => {
-                const a = at.get(l.sourceId)!;
-                const b = at.get(l.targetId)!;
-                const [top, bottom] = a.y <= b.y ? [a, b] : [b, a];
-                const x1 = top.x + NODE_W / 2;
-                const x2 = bottom.x + NODE_W / 2;
-                const y1 = top.y + NODE_H;
-                const y2 = bottom.y;
-                const mid = (y1 + y2) / 2;
+                const a = at.get(l.sourceId);
+                const b = at.get(l.targetId);
+                if (!a || !b) return null;
+                const { d, labelX, labelY, top } = linkPath(a, b);
                 const trunk = l.kind === 'lldp';
+                const lit = pathLinks.has(linkKey(l.sourceId, l.targetId));
                 return (
                   <g
                     key={`${l.sourceId}-${l.targetId}`}
                     className="topology-link"
                     data-kind={l.kind}
                     data-trunk={trunk || undefined}
+                    data-path={lit || undefined}
                   >
-                    <path d={`M${x1} ${y1} V${mid} H${x2} V${y2}`} />
-                    <text x={x2 + 6} y={mid - 6} className="topology-link-label">
+                    <path d={d} />
+                    {lit && <path d={d} className="topology-flow" />}
+                    <text x={labelX} y={labelY} className="topology-link-label">
                       {top === a ? `${l.sourcePort} ↔ ${l.targetPort}` : `${l.targetPort} ↔ ${l.sourcePort}`}
                     </text>
                     <title>
@@ -390,22 +702,20 @@ export function TopologyMap({
                 ];
                 const minX = Math.min(ox, ...xs);
                 const maxX = Math.max(ox, ...xs);
+                const chosen = c.endpoints.find((e) => e.key === selectedEndpoint?.key);
+                const comb = (x: number, y: number) => `M${x - EP_GAP_X / 2} ${c.busY} V${y + EP_H / 2} H${x}`;
                 return (
-                  <g key={`bus-${c.switchId}`} className="topology-bus">
+                  <g key={`bus-${c.switchId}`} className="topology-bus" data-path={chosen ? true : undefined}>
                     <path d={`M${ox} ${owner.y + NODE_H} V${c.busY} M${minX} ${c.busY} H${maxX}`} />
-                    {c.endpoints.map((e) => {
-                      const on = selection?.kind === 'endpoint' && selection.key === e.key;
-                      return (
-                        <path
-                          key={e.key}
-                          d={`M${e.x - EP_GAP_X / 2} ${c.busY} V${e.y + EP_H / 2} H${e.x}`}
-                          data-kind={e.kind}
-                          data-selected={on || undefined}
-                        />
-                      );
-                    })}
-                    {c.more && (
-                      <path d={`M${c.more.x - EP_GAP_X / 2} ${c.busY} V${c.more.y + EP_H / 2} H${c.more.x}`} />
+                    {c.endpoints.map((e) => (
+                      <path key={e.key} d={comb(e.x, e.y)} data-kind={e.kind} />
+                    ))}
+                    {c.more && <path d={comb(c.more.x, c.more.y)} />}
+                    {chosen && (
+                      <path
+                        className="topology-flow"
+                        d={`M${ox} ${owner.y + NODE_H} V${c.busY} H${chosen.x - EP_GAP_X / 2} V${chosen.y + EP_H / 2} H${chosen.x}`}
+                      />
                     )}
                   </g>
                 );
@@ -418,12 +728,14 @@ export function TopologyMap({
                     key={n.id}
                     className="topology-node"
                     data-selected={on || undefined}
+                    data-path={onPath.has(n.id) || undefined}
+                    data-status={n.status}
                     transform={`translate(${n.x}, ${n.y})`}
                     role="button"
                     tabIndex={0}
                     aria-pressed={on}
                     aria-label={`${n.name}: ${DEVICE_STATUS_LABEL[n.status]}`}
-                    onClick={() => setSelection({ kind: 'node', id: n.id })}
+                    onClick={() => setSelection(on ? null : { kind: 'node', id: n.id })}
                     onDoubleClick={() => onOpenDevice(n.id)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') onOpenDevice(n.id);
@@ -431,18 +743,20 @@ export function TopologyMap({
                         e.preventDefault();
                         setSelection({ kind: 'node', id: n.id });
                       }
+                      if (e.key === 'Escape') setSelection(null);
                     }}
                   >
-                    <rect width={NODE_W} height={NODE_H} rx={4} />
-                    <path className="topology-icon" transform="translate(12, 17) scale(1)" d={nodeIcon(n.type)} />
-                    <text x={44} y={22} className="topology-name">
+                    <rect width={NODE_W} height={NODE_H} rx={6} />
+                    <rect className="topology-stripe" width={4} height={NODE_H} rx={2} />
+                    <path className="topology-icon" transform="translate(14, 17)" d={nodeIcon(n.type)} />
+                    <text x={46} y={22} className="topology-name">
                       {n.name}
                     </text>
-                    <text x={44} y={38} className="topology-sub">
+                    <text x={46} y={38} className="topology-sub">
                       {DEVICE_TYPE_LABEL[n.type]}
                       {n.modelName ? ` · ${n.modelName}` : ''}
                     </text>
-                    <text x={44} y={52} className="topology-sub mono">
+                    <text x={46} y={52} className="topology-sub mono">
                       {n.type === 'access_point' && n.clients
                         ? `${n.clients} clientes Wi-Fi`
                         : (n.managementIp ?? n.branchName)}
@@ -460,36 +774,35 @@ export function TopologyMap({
                     className="topology-endpoint"
                     data-kind={e.kind}
                     data-selected={on || undefined}
+                    data-path={on || undefined}
                     transform={`translate(${e.x}, ${e.y})`}
                     role="button"
                     tabIndex={0}
                     aria-pressed={on}
                     aria-label={`${endpointName(e)}, ${CATEGORY_LABEL[e.category]}, puerto ${e.portLabel}${e.vlan ? `, VLAN ${e.vlan}` : ''}`}
-                    onClick={() => setSelection({ kind: 'endpoint', key: e.key })}
+                    onClick={() => setSelection(on ? null : { kind: 'endpoint', key: e.key })}
                     onKeyDown={(ev) => {
                       if (ev.key === 'Enter' || ev.key === ' ') {
                         ev.preventDefault();
                         setSelection({ kind: 'endpoint', key: e.key });
                       }
+                      if (ev.key === 'Escape') setSelection(null);
                     }}
                   >
-                    <rect width={EP_W} height={EP_H} rx={4} />
-                    <path className="topology-icon" transform="translate(10, 12)" d={ICONS[e.category]} />
-                    <text x={40} y={20} className="topology-name">
+                    <rect width={EP_W} height={EP_H} rx={6} />
+                    <path className="topology-icon" transform="translate(10, 10)" d={ICONS[e.category]} />
+                    <text x={40} y={19} className="topology-name">
                       {endpointName(e)}
                     </text>
-                    <text x={40} y={35} className="topology-sub">
-                      {CATEGORY_LABEL[e.category]}
-                      {e.categoryInferred ? ' ?' : ''}
-                    </text>
-                    <text x={40} y={49} className="topology-sub mono">
+                    <text x={40} y={34} className="topology-sub mono">
                       {e.ip ?? e.mac ?? '—'}
                     </text>
-                    <text x={40} y={62} className="topology-port mono">
+                    <text x={40} y={49} className="topology-port mono">
                       {e.portLabel}
                       {e.vlan ? ` · VLAN ${e.vlan}` : ''}
+                      {e.categoryInferred ? ' · ?' : ''}
                     </text>
-                    <circle cx={EP_W - 11} cy={11} r={4.5} data-tone={endpointTone(e)} className="topology-dot" />
+                    <circle cx={EP_W - 11} cy={11} r={4} data-tone={endpointTone(e)} className="topology-dot" />
                   </g>
                 );
               })}
@@ -512,7 +825,7 @@ export function TopologyMap({
                       }
                     }}
                   >
-                    <rect width={EP_W} height={EP_H} rx={4} />
+                    <rect width={EP_W} height={EP_H} rx={6} />
                     <text x={EP_W / 2} y={EP_H / 2 + 4} textAnchor="middle" className="topology-name">
                       + ver {c.hidden} más
                     </text>
@@ -524,12 +837,24 @@ export function TopologyMap({
             <span data-legend="trunk">Troncal (LLDP)</span>
             <span data-legend="seen">Visto por SNMP</span>
             <span data-legend="doc">Solo documentado</span>
-            <span data-legend="selected">Seleccionado</span>
-            <span className="topology-legend-note">Un "?" en el tipo: deducido por el fabricante de la MAC.</span>
+            <span data-legend="selected">Ruta del elegido</span>
+            <span className="topology-legend-note">
+              Rueda: zoom · arrastrar: moverse · un "?": tipo deducido por el fabricante de la MAC.
+            </span>
           </div>
         </Card>
 
         <Card title="Detalle" className="topology-detail">
+          {route.length > 1 && (
+            <ol className="topology-route" aria-label="Ruta hasta el core">
+              {route.map((step, i) => (
+                <li key={`${step.name}-${i}`}>
+                  <strong className="mono">{step.name}</strong>
+                  {step.port && <span className="mono muted"> · {step.port}</span>}
+                </li>
+              ))}
+            </ol>
+          )}
           {selectedNode ? (
             <NodeDetail node={selectedNode} onOpen={() => onOpenDevice(selectedNode.id)} />
           ) : selectedEndpoint ? (
@@ -542,7 +867,7 @@ export function TopologyMap({
             />
           ) : (
             <EmptyState title="Elija un equipo del mapa.">
-              Un clic muestra su detalle; doble clic en un equipo de red abre su ficha.
+              Un clic muestra su detalle y resalta su ruta hasta el core; doble clic en un equipo de red abre su ficha.
             </EmptyState>
           )}
         </Card>
@@ -709,6 +1034,8 @@ async function exportSvgAsPng(svg: SVGSVGElement, width: number, height: number,
     const target = copies[i] as SVGElement;
     for (const prop of EXPORT_PROPS) target.style.setProperty(prop, style.getPropertyValue(prop));
   });
+  // Todo el mapa, aunque en pantalla se vea una parte (zoom).
+  clone.setAttribute('viewBox', `0 0 ${width} ${height}`);
   clone.setAttribute('width', String(width));
   clone.setAttribute('height', String(height));
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');

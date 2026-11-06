@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MonitoreoTI.Application.Auth;
 using MonitoreoTI.Application.Panel;
@@ -33,26 +33,43 @@ public sealed class TicketQueries(MonitoreoDbContext db, ICurrentUser user, IAtt
 
     public async Task<TicketList> TicketsAsync(TicketFilter filter, CancellationToken ct)
     {
-        var scoped = await VisibleTicketsAsync(ct);
+        // Decisión 83: la vista trae el equipo, la sucursal, las personas y los comentarios en la misma consulta.
+        var me = user.UserId;
+        var scoped = db.TicketListView.AsNoTracking();
+        if (!user.HasPermission(PermissionKeys.TicketsManage))
+            scoped = scoped.Where(t => t.CreatedById == me);
+        var allowed = await user.AllowedBranchIdsAsync(ct);
+        if (allowed is not null)
+            scoped = scoped.Where(t => (t.MachineId != null && t.BranchId != null && allowed.Contains(t.BranchId.Value))
+                || (t.MachineId == null && t.CreatedById == me));
+
         if (filter.BranchId is int branchId)
-            scoped = scoped.Where(t => db.Machines.Any(m => m.Id == t.MachineId && m.BranchId == branchId));
+            scoped = scoped.Where(t => t.BranchId == branchId);
         if (filter.MachineId is int machineId)
             scoped = scoped.Where(t => t.MachineId == machineId);
         if (filter.AlertId is long alertId)
             scoped = scoped.Where(t => t.AlertId == alertId);
+        if (filter.CreatedById is int createdBy)
+            scoped = scoped.Where(t => t.CreatedById == createdBy);
+        if (!string.IsNullOrWhiteSpace(filter.Title))
+            scoped = scoped.Where(t => t.Title.Contains(filter.Title.Trim()));
         if (!string.IsNullOrWhiteSpace(filter.Query))
         {
             var q = filter.Query.Trim();
             var number = int.TryParse(q.TrimStart('#'), out var n) ? n : 0;
-            scoped = scoped.Where(t => t.Title.Contains(q) || t.Id == number || db.Machines.Any(m => m.Id == t.MachineId && m.Name.Contains(q)));
+            scoped = scoped.Where(t => t.Title.Contains(q) || t.Id == number || (t.Machine != null && t.Machine.Contains(q)));
         }
         if (filter.Priority is { } priorityText && TicketValues.Priorities.Contains(priorityText))
         {
             var priority = EnumMemberConverter<TicketPriority>.FromProvider(priorityText);
             scoped = scoped.Where(t => t.Priority == priority);
         }
+        var (from, to) = Paging.DateRange(filter.From, filter.To);
+        if (from is not null)
+            scoped = scoped.Where(t => t.CreatedAt >= from);
+        if (to is not null)
+            scoped = scoped.Where(t => t.CreatedAt < to);
 
-        var me = user.UserId;
         var tally = await scoped
             .GroupBy(t => new { t.Status, Mine = t.AssignedToId == me, Unassigned = t.AssignedToId == null })
             .Select(g => new { g.Key.Status, g.Key.Mine, g.Key.Unassigned, Count = g.Count() })
@@ -82,27 +99,15 @@ public sealed class TicketQueries(MonitoreoDbContext db, ICurrentUser user, IAtt
             query = query.Where(t => t.Status != TicketStatus.Closed);
         }
 
-        var pageSize = Math.Clamp(filter.PageSize, 1, 300);
-        var page = Math.Max(filter.Page, 1);
-        var total = await query.CountAsync(ct);
-        var rows = await query
-            .OrderByDescending(t => t.Priority).ThenByDescending(t => t.CreatedAt)
-            .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(t => new
-            {
-                Ticket = t,
-                Machine = db.Machines.Where(m => m.Id == t.MachineId).Select(m => new { m.Name, Branch = m.Branch!.Name }).FirstOrDefault(),
-                AssignedTo = db.Users.Where(u => u.Id == t.AssignedToId).Select(u => u.Name).FirstOrDefault(),
-                CreatedBy = db.Users.Where(u => u.Id == t.CreatedById).Select(u => u.Name).FirstOrDefault(),
-                Comments = db.TicketComments.Count(c => c.TicketId == t.Id),
-            })
-            .ToListAsync(ct);
+        var (page, limit) = Paging.Normalize(filter.Page, filter.Limit);
+        // Por prioridad real (urgente, alta, media, baja) y los más nuevos primero.
+        var rows = await query.OrderByDescending(t => t.PriorityOrder).ThenByDescending(t => t.CreatedAt).ThenByDescending(t => t.Id)
+            .ToPageAsync(page, limit, ct);
 
-        var items = rows.Select(r => new TicketListItem(
-            r.Ticket.Id, r.Ticket.Title, Text(r.Ticket.Priority), Text(r.Ticket.Status), r.Ticket.MachineId, r.Machine?.Name,
-            r.Machine?.Branch, r.Ticket.AlertId, r.Ticket.AssignedToId, r.AssignedTo, r.CreatedBy ?? "—", r.Ticket.CreatedAt,
-            r.Ticket.ClosedAt, r.Comments)).ToList();
-        return new TicketList(new PagedResult<TicketListItem>(items, total, page, pageSize), counts);
+        var items = rows.Map(r => new TicketListItem(
+            r.Id, r.Title, Text(r.Priority), Text(r.Status), r.MachineId, r.Machine, r.Branch, r.AlertId, r.AssignedToId,
+            r.AssignedTo, r.CreatedBy ?? "—", r.CreatedAt, r.ClosedAt, r.Comments));
+        return new TicketList(items, counts);
     }
 
     public async Task<TicketDetail?> TicketAsync(int id, CancellationToken ct)

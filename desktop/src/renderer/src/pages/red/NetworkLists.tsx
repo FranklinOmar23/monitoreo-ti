@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pager } from '@components/Pager';
+import { usePaged } from '../../data/usePaged';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeviceModelItem, OutletItem } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
@@ -22,11 +24,9 @@ export function DevicesList({ canEdit, onOpenDevice }: { canEdit: boolean; onOpe
   const [adding, setAdding] = useState(false);
   const search = useDebounced(query.trim());
   const filter = { q: search, tipo, sucursal: sucursal ? Number(sucursal) : null };
-  const list = useQuery({
-    queryKey: ['red', 'dispositivos', filter],
-    queryFn: () => api.red.devices(filter),
-    placeholderData: keepPreviousData,
-  });
+  const { query: list, data: page, items: devices, setPage } = usePaged(['red', 'dispositivos', filter], (p) =>
+    api.red.devicesPage(filter, p),
+  );
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
 
   return (
@@ -75,7 +75,7 @@ export function DevicesList({ canEdit, onOpenDevice }: { canEdit: boolean; onOpe
               </tr>
             </thead>
             <tbody>
-              {list.data.map((d) => (
+              {devices.map((d) => (
                 <tr key={d.id}>
                   <td>
                     <StatusBadge status={DEVICE_STATUS_TONE[d.status]} label={DEVICE_STATUS_LABEL[d.status]} />
@@ -108,7 +108,8 @@ export function DevicesList({ canEdit, onOpenDevice }: { canEdit: boolean; onOpe
               ))}
             </tbody>
           </table>
-          {list.data.length === 0 && <EmptyState title="Ningún dispositivo coincide con los filtros." />}
+          {devices.length === 0 && <EmptyState title="Ningún dispositivo coincide con los filtros." />}
+          <Pager data={page} noun="dispositivos" onPage={setPage} />
         </div>
       )}
       {adding && <DeviceForm onClose={() => setAdding(false)} onSaved={onOpenDevice} />}
@@ -126,11 +127,9 @@ export function OutletsList({ canEdit }: { canEdit: boolean }) {
   const [route, setRoute] = useState<OutletItem | null>(null);
   const search = useDebounced(query.trim());
   const branchId = sucursal ? Number(sucursal) : null;
-  const list = useQuery({
-    queryKey: ['red', 'rosetas', branchId, search],
-    queryFn: () => api.red.outlets(branchId, search),
-    placeholderData: keepPreviousData,
-  });
+  const { query: list, data: page, items: outlets, setPage } = usePaged(['red', 'rosetas', branchId, search], (p) =>
+    api.red.outletsPage(branchId, { ...p, q: search || undefined }),
+  );
   const branches = useQuery({ queryKey: ['sucursales'], queryFn: () => api.branches() });
   const remove = useMutation({
     mutationFn: (id: number) => api.red.deleteOutlet(id),
@@ -185,7 +184,7 @@ export function OutletsList({ canEdit }: { canEdit: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {list.data.map((o) => (
+              {outlets.map((o) => (
                 <tr key={o.id}>
                   <td className="mono">{o.code}</td>
                   <td>{o.location ?? '—'}</td>
@@ -218,7 +217,8 @@ export function OutletsList({ canEdit }: { canEdit: boolean }) {
               ))}
             </tbody>
           </table>
-          {list.data.length === 0 && (
+          <Pager data={page} noun="rosetas" onPage={setPage} />
+          {outlets.length === 0 && (
             <EmptyState title="Sin rosetas">
               Registre las rosetas de pared o escritorio para documentar el cableado hasta el switch.
             </EmptyState>
@@ -240,7 +240,9 @@ export function OutletsList({ canEdit }: { canEdit: boolean }) {
 /** W-56 Catálogo de modelos. */
 export function CatalogList({ canEdit }: { canEdit: boolean }) {
   const api = usePanelApi();
-  const models = useQuery({ queryKey: ['red', 'modelos'], queryFn: () => api.red.models() });
+  const { query: models, data: modelsPage, items: modelItems, setPage } = usePaged(['red', 'modelos', 'lista'], (p) =>
+    api.red.modelsPage(p),
+  );
   const [editing, setEditing] = useState<DeviceModelItem | 'nuevo' | null>(null);
 
   return (
@@ -272,7 +274,7 @@ export function CatalogList({ canEdit }: { canEdit: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {models.data.map((m) => (
+              {modelItems.map((m) => (
                 <tr key={m.id}>
                   <td>
                     <strong>{m.brand}</strong> {m.model}
@@ -298,6 +300,7 @@ export function CatalogList({ canEdit }: { canEdit: boolean }) {
               ))}
             </tbody>
           </table>
+          <Pager data={modelsPage} noun="modelos" onPage={setPage} />
         </div>
       )}
       {editing && <ModelForm model={editing === 'nuevo' ? undefined : editing} onClose={() => setEditing(null)} />}
