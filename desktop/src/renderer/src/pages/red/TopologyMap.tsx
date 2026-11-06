@@ -4,6 +4,7 @@ import type { EndpointCategory, Topology, TopologyEndpoint, TopologyNode } from 
 import { Card } from '@components/Card';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
+import { Icon } from '@components/Icon';
 import { dateTime, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
 import { DEVICE_STATUS_LABEL, DEVICE_TYPE_LABEL } from './netLabels';
@@ -148,6 +149,82 @@ function speed(mbps: number | null): string | null {
 
 // ------------------------------------------------------------------ árbol (rediseño)
 
+/** Identificador de un equipo final en el mapa (su puerto y su MAC o ficha). */
+export const endpointKey = (e: Pick<TopologyEndpoint, 'portId' | 'mac' | 'machineId'>) =>
+  `${e.portId}-${e.mac ?? e.machineId}`;
+
+/** Resultado del buscador de la topología. */
+export type SearchHit =
+  | { kind: 'node'; id: number; label: string; sub: string }
+  | { kind: 'endpoint'; key: string; endpoint: TopologyEndpoint; label: string; sub: string };
+
+/**
+ * Busca por IP, nombre (de la ficha, el hostname o el equipo de red) o MAC (con o sin separadores) en los equipos de
+ * red y los equipos finales. Primero lo que coincide exacto, después lo que empieza igual y al final lo que contiene.
+ */
+export function searchTopology(
+  topology: Pick<Topology, 'nodes'> & { endpoints?: TopologyEndpoint[] | null },
+  text: string,
+  limit = 8,
+): SearchHit[] {
+  const q = text.trim().toLowerCase();
+  if (q.length < 2) return [];
+  // Parece MAC si lleva letras hex o separadores de MAC, o son 6+ dígitos seguidos (una IP lleva puntos).
+  const hex =
+    /^[0-9a-f:.-]+$/.test(q) && (/[a-f:-]/.test(q) || /^[0-9a-f]{6,}$/.test(q)) ? q.replace(/[^0-9a-f]/g, '') : '';
+  const rank = (fields: (string | null | undefined)[], macs: (string | null | undefined)[]) => {
+    let best = Infinity;
+    for (const raw of fields) {
+      const f = raw?.toLowerCase();
+      if (!f) continue;
+      if (f === q) best = Math.min(best, 0);
+      else if (f.startsWith(q)) best = Math.min(best, 1);
+      else if (f.includes(q)) best = Math.min(best, 2);
+    }
+    if (hex.length >= 4)
+      for (const raw of macs) {
+        const m = raw?.toLowerCase().replace(/[^0-9a-f]/g, '');
+        if (!m) continue;
+        if (m === hex) best = Math.min(best, 0);
+        else if (m.includes(hex)) best = Math.min(best, 2);
+      }
+    return best;
+  };
+  const names = new Map(topology.nodes.map((n) => [n.id, n.name]));
+  const hits: { hit: SearchHit; score: number }[] = [];
+  for (const n of topology.nodes) {
+    const score = rank([n.name, n.managementIp], []);
+    if (score < Infinity)
+      hits.push({
+        score,
+        hit: {
+          kind: 'node',
+          id: n.id,
+          label: n.name,
+          sub: `${DEVICE_TYPE_LABEL[n.type]} · ${n.managementIp ?? n.branchName}`,
+        },
+      });
+  }
+  for (const e of topology.endpoints ?? []) {
+    const score = rank([e.machineName, e.hostname, e.ip], [e.mac]);
+    if (score < Infinity)
+      hits.push({
+        score,
+        hit: {
+          kind: 'endpoint',
+          key: endpointKey(e),
+          endpoint: e,
+          label: endpointName(e),
+          sub: `${e.ip ?? e.mac ?? '—'} · ${names.get(e.deviceId) ?? 'switch'} ${e.portLabel}`,
+        },
+      });
+  }
+  return hits
+    .sort((a, b) => a.score - b.score || a.hit.label.localeCompare(b.hit.label))
+    .slice(0, limit)
+    .map((h) => h.hit);
+}
+
 interface PlacedEndpoint extends TopologyEndpoint {
   key: string;
   x: number;
@@ -291,7 +368,7 @@ export function layoutTree(
           busY: top - Math.min(26, GAP_Y / 2),
           endpoints: shown.map((e, i) => ({
             ...e,
-            key: `${e.portId}-${e.mac ?? e.machineId}`,
+            key: endpointKey(e),
             x: ex + (i % c!.cols) * (EP_W + EP_GAP_X),
             y: top + Math.floor(i / c!.cols) * (EP_H + EP_GAP_Y),
           })),
@@ -384,6 +461,13 @@ export function TopologyMap({
   const [withEndpoints, setWithEndpoints] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchActive, setSearchActive] = useState(0);
+  /** Lo elegido en el buscador: se encuadra en cuanto el mapa lo dibuja. */
+  const [focusTarget, setFocusTarget] = useState<
+    { kind: 'node'; id: number } | { kind: 'endpoint'; key: string; deviceId: number } | null
+  >(null);
   const [box, setBox] = useState<ViewBox | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -440,6 +524,32 @@ export function TopologyMap({
     setShowingAll(false);
   }
 
+  // Encuadre de lo buscado (cuando el mapa ya lo dibujó): si el equipo final está entre los "ver N más", primero se
+  // abre ese grupo y se encuadra en la vuelta siguiente.
+  if (focusTarget && view) {
+    let center: { x: number; y: number } | null = null;
+    let pending = false;
+    if (focusTarget.kind === 'node') {
+      const n = view.nodes.find((p) => p.id === focusTarget.id);
+      if (n) center = { x: n.x + NODE_W / 2, y: n.y + NODE_H / 2 };
+    } else {
+      const e = view.clusters.flatMap((c) => c.endpoints).find((p) => p.key === focusTarget.key);
+      if (e) center = { x: e.x + EP_W / 2, y: e.y + EP_H / 2 };
+      else if (!expanded.has(focusTarget.deviceId) && view.clusters.some((c) => c.switchId === focusTarget.deviceId)) {
+        setExpanded(new Set([...expanded, focusTarget.deviceId]));
+        pending = true;
+      }
+    }
+    if (!pending) {
+      setFocusTarget(null);
+      if (center) {
+        // Un poco por encima del centro: se ve también el camino hacia el switch.
+        setBox({ x: center.x - size.w / 2, y: center.y - size.h * 0.62, w: size.w, h: size.h });
+        setShowingAll(false);
+      }
+    }
+  }
+
   const zoom = (factor: number, cx?: number, cy?: number) =>
     setBox((b) => {
       if (!b) return b;
@@ -489,6 +599,29 @@ export function TopologyMap({
     return () => el.removeEventListener('wheel', onWheel);
   }, [query.isSuccess]);
 
+  const hits = useMemo(() => (data ? searchTopology(data, search) : []), [data, search]);
+
+  /** Muestra lo buscado: quita los filtros que lo ocultan, lo elige (resalta su ruta) y lo centra. */
+  const choose = (hit: SearchHit | undefined) => {
+    if (!hit || !data) return;
+    setSearch(hit.label);
+    setSearchOpen(false);
+    const deviceId = hit.kind === 'node' ? hit.id : hit.endpoint.deviceId;
+    const owner = data.nodes.find((n) => n.id === deviceId);
+    if (branch && owner && String(owner.branchId ?? owner.branchName) !== branch) setBranch('');
+    if (hit.kind === 'endpoint') {
+      const e = hit.endpoint;
+      if (vlan && String(e.vlan) !== vlan) setVlan('');
+      if (category && e.category !== category) setCategory('');
+      setWithEndpoints(true);
+      setSelection({ kind: 'endpoint', key: hit.key });
+      setFocusTarget({ kind: 'endpoint', key: hit.key, deviceId });
+    } else {
+      setSelection({ kind: 'node', id: hit.id });
+      setFocusTarget({ kind: 'node', id: hit.id });
+    }
+  };
+
   if (query.isPending) return <Loading variant="block" />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   if (!data || !view || data.nodes.length === 0) return <EmptyState title="Sin equipos de red activos." />;
@@ -534,6 +667,65 @@ export function TopologyMap({
   return (
     <div className="topology-view">
       <div className="filters">
+        <div className="topology-search">
+          <label className="search filter-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={search}
+              placeholder="Buscar IP, nombre o MAC"
+              aria-label="Buscar en la topología"
+              role="combobox"
+              aria-expanded={searchOpen && search.trim().length >= 2}
+              aria-controls="topology-search-results"
+              aria-autocomplete="list"
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setSearchOpen(true);
+                setSearchActive(0);
+              }}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => setSearchOpen(false)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setSearchOpen(true);
+                  const step = event.key === 'ArrowDown' ? 1 : -1;
+                  setSearchActive((i) => (hits.length ? (i + step + hits.length) % hits.length : 0));
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  choose(hits[searchActive] ?? hits[0]);
+                } else if (event.key === 'Escape') {
+                  setSearchOpen(false);
+                }
+              }}
+            />
+          </label>
+          {searchOpen && search.trim().length >= 2 && (
+            <ul id="topology-search-results" className="topology-search-results" role="listbox">
+              {hits.length === 0 ? (
+                <li className="topology-search-empty">Nada con «{search.trim()}» en la topología.</li>
+              ) : (
+                hits.map((hit, i) => (
+                  <li key={hit.kind === 'node' ? `n${hit.id}` : `e${hit.key}`}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={i === searchActive}
+                      // Antes de que el campo pierda el foco (y se cierre la lista).
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => choose(hit)}
+                    >
+                      <span className="topology-search-kind">{hit.kind === 'node' ? 'Red' : 'Equipo'}</span>
+                      <strong className="mono">{hit.label}</strong>
+                      <span className="mono muted">{hit.sub}</span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </div>
         <FilterSelect label="Sucursal" value={branch} options={branches} allLabel="Todas" onChange={setBranch} />
         <FilterSelect label="VLAN" value={vlan} options={vlans} allLabel="Todas" onChange={setVlan} />
         <FilterSelect
@@ -867,7 +1059,8 @@ export function TopologyMap({
             />
           ) : (
             <EmptyState title="Elija un equipo del mapa.">
-              Un clic muestra su detalle y resalta su ruta hasta el core; doble clic en un equipo de red abre su ficha.
+              Búsquelo por IP, nombre o MAC, o haga clic en él: se muestra su detalle y se resalta su ruta hasta el
+              core; doble clic en un equipo de red abre su ficha.
             </EmptyState>
           )}
         </Card>

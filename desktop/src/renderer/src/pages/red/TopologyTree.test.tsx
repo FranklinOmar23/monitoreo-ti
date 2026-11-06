@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TopologyEndpoint, TopologyLink, TopologyNode } from '@monitoreoti/shared';
 import { fakeNetworkApi, fakePanelApi, renderWithPanel } from '../../test/fakes';
-import { layoutTree, linkKey, pathToRoot } from './TopologyMap';
+import { layoutTree, linkKey, pathToRoot, searchTopology } from './TopologyMap';
 import { RedPage } from './RedPage';
 
 afterEach(cleanup);
@@ -132,5 +132,66 @@ describe('topología como árbol (decisión 81)', () => {
     fireEvent.click(screen.getByRole('button', { name: /PC-07, PC, puerto port5/ }));
     expect(svg.getAttribute('data-focus')).toBeNull();
     expect(screen.getByRole('button', { name: 'Acercar' })).toBeTruthy();
+  });
+
+  it('el buscador encuentra por IP, nombre y MAC (con o sin separadores)', () => {
+    const endpoints = [
+      endpoint(2, 5, { machineId: 7, machineName: 'PC-07' }),
+      endpoint(3, 9, { hostname: 'CAJA-09' }),
+      endpoint(3, 15),
+    ];
+    const topology = { nodes, endpoints };
+    // La IP exacta va primero, antes de las que solo empiezan igual (192.168.4.15).
+    expect(searchTopology(topology, '192.168.4.5').map((h) => h.label)).toEqual(['PC-07']);
+    expect(searchTopology(topology, '192.168.4.1')[0]!.sub).toContain('SW-PISO2 port15');
+    expect(searchTopology(topology, 'caja').map((h) => h.label)).toEqual(['CAJA-09']);
+    expect(searchTopology(topology, '001122330309').map((h) => h.label)).toEqual(['CAJA-09']);
+    expect(searchTopology(topology, '00-11-22-33-03-09').map((h) => h.label)).toEqual(['CAJA-09']);
+    expect(searchTopology(topology, 'sw-piso')).toHaveLength(2);
+    expect(searchTopology(topology, 'x')).toEqual([]);
+  });
+
+  it('al buscar un equipo se elige, se abre su grupo si estaba plegado y se ve su ruta hasta el core', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => endpoint(2, i + 1));
+    many[10] = endpoint(2, 11, { machineId: 8, machineName: 'PC-ONCE', machineStatus: 'sano', hasAgent: true });
+    renderWithPanel(
+      <RedPage canEdit={false} onOpenEquipo={vi.fn()} initialTab="topologia" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          topology: () => Promise.resolve({ nodes, links, macTableReadAt: new Date().toISOString(), endpoints: many }),
+          path: () => Promise.resolve([]),
+        }),
+      }),
+    );
+
+    const box = await screen.findByRole('combobox', { name: 'Buscar en la topología' });
+    // Plegado: no se ve hasta que se busca.
+    expect(screen.queryByRole('button', { name: /PC-ONCE/ })).toBeNull();
+    fireEvent.change(box, { target: { value: '192.168.4.11' } });
+    expect(within(screen.getByRole('listbox')).getByText('PC-ONCE')).toBeTruthy();
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    const route = await screen.findByRole('list', { name: 'Ruta hasta el core' });
+    expect(
+      within(route)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['PC-ONCE', 'SW-PISO1 · port11', 'FGT-SD-02']);
+    expect((await screen.findByRole('button', { name: /PC-ONCE/ })).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('el buscador dice cuando no hay nada', async () => {
+    renderWithPanel(
+      <RedPage canEdit={false} onOpenEquipo={vi.fn()} initialTab="topologia" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          topology: () => Promise.resolve({ nodes, links, macTableReadAt: null, endpoints: [] }),
+        }),
+      }),
+    );
+    const box = await screen.findByRole('combobox', { name: 'Buscar en la topología' });
+    fireEvent.change(box, { target: { value: '10.9.9.9' } });
+    expect(screen.getByText(/Nada con «10.9.9.9»/)).toBeTruthy();
   });
 });

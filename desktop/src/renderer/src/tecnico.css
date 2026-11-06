@@ -1909,6 +1909,90 @@ body {
   color: var(--color-text);
 }
 
+/* Buscador de la topología: IP, nombre o MAC → elige el equipo y resalta su ruta. */
+.topology-search {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 240px;
+  max-width: 380px;
+}
+
+.topology-search .filter-search {
+  width: 100%;
+  min-width: 0;
+}
+
+.topology-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  max-height: 340px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+}
+
+.topology-search-results button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.topology-search-results button:hover,
+.topology-search-results button[aria-selected='true'] {
+  background: var(--color-surface-muted);
+}
+
+.topology-search-results strong,
+.topology-search-results .muted {
+  overflow: hidden;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.topology-search-results .muted {
+  grid-column: 2;
+  font-size: 11px;
+}
+
+.topology-search-kind {
+  grid-row: span 2;
+  align-self: center;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+}
+
+.topology-search-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
 .topology-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);

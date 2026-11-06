@@ -181,6 +181,25 @@ public sealed class IpAddressTests(TestDatabase database) : IAsyncLifetime
         pcHistory.GetProperty("machineId").GetInt32().Should().Be(pc.MachineId);
         pcHistory.GetProperty("source").GetString().Should().Be("agente");
         (await admin.GetAsync($"/api/v1/red/subredes/{subnetId}/historial?ip=no-es-ip")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // Una muestra más vieja que el período vigente (cola atrasada del agente, reloj del equipo detrás del servidor)
+        // no lo acorta: antes dejaba "hasta" antes de "desde", violaba el CHECK y el agente reenviaba sin fin.
+        await _api.ExecuteAsync(
+            "UPDATE dbo.historial_ip SET desde = DATEADD(HOUR, 1, SYSUTCDATETIME()), hasta = DATEADD(HOUR, 1, SYSUTCDATETIME()) " +
+            "WHERE subred_id = @s AND ip = @ip", ("@s", subnetId), ("@ip", $"{net}.70"));
+        await JsonAsync(await admin.PostAsync($"/api/v1/red/subredes/{subnetId}/escanear", null));
+        await NextOfTypeAsync(socket, "barrido_ip");
+        await SendAckedAsync(socket, "barrido_ip_resultado", new
+        {
+            subredId = subnetId,
+            ok = true,
+            responden = Array.Empty<string>(),
+            arp = new[] { new { ip = $"{net}.70", mac = printerMac } },
+        });
+        var invalid = await _api.ScalarAsync(
+            "SELECT COUNT(*) FROM dbo.historial_ip WHERE subred_id = @s AND ip = @ip AND hasta < desde", ("@s", subnetId), ("@ip", $"{net}.70"));
+        Convert.ToInt32(invalid).Should().Be(0);
+        (await JsonAsync(await admin.GetAsync($"/api/v1/red/subredes/{subnetId}/historial?ip={net}.70"))).EnumerateArray().Should().ContainSingle();
     }
 
     [DatabaseFact]

@@ -4346,7 +4346,7 @@ button.profile:hover {
 }
 
 .connect-steps .btn-outline {
-  background: #ffffff;
+  background: var(--color-surface);
   color: var(--color-text);
 }
 
@@ -4357,7 +4357,7 @@ button.profile:hover {
   width: min(460px, 92vw);
   padding: 28px;
   border-radius: var(--radius);
-  background: #ffffff;
+  background: var(--color-surface);
   color: var(--color-text);
 }
 
@@ -4525,8 +4525,10 @@ button.profile:hover {
   gap: 2px;
   width: 290px;
   padding: 10px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  background: #ffffff;
+  /* Con el tema: en oscuro el texto es claro y un fondo blanco fijo lo hacía ilegible. */
+  background: var(--color-surface);
   color: var(--color-text);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
 }

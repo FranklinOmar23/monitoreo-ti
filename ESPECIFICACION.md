@@ -103,7 +103,7 @@ El protocolo de mensajes agente ↔ servidor se define en C# en `MonitoreoTI.Age
 
 ### 4.3 Librerías permitidas (sin preguntar)
 
-- .NET: EF Core, `Microsoft.Data.SqlClient`, `Microsoft.Data.Sqlite` (cola local del agente), `System.Management` (WMI), `FluentValidation`, `Serilog`, `BCrypt.Net-Next` o Argon2 (`Konscious.Security.Cryptography`), `Otp.NET` (2FA TOTP), `QRCoder`, `Lextm.SharpSnmpLib` (SNMP v2c/v3), `xUnit`, `FluentAssertions`, `NSubstitute`.
+- .NET: EF Core, `Microsoft.Data.SqlClient`, `Microsoft.Data.Sqlite` (cola local del agente), `System.Management` (WMI), `FluentValidation`, `Serilog`, `BCrypt.Net-Next` o Argon2 (`Konscious.Security.Cryptography`), `Otp.NET` (2FA TOTP), `QRCoder`, `Lextm.SharpSnmpLib` (SNMP v2c/v3), `xUnit`, `FluentAssertions`, `NSubstitute`, `Swashbuckle.AspNetCore` (Swagger, solo en desarrollo).
 - Escritorio: `electron`, `electron-builder`, `electron-updater` (actualizaciones servidas desde nuestro propio servidor), `react-router`, `@tanstack/react-query`, `zustand`, `@microsoft/signalr`, `three`, `@react-three/fiber`, `@react-three/drei`, `xterm` (`@xterm/xterm`), `recharts`, `zod`, `react-hook-form`, `vitest`, `@testing-library/react`, `playwright`.
 - Móvil: `expo`, `expo-camera` (QR), `expo-secure-store`, `expo-local-authentication`, `expo-notifications`, `@tanstack/react-query`, `@microsoft/signalr`, `react-navigation`.
 - Instalador del agente: WiX Toolset (herramienta de compilación del .msi).

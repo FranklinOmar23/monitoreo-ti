@@ -124,7 +124,7 @@ public static class IpInventory
             var rows = await db.IpAddresses.Where(r => r.SubnetId == group.Key && ips.Contains(r.Ip)).ToDictionaryAsync(r => r.Ip, ct);
             var latest = (await db.IpHistory.Where(h => h.SubnetId == group.Key && ips.Contains(h.Ip))
                     .GroupBy(h => h.Ip)
-                    .Select(g => g.OrderByDescending(h => h.To).First())
+                    .Select(g => g.OrderByDescending(h => h.To).ThenByDescending(h => h.Id).First())
                     .ToListAsync(ct))
                 .ToDictionary(h => h.Ip);
 
@@ -196,7 +196,10 @@ public static class IpInventory
                 : machineId is null || current.MachineId is null || current.MachineId == machineId;
             if (same)
             {
-                current.To = now;
+                // Una muestra atrasada (cola del agente, reloj del equipo detrás del servidor) no acorta el período:
+                // "hasta" nunca puede quedar antes de "desde" (CHECK de historial_ip).
+                if (now > current.To)
+                    current.To = now;
                 current.MacAddress ??= mac;
                 current.Vendor ??= vendor;
                 current.MachineId ??= machineId;

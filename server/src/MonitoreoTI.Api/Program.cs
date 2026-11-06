@@ -25,10 +25,15 @@ builder.Services.AddAgentGateway(builder.Configuration);
 builder.Services.AddPanelAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddPanelCors(builder.Configuration, builder.Environment);
 builder.Services.AddPanelApi();
+// Swagger solo en desarrollo (/swagger).
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddDevSwagger();
 
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
+if (app.Environment.IsDevelopment())
+    app.UseDevSwagger();
 app.UseCors(CorsExtensions.PanelPolicy);
 app.UseRateLimiter();
 app.UseAuthentication();

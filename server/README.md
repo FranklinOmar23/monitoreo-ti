@@ -30,6 +30,8 @@ dotnet watch --project src/MonitoreoTI.Api --launch-profile http --no-hot-reload
 
 Sin `ConnectionStrings:TestServer` las pruebas que necesitan SQL Server se omiten.
 
+**Swagger** (solo en desarrollo): http://localhost:5126/swagger lista todos los endpoints agrupados por recurso. Para probarlos, haga login con `POST /api/v1/auth/login`, copie el `accessToken` y péguelo en **Authorize**.
+
 ## Aislamiento entre empresas
 
 1. **SQL Server RLS**: `TenantSessionContextInterceptor` ejecuta `sp_set_session_context` (solo lectura) al abrir cada conexión.

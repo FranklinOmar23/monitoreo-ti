@@ -170,7 +170,7 @@ public sealed class IpAddresses(
         var since = now.AddDays(-Math.Clamp(days, 1, 90));
         var rows = await db.IpHistory.AsNoTracking()
             .Where(h => h.SubnetId == subnetId && h.Ip == text && h.To >= since)
-            .OrderByDescending(h => h.To).Take(200).ToListAsync(ct);
+            .OrderByDescending(h => h.To).ThenByDescending(h => h.Id).Take(200).ToListAsync(ct);
 
         var machineIds = rows.Where(r => r.MachineId != null).Select(r => r.MachineId!.Value).Distinct().ToList();
         var stillThere = await db.NetworkInterfaces.AsNoTracking()
