@@ -103,6 +103,7 @@ public static class PanelExtensions
         app.MapMaintenanceEndpoints();
         app.MapRemoteEndpoints();
         app.MapBackupEndpoints();
+        app.MapReportNowEndpoints();
         app.MapUserEndpoints();
         app.MapReportEndpoints();
         app.MapPanelUpdateEndpoints();

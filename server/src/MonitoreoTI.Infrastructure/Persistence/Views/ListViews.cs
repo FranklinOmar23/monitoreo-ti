@@ -14,6 +14,7 @@ public sealed class MachineListRow : ITenantEntity
     public int CompanyId { get; set; }
     public int Id { get; set; }
     public string Name { get; set; } = "";
+    public string? Alias { get; set; }
     public MachineType Type { get; set; }
     public string? Brand { get; set; }
     public string? Model { get; set; }
@@ -123,6 +124,7 @@ internal sealed class MachineListRowConfiguration : IEntityTypeConfiguration<Mac
         b.Property(x => x.CompanyId).HasColumnName("empresa_id");
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.Name).HasColumnName("nombre");
+        b.Property(x => x.Alias).HasColumnName("alias");
         b.Property(x => x.Type).HasColumnName("tipo");
         b.Property(x => x.Brand).HasColumnName("marca");
         b.Property(x => x.Model).HasColumnName("modelo");

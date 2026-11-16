@@ -12,6 +12,8 @@ import { loadWindowTicket } from './windowTicket';
 /** La barra se esconde tras este tiempo sin el mouse encima (y al empezar, tras un poco más). */
 const TOOLBAR_HIDE_MS = 1500;
 const TOOLBAR_FIRST_HIDE_MS = 3000;
+/** Tras "sin respuesta", lo que se espera a que el equipo vuelva solo antes de abrir una sesión nueva. */
+const RECONNECT_GRACE_MS = 4000;
 const PINNED_KEY = 'centinela.escritorio.barraFija';
 
 function readPinned(): boolean {
@@ -87,6 +89,10 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
   const [menu, setMenu] = useState<string | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Veces que la imagen se destrabó sola en esta sesión. */
+  const [recoveries, setRecoveries] = useState(0);
+  /** El canal no responde: se espera un momento y se vuelve a abrir la sesión sola. */
+  const [stalledAt, setStalledAt] = useState<number | null>(null);
   const [secureDesktop, setSecureDesktop] = useState<string | null>(null);
   const [inputBlocked, setInputBlocked] = useState(false);
   const [blackScreen, setBlackScreen] = useState(false);
@@ -168,6 +174,29 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
     };
   }, [createSocket]);
 
+  // Canal trabado (decisión 86): si en unos segundos no vuelve a responder, se abre una sesión nueva sola (la misma
+  // ruta que "Reintentar"), sin que el técnico tenga que cerrar y conectarse otra vez.
+  useEffect(() => {
+    if (stalledAt === null) return;
+    const timer = setTimeout(() => {
+      socketRef.current?.close();
+      if (bridge && launch?.machineId)
+        void bridge.requestSession('escritorio').then((ok) => {
+          if (ok) window.close();
+          else
+            setPhase({
+              kind: 'error',
+              code: 'ERR_SIN_RESPUESTA',
+              message: 'El equipo dejó de responder y no se pudo reconectar.',
+              at: new Date(),
+            });
+        });
+      else
+        setPhase({ kind: 'error', code: 'ERR_SIN_RESPUESTA', message: 'El equipo dejó de responder.', at: new Date() });
+    }, RECONNECT_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [stalledAt, bridge, launch?.machineId]);
+
   // Reloj de la sesión y de la espera del permiso.
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -230,6 +259,16 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
         case 'pantalla_negra':
           setBlackScreen(event.active);
           if (event.message) setNotice(event.message);
+          break;
+        case 'recuperada':
+          setRecoveries(event.times);
+          setNotice('La imagen se había trabado y se recuperó sola.');
+          break;
+        case 'sin_respuesta':
+          setStalledAt(Date.now());
+          break;
+        case 'respondiendo':
+          setStalledAt(null);
           break;
       }
     },
@@ -372,6 +411,17 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
                 secure={secure}
                 onCancel={finish}
               />
+            </div>
+          )}
+
+          {streaming && stalledAt !== null && (
+            <div className="desktop-overlay desktop-stalled" role="alert">
+              <div>
+                <strong>El equipo dejó de responder</strong>
+                <span>
+                  Reconectando en {Math.max(0, Math.ceil((stalledAt + RECONNECT_GRACE_MS - now) / 1000))} s…
+                </span>
+              </div>
             </div>
           )}
 
@@ -577,6 +627,10 @@ export function DesktopWindow({ loadTicket = loadWindowTicket, createSocket = br
                   <div>
                     <span>Ancho</span>
                     <strong className="mono">{stats.mbps} Mb/s</strong>
+                  </div>
+                  <div>
+                    <span>Recuperada</span>
+                    <strong className="mono">{recoveries === 1 ? '1 vez' : `${recoveries} veces`}</strong>
                   </div>
                 </div>
                 {stats.codec && (

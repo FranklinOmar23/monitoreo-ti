@@ -38,7 +38,8 @@ public sealed class PanelCommands(
 
     public async Task<CommandResult> CreateMachineAsync(MachineInput input, CancellationToken ct)
     {
-        var invalid = await ValidateMachineReferencesAsync(input, ct) ?? await ValidatePrinterSnmpAsync(null, input, ct);
+        var invalid = await ValidateMachineReferencesAsync(input, ct) ?? await ValidateAliasAsync(null, input, ct)
+            ?? await ValidatePrinterSnmpAsync(null, input, ct);
         if (invalid is not null)
             return invalid;
 
@@ -61,7 +62,8 @@ public sealed class PanelCommands(
         if (machine is null || machine.Status == MachineStatus.Retired)
             return CommandResult.NotFound();
 
-        var invalid = await ValidateMachineReferencesAsync(input, ct) ?? await ValidatePrinterSnmpAsync(machine, input, ct);
+        var invalid = await ValidateMachineReferencesAsync(input, ct) ?? await ValidateAliasAsync(id, input, ct)
+            ?? await ValidatePrinterSnmpAsync(machine, input, ct);
         if (invalid is not null)
             return invalid;
 
@@ -107,6 +109,18 @@ public sealed class PanelCommands(
             && !await db.Departments.AnyAsync(d => d.Id == departmentId && d.BranchId == input.SucursalId, ct))
             return CommandResult.Invalid("El departamento no es de la sucursal elegida.");
         return null;
+    }
+
+    /// <summary>El alias se repite entre sucursales pero no dentro de una (decisión 87).</summary>
+    private async Task<CommandResult?> ValidateAliasAsync(int? machineId, MachineInput input, CancellationToken ct)
+    {
+        var alias = Clean(input.Alias);
+        if (alias is null)
+            return null;
+        var taken = await db.Machines.AsNoTracking()
+            .Where(m => m.BranchId == input.SucursalId && m.Alias == alias && m.Id != (machineId ?? 0) && m.Status != MachineStatus.Retired)
+            .Select(m => m.Name).FirstOrDefaultAsync(ct);
+        return taken is null ? null : CommandResult.Conflict($"El alias «{alias}» ya lo tiene {taken} en esta sucursal.");
     }
 
     /// <summary>
@@ -185,11 +199,13 @@ public sealed class PanelCommands(
         machine.AssignedTo = Clean(input.Responsable);
         machine.PurchaseDate = input.FechaCompra;
         machine.WarrantyUntil = input.GarantiaHasta;
+        machine.Alias = Clean(input.Alias);
     }
 
     private static object Snapshot(Machine m) => new
     {
         nombre = m.Name,
+        alias = m.Alias,
         tipo = PanelQueries.Text(m.Type),
         estado = PanelQueries.Text(m.Status),
         sucursalId = m.BranchId,

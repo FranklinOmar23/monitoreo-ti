@@ -45,7 +45,9 @@ public sealed record MachineInput(
     string? SnmpComunidad = null,
     string? SnmpClaveAutenticacion = null,
     string? SnmpClavePrivacidad = null,
-    int? RecolectorId = null);
+    int? RecolectorId = null,
+    /// <summary>Nombre corto para reconocerlo (decisión 87); vacío lo quita. Único en la sucursal.</summary>
+    string? Alias = null);
 
 public sealed class MachineInputValidator : AbstractValidator<MachineInput>
 {
@@ -54,6 +56,7 @@ public sealed class MachineInputValidator : AbstractValidator<MachineInput>
     public MachineInputValidator()
     {
         RuleFor(x => x.Nombre).NotEmpty().WithMessage("Escriba el nombre del equipo.").MaximumLength(100);
+        RuleFor(x => x.Alias).MaximumLength(60).WithMessage("El alias tiene como máximo 60 caracteres.");
         RuleFor(x => x.Tipo).Must(t => Types.Contains(t)).WithMessage("Tipo de equipo no válido.");
         RuleFor(x => x.SucursalId).GreaterThan(0).WithMessage("Elija la sucursal.");
         RuleFor(x => x.Marca).MaximumLength(100);

@@ -256,7 +256,15 @@ namespace MonitoreoTI.AgenteClasico
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
         private readonly Stopwatch _clock = Stopwatch.StartNew();
         private Thread _thread;
+        private Thread _inputThread;
+        /// <summary>El monitor que se muestra, para ubicar el mouse desde el hilo de la entrada.</summary>
+        private volatile MonitorArea _area;
         private int _inFlight;
+        private int _recoveries;
+
+        /// <summary>Partes en camino sin confirmar; sin confirmación en este tiempo se dan por perdidas (decisión 86).</summary>
+        public const int MaxInFlight = 2;
+        public const int StallMilliseconds = 3000;
         private volatile int _monitor;
         private volatile bool _full = true;
         private volatile bool _auto = true;
@@ -281,6 +289,9 @@ namespace MonitoreoTI.AgenteClasico
                 return false;
             _thread = new Thread(Run) { IsBackground = true, Name = "Pantalla remota" };
             _thread.Start();
+            // El mouse y el teclado van por su propio hilo: una captura trabada no deja al técnico sin control.
+            _inputThread = new Thread(RunInput) { IsBackground = true, Name = "Entrada remota" };
+            _inputThread.Start();
             return true;
         }
 
@@ -293,7 +304,9 @@ namespace MonitoreoTI.AgenteClasico
 
         public void Acknowledge()
         {
-            Interlocked.Decrement(ref _inFlight);
+            // Una confirmación que llega tarde (después de destrabarse) no deja el contador por debajo de cero.
+            if (Interlocked.Decrement(ref _inFlight) < 0)
+                Interlocked.Exchange(ref _inFlight, 0);
             if (!_sentAt.TryDequeue(out var sent) || !_auto)
                 return;
             var elapsed = _clock.ElapsedMilliseconds - sent;
@@ -320,10 +333,36 @@ namespace MonitoreoTI.AgenteClasico
             _full = true;
         }
 
-        public void Post(Action<MonitorArea> action)
+        public void Post(Action<MonitorArea> action) => _queue.Add(action);
+
+        /// <summary>Hilo de la entrada: mouse, teclado y portapapeles en el escritorio que recibe la entrada.</summary>
+        private void RunInput()
         {
-            _queue.Add(action);
-            _wake.Set();
+            var desktop = "";
+            while (!_stop.WaitOne(0))
+            {
+                Action<MonitorArea> action;
+                try
+                {
+                    if (!_queue.TryTake(out action, 250))
+                        continue;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+                var active = DesktopSwitcher.InputDesktopName();
+                if (active != null && active != desktop && DesktopSwitcher.SwitchThreadTo(active))
+                    desktop = active;
+                try
+                {
+                    action(_area ?? Area());
+                }
+                catch (Exception)
+                {
+                    // Una entrada que falla (escritorio cambiando) no corta la sesión.
+                }
+            }
         }
 
         public void SetClipboard(string text)
@@ -384,19 +423,22 @@ namespace MonitoreoTI.AgenteClasico
                         _full = true;
                     }
 
-                    while (_queue.TryTake(out var action))
+                    _area = area;
+
+                    // Una confirmación perdida en el camino (corte de red, cuadro descartado) no congela la pantalla:
+                    // lo pendiente se da por perdido y se manda la pantalla entera.
+                    if (Volatile.Read(ref _inFlight) >= MaxInFlight && _sentAt.TryPeek(out var oldest)
+                        && _clock.ElapsedMilliseconds - oldest > StallMilliseconds)
                     {
-                        try
+                        while (_sentAt.TryDequeue(out _))
                         {
-                            action(area);
                         }
-                        catch (Exception)
-                        {
-                            // Una entrada que falla (escritorio cambiando) no corta la sesión.
-                        }
+                        Interlocked.Exchange(ref _inFlight, 0);
+                        _full = true;
+                        _sendText(new Dictionary<string, object> { ["tipo"] = "recuperada", ["veces"] = Interlocked.Increment(ref _recoveries) });
                     }
 
-                    if (_viewing.IsSet && Volatile.Read(ref _inFlight) < 2)
+                    if (_viewing.IsSet && Volatile.Read(ref _inFlight) < MaxInFlight)
                     {
                         if (_full)
                         {
@@ -443,6 +485,7 @@ namespace MonitoreoTI.AgenteClasico
         {
             _stop.Set();
             _thread?.Join(TimeSpan.FromSeconds(2));
+            _inputThread?.Join(TimeSpan.FromSeconds(2));
         }
     }
 

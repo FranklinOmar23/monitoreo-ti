@@ -13,8 +13,8 @@
     <LangVersion>8.0</LangVersion>
     <AssemblyName>MonitoreoTI.AgenteClasico</AssemblyName>
     <RootNamespace>MonitoreoTI.AgenteClasico</RootNamespace>
-    <Version>0.2.0</Version>
-    <InformationalVersion>0.2.0-clasico</InformationalVersion>
+    <Version>0.2.2</Version>
+    <InformationalVersion>0.2.2-clasico</InformationalVersion>
     <Product>MonitoreoTI Agente clásico</Product>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <DebugType>none</DebugType>

@@ -260,7 +260,7 @@ public sealed class NetworkInsights(MonitoreoDbContext db, NetworkQueries querie
             .ToListAsync(ct);
         var machineIds = macs.Where(m => m.MachineId != null).Select(m => m.MachineId!.Value).Distinct().ToList();
         var machines = await db.Machines.AsNoTracking().Where(m => machineIds.Contains(m.Id))
-            .Select(m => new { m.Id, m.Name, m.Type, m.Status, m.IpAddress, HasAgent = m.Agent != null })
+            .Select(m => new { m.Id, m.Name, m.Alias, m.Type, m.Status, m.IpAddress, HasAgent = m.Agent != null })
             .ToDictionaryAsync(m => m.Id, ct);
 
         var seenMacs = macs.Select(m => m.MacAddress).Distinct().ToList();
@@ -296,7 +296,8 @@ public sealed class NetworkInsights(MonitoreoDbContext db, NetworkQueries querie
             list.Add(new TopologyEndpoint(
                 port.DeviceId, port.Id, row.Number, port.PortName, m.Vlan ?? row.Vlan, row.SpeedMbps, m.MacAddress, m.IpAddress ?? machine?.IpAddress,
                 m.Vendor, machine?.Id, machine?.Name, machine is null ? null : Text(machine.Status), machine?.HasAgent ?? false,
-                category, inferred, seen ? "detectado" : "documentado", m.FirstSeenAt, m.LastSeenAt, hostnames.GetValueOrDefault(m.MacAddress)));
+                category, inferred, seen ? "detectado" : "documentado", m.FirstSeenAt, m.LastSeenAt, hostnames.GetValueOrDefault(m.MacAddress),
+                machine?.Alias));
             if (list.Count >= MaxEndpoints)
                 break;
         }

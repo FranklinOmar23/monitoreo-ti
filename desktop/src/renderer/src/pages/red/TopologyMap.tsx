@@ -136,6 +136,7 @@ function endpointTone(e: TopologyEndpoint): 'sano' | 'advertencia' | 'critico' |
 
 function endpointName(e: TopologyEndpoint): string {
   return (
+    e.machineAlias ??
     e.machineName ??
     e.hostname ??
     (e.category === 'desconocido' ? 'Desconocido' : (e.vendor ?? CATEGORY_LABEL[e.category]))
@@ -206,7 +207,7 @@ export function searchTopology(
       });
   }
   for (const e of topology.endpoints ?? []) {
-    const score = rank([e.machineName, e.hostname, e.ip], [e.mac]);
+    const score = rank([e.machineAlias, e.machineName, e.hostname, e.ip], [e.mac]);
     if (score < Infinity)
       hits.push({
         score,

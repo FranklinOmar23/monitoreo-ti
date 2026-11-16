@@ -38,6 +38,8 @@ export const SERVER_MESSAGE_TYPES = [
   'config_actualizada',
   'barrido_ip',
   'sondear_ahora',
+  /** "Actualizar" en la ficha (decisión 85): métricas, volúmenes, procesos y servicios en el momento. */
+  'reportar_ahora',
 ] as const;
 export type ServerMessageType = (typeof SERVER_MESSAGE_TYPES)[number];
 

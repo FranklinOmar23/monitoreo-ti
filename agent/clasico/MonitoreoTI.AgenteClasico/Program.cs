@@ -135,6 +135,7 @@ namespace MonitoreoTI.AgenteClasico
         private Gateway _gateway;
         private Commands _commands;
         private RemoteSessions _sessions;
+        private int _reportingNow;
 
         public void Start()
         {
@@ -200,6 +201,38 @@ namespace MonitoreoTI.AgenteClasico
                     {
                         _gateway.Enqueue("inventario_hardware", Collectors.Hardware());
                         _gateway.Enqueue("inventario_software", Collectors.Software());
+                    });
+                    break;
+                case "reportar_ahora":
+                    // "Actualizar" en la ficha (decisión 85): lo que más cambia, sin esperar su horario.
+                    Task.Run(() =>
+                    {
+                        if (Interlocked.Exchange(ref _reportingNow, 1) == 1)
+                            return;
+                        try
+                        {
+                            foreach (var part in new Dictionary<string, Func<Dictionary<string, object>>>
+                                     {
+                                         ["metricas"] = Collectors.Metrics,
+                                         ["volumenes"] = Collectors.Volumes,
+                                         ["procesos"] = Collectors.Processes,
+                                         ["servicios"] = Collectors.Services,
+                                     })
+                            {
+                                try
+                                {
+                                    _gateway.Enqueue(part.Key, part.Value());
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Error($"No se pudo recolectar {part.Key}: {ex.Message}");
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            Interlocked.Exchange(ref _reportingNow, 0);
+                        }
                     });
                     break;
                 case "abrir_sesion_remota":

@@ -70,7 +70,7 @@ public static class FrameIo
 public static class DesktopHelper
 {
     /// <summary>Partes de pantalla en camino sin confirmar: más, y el visor se atrasa (la imagen tendría retraso).</summary>
-    private const int MaxInFlight = 2;
+    internal const int MaxInFlight = 2;
     private static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(50);
 
     public static async Task<int> RunAsync()
@@ -319,6 +319,9 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     private readonly AutoResetEvent _wake = new(false);
     private readonly CancellationTokenSource _stop = new();
     private Thread? _thread;
+    private Thread? _inputThread;
+    /// <summary>El monitor que se está mostrando, para ubicar el mouse desde el hilo de la entrada.</summary>
+    private volatile MonitorArea? _area;
     private int _inFlight;
     private volatile int _monitor;
     private volatile bool _full = true;
@@ -326,6 +329,18 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     private volatile int _quality = 60;
     private uint _clipboardSequence;
     private int _videoFailures;
+    /// <summary>La V2 se trabó en esta sesión: se sigue con la V1 hasta el final (no se reintenta al cambiar de escritorio).</summary>
+    private volatile bool _videoDisabled;
+    /// <summary>Última vuelta del bucle de la pantalla (lo mira el vigilante).</summary>
+    private long _heartbeat = Environment.TickCount64;
+    /// <summary>Bucle vigente: uno abandonado (trabado) termina en cuanto vuelve y ve que ya no es el vigente.</summary>
+    private int _generation;
+    private int _restarts;
+    private Thread? _watchdog;
+
+    /// <summary>Sin una vuelta del bucle de la pantalla en este tiempo, se da por trabado y se abre otro (decisión 89).</summary>
+    public const int FrozenMilliseconds = 6000;
+    private const int MaxRestarts = 5;
     private List<MonitorArea> _monitors = [];
     private string? _user;
 
@@ -341,8 +356,15 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
         _monitors = ScreenCapture.Monitors();
         if (_monitors.Count == 0)
             return false;
-        _thread = new Thread(Run) { IsBackground = true, Name = "Pantalla remota" };
-        _thread.Start();
+        StartLoop();
+        // Vigilante: si el bucle de la pantalla se traba (el codificador o la duplicación de video no vuelven) o muere por
+        // un error inesperado, se abandona y se abre otro con la captura JPEG.
+        _watchdog = new Thread(Watch) { IsBackground = true, Name = "Vigilante de pantalla" };
+        _watchdog.Start();
+        // El mouse y el teclado van por su propio hilo: una captura que se traba (cambio de escritorio, controlador de
+        // video) no deja al técnico sin control.
+        _inputThread = new Thread(RunInput) { IsBackground = true, Name = "Entrada remota" };
+        _inputThread.Start();
         return true;
     }
 
@@ -356,7 +378,9 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
 
     public void Acknowledge()
     {
-        Interlocked.Decrement(ref _inFlight);
+        // Una confirmación que llega tarde (después de destrabarse) no deja el contador por debajo de cero.
+        if (Interlocked.Decrement(ref _inFlight) < 0)
+            Interlocked.Exchange(ref _inFlight, 0);
         if (!_sentAt.TryDequeue(out var sent) || !_auto)
             return;
         // Calidad automática: lo que tarda una actualización en dibujarse y confirmarse.
@@ -387,10 +411,45 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     }
 
     /// <summary>Una acción (mouse, teclado, portapapeles) a ejecutar en el escritorio activo, con el monitor actual.</summary>
-    public void Post(Action<MonitorArea> action)
+    public void Post(Action<MonitorArea> action) => _queue.Add(action);
+
+    /// <summary>Sin confirmación del visor en este tiempo, lo enviado se da por perdido y se manda la pantalla entera.</summary>
+    public const int StallMilliseconds = 3000;
+
+    /// <summary>Veces que la pantalla se destrabó sola en esta sesión (se informa al visor).</summary>
+    public int Recoveries => _recoveries;
+    private int _recoveries;
+
+    /// <summary>
+    /// Hilo de la entrada: ejecuta mouse, teclado y portapapeles en el escritorio que recibe la entrada (normal, bloqueo,
+    /// UAC), siguiéndolo por su cuenta.
+    /// </summary>
+    private void RunInput()
     {
-        _queue.Add(action);
-        _wake.Set();
+        var desktop = "";
+        try
+        {
+            while (!_stop.IsCancellationRequested)
+            {
+                if (!_queue.TryTake(out var action, 250, _stop.Token))
+                    continue;
+                var active = DesktopSwitcher.InputDesktopName();
+                if (active is not null && active != desktop && DesktopSwitcher.SwitchThreadTo(active))
+                    desktop = active;
+                try
+                {
+                    action(_area ?? Area());
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    // Una entrada que falla (escritorio cambiando) no corta la sesión.
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Fin de la sesión.
+        }
     }
 
     /// <summary>Lo que manda el visor al portapapeles del equipo (sin devolverlo como "copiado en el equipo").</summary>
@@ -422,7 +481,7 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     /// <summary>V2 si se puede; si no, V1. "Todos los monitores" va siempre por la V1 (DXGI duplica de a un monitor).</summary>
     private IScreenSource CreateSource(MonitorArea area)
     {
-        if (VideoAllowed && _monitor != AllMonitors && _videoFailures < 3)
+        if (VideoAllowed && !_videoDisabled && _monitor != AllMonitors && _videoFailures < 3)
         {
             try
             {
@@ -437,7 +496,61 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
         return new ScreenCapture(area);
     }
 
-    private void Run()
+    /// <summary>Al registro del agente (el lanzador no recoge la salida de errores del asistente) y de paso al visor.</summary>
+    private void Diagnose(string text)
+    {
+        try
+        {
+            sendText(new { tipo = "diagnostico", mensaje = $"Pantalla remota: {text}" });
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            // El agente se fue.
+        }
+    }
+
+    private void StartLoop()
+    {
+        var generation = Interlocked.Increment(ref _generation);
+        Interlocked.Exchange(ref _heartbeat, Environment.TickCount64);
+        _thread = new Thread(() => Run(generation)) { IsBackground = true, Name = $"Pantalla remota {generation}" };
+        _thread.Start();
+    }
+
+    private void Watch()
+    {
+        try
+        {
+            while (!_stop.Token.WaitHandle.WaitOne(1000))
+            {
+                if (!_viewing.IsSet || Environment.TickCount64 - Interlocked.Read(ref _heartbeat) < FrozenMilliseconds)
+                    continue;
+                if (_restarts >= MaxRestarts)
+                {
+                    sendText(new { tipo = "error", codigo = "PANTALLA_TRABADA", mensaje = "La captura de pantalla del equipo se trabó varias veces. Vuelva a conectarse." });
+                    return;
+                }
+                _restarts++;
+                _videoDisabled = true;
+                Diagnose($"el bucle de captura no responde hace {FrozenMilliseconds / 1000} s; se abre otro con la captura JPEG (vez {_restarts}).");
+                while (_sentAt.TryDequeue(out _))
+                {
+                }
+                Interlocked.Exchange(ref _inFlight, 0);
+                _full = true;
+                StartLoop();
+                Interlocked.Increment(ref _recoveries);
+                sendText(new { tipo = "recuperada", veces = _recoveries });
+                sendText(new { tipo = "aviso", mensaje = "La captura de video se trabó; se siguió con imágenes JPEG." });
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Fin de la sesión.
+        }
+    }
+
+    private void Run(int generation)
     {
         IScreenSource? capture = null;
         var desktop = "";
@@ -445,8 +558,9 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
         var nextClipboardCheck = 0L;
         try
         {
-            while (!_stop.IsCancellationRequested)
+            while (!_stop.IsCancellationRequested && generation == Volatile.Read(ref _generation))
             {
+                Interlocked.Exchange(ref _heartbeat, Environment.TickCount64);
                 // ¿Cambió el escritorio que recibe la entrada (bloqueo, UAC, inicio de sesión)?
                 var active = DesktopSwitcher.InputDesktopName();
                 if (active is not null && active != desktop && DesktopSwitcher.SwitchThreadTo(active))
@@ -472,20 +586,23 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
                     _full = true;
                 }
 
-                // Primero el control (que no espere a la pantalla).
-                while (_queue.TryTake(out var action))
+                _area = area;
+
+                // Si una confirmación se perdió en el camino (corte de red, cuadro descartado), el visor ya no va a
+                // confirmar: lo pendiente se da por perdido y se manda la pantalla entera (en H.264, un cuadro clave).
+                if (Volatile.Read(ref _inFlight) >= DesktopHelper.MaxInFlight && _sentAt.TryPeek(out var oldest)
+                    && Environment.TickCount64 - oldest > StallMilliseconds)
                 {
-                    try
+                    while (_sentAt.TryDequeue(out _))
                     {
-                        action(area);
                     }
-                    catch (Exception ex) when (ex is not OutOfMemoryException)
-                    {
-                        // Una entrada que falla (escritorio cambiando) no corta la sesión.
-                    }
+                    Interlocked.Exchange(ref _inFlight, 0);
+                    _full = true;
+                    Interlocked.Increment(ref _recoveries);
+                    sendText(new { tipo = "recuperada", veces = _recoveries });
                 }
 
-                if (_viewing.IsSet && Volatile.Read(ref _inFlight) < 2)
+                if (_viewing.IsSet && Volatile.Read(ref _inFlight) < DesktopHelper.MaxInFlight)
                 {
                     if (_full)
                     {
@@ -539,11 +656,25 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
         {
             // Fin de la sesión o el agente se fue.
         }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Un error inesperado no puede dejar la pantalla congelada en silencio: queda en el registro del agente y el
+            // vigilante abre otro bucle.
+            Diagnose($"el bucle de captura terminó por un error: {ex.GetType().Name}: {ex.Message}");
+        }
         finally
         {
-            capture?.Dispose();
-            // Si el técnico bloqueó la entrada del usuario, se le devuelve al terminar.
-            InputInjector.Block(false);
+            try
+            {
+                capture?.Dispose();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // La captura trabada puede fallar al liberarse.
+            }
+            // Si el técnico bloqueó la entrada del usuario, se le devuelve al terminar la sesión (no al reabrir el bucle).
+            if (_stop.IsCancellationRequested)
+                InputInjector.Block(false);
         }
     }
 
@@ -551,6 +682,8 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     {
         _stop.Cancel();
         _thread?.Join(TimeSpan.FromSeconds(2));
+        _inputThread?.Join(TimeSpan.FromSeconds(2));
+        _watchdog?.Join(TimeSpan.FromSeconds(2));
         _queue.Dispose();
         _viewing.Dispose();
         _wake.Dispose();

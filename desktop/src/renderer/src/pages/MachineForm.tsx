@@ -22,6 +22,7 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
 
   const [form, setForm] = useState({
     nombre: machine?.name ?? '',
+    alias: machine?.alias ?? '',
     tipo: (machine?.type ?? 'computadora') as MachineType,
     sucursalId: machine ? String(machine.branchId) : '',
     departamentoId: machine?.departmentId ? String(machine.departmentId) : '',
@@ -62,6 +63,7 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
     mutationFn: () => {
       const input: MachineInput = {
         nombre: form.nombre.trim(),
+        alias: empty(form.alias),
         tipo: form.tipo,
         sucursalId: Number(form.sucursalId),
         departamentoId: form.departamentoId ? Number(form.departamentoId) : null,
@@ -122,6 +124,11 @@ export function MachineForm({ machine, onClose, onSaved }: MachineFormProps) {
         <label className="field">
           <span>Nombre *</span>
           <input required maxLength={100} value={form.nombre} onChange={set('nombre')} autoFocus />
+        </label>
+        <label className="field">
+          <span>Alias</span>
+          <input maxLength={60} value={form.alias} placeholder="Caja 3 – Recepción" onChange={set('alias')} />
+          <small className="field-hint">Para reconocerlo rápido. No se repite en la sucursal.</small>
         </label>
         <label className="field">
           <span>Tipo *</span>

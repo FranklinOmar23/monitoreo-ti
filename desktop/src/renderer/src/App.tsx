@@ -22,6 +22,7 @@ import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/configuracion/ConfiguracionPage';
 import { ReportesPage } from './pages/reportes/ReportesPage';
 import { useDeepLink } from './data/deepLinks';
+import { machineLabel } from './data/format';
 import { TopLoader } from './TopLoader';
 import { UpdateBanner } from './UpdateBanner';
 import { applyBrandColor, cacheAppearance } from './theme/brand';
@@ -439,7 +440,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
                 onRetire={can('equipos.editar') ? (machine) => setForm({ kind: 'baja', machine }) : undefined}
                 onCreateTicket={
                   canTickets
-                    ? (machine) => setNewTicket({ machineId: machine.id, machineName: machine.name })
+                    ? (machine) => setNewTicket({ machineId: machine.id, machineName: machineLabel(machine) })
                     : undefined
                 }
                 onScheduleMaintenance={
@@ -454,7 +455,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
                 onOpenSession={(machine, type) =>
                   type === 'escritorio'
                     ? setConnectTo(machine)
-                    : setRemoteSession({ machineId: machine.id, machineName: machine.name, type })
+                    : setRemoteSession({ machineId: machine.id, machineName: machineLabel(machine), type })
                 }
               />
             ) : (
@@ -571,7 +572,7 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
               lastDesktop.current.set(connectTo.id, { choice, machine: connectTo });
               setRemoteSession({
                 machineId: connectTo.id,
-                machineName: connectTo.name,
+                machineName: machineLabel(connectTo),
                 type: 'escritorio',
                 choice,
                 machine: connectTo,

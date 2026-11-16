@@ -320,6 +320,8 @@ export interface TopologyEndpoint {
   lastSeenAt: string | null;
   /** Nombre que dio en la red (NetBIOS o DNS). */
   hostname?: string | null;
+  /** Alias del equipo conocido (decisión 87). */
+  machineAlias?: string | null;
 }
 
 export interface TopologyLink {

@@ -226,6 +226,46 @@ describe('AgentRuntime', () => {
     expect(sent.filter((m) => m.tipo === 'metricas')).toHaveLength(3);
   });
 
+  it('"reportar_ahora" manda métricas, volúmenes, procesos y servicios en el momento, como mucho cada 10 s', async () => {
+    online = true;
+    const processes = vi.fn(() => Promise.resolve({ procesos: [] }));
+    const runtime = new AgentRuntime({
+      outbox,
+      collectors,
+      health: {
+        volumes: () => Promise.resolve({ volumenes: [] }),
+        processes,
+        services: () => Promise.resolve({ servicios: [] }),
+      },
+      log: vi.fn(),
+      startupDelaysMs: { hardware: 1_000_000, software: 1_000_000, interfaces: 1_000_000 },
+      createGateway: (callbacks) => {
+        onReady = callbacks.onReady;
+        onMessage = callbacks.onMessage;
+        return gateway;
+      },
+    });
+    runtime.start();
+    onReady({ heartbeatSeconds: 30, metricsSeconds: 60, isCollector: false, collector: null });
+    const ask = () =>
+      onMessage({ v: 1, tipo: 'reportar_ahora', id: crypto.randomUUID(), ts: new Date().toISOString(), datos: {} });
+
+    ask();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sent.map((m) => m.tipo)).toEqual(['metricas', 'volumenes', 'procesos', 'servicios']);
+
+    // Un segundo pedido enseguida no repite las consultas.
+    ask();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processes).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    ask();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processes).toHaveBeenCalledTimes(2);
+    runtime.stop();
+  });
+
   it('se vuelve recolector con la lista del servidor y la cambia con config_actualizada', async () => {
     online = true;
     const query = vi.fn(() => Promise.resolve({ ok: true }));

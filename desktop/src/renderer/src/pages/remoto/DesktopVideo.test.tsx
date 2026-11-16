@@ -1,6 +1,6 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DesktopView, h264Codec, parseVideoUpdate } from './DesktopView';
+import { DesktopView, h264Codec, parseVideoUpdate, STALL_FULL_MS, STALL_RECONNECT_MS } from './DesktopView';
 
 /** SPS (perfil base restringido, nivel 4), PPS y una porción IDR, como los manda el codificador de Windows. */
 const KEY_DATA = [0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xab, 0, 0, 0, 1, 0x68, 0xce, 0, 0, 0, 1, 0x65, 0x88, 0x84];
@@ -21,6 +21,9 @@ function videoFrame(key: boolean, data: number[], width = 1920, height = 1080) {
 /** VideoDecoder de mentira: cada cuadro sale enseguida, como con optimizeForLatency. */
 class FakeDecoder {
   static configured: string[] = [];
+  static configs: Record<string, unknown>[] = [];
+  /** Simula el decodificador del navegador que deja de entregar cuadros sin avisar. */
+  static silent = false;
   state: 'unconfigured' | 'configured' | 'closed' = 'unconfigured';
   constructor(private readonly init: { output: (frame: unknown) => void; error: (e: unknown) => void }) {}
   static isConfigSupported() {
@@ -28,9 +31,11 @@ class FakeDecoder {
   }
   configure(config: { codec: string }) {
     FakeDecoder.configured.push(config.codec);
+    FakeDecoder.configs.push(config);
     this.state = 'configured';
   }
   decode() {
+    if (FakeDecoder.silent) return;
     queueMicrotask(() => this.init.output({ displayWidth: 1920, displayHeight: 1080, close: () => undefined }));
   }
   close() {
@@ -50,6 +55,8 @@ const drawImage = vi.fn();
 
 beforeEach(() => {
   FakeDecoder.configured = [];
+  FakeDecoder.configs = [];
+  FakeDecoder.silent = false;
   drawImage.mockClear();
   vi.stubGlobal('VideoDecoder', FakeDecoder);
   vi.stubGlobal('EncodedVideoChunk', class {});
@@ -106,5 +113,78 @@ describe('pantalla V2 (H.264, etapa 7.5)', () => {
     const { socket, sent } = fakeSocket();
     render(<DesktopView socket={socket} />);
     await waitFor(() => expect(sent()).toContainEqual({ tipo: 'ver' }));
+  });
+});
+
+describe('canal trabado (decisión 86)', () => {
+  it('sin nada del equipo pide la pantalla entera y después avisa que no responde; al volver, lo dice', async () => {
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'],
+    });
+    try {
+      const { socket, sent, receive } = fakeSocket();
+      const onEvent = vi.fn();
+      render(<DesktopView socket={socket} onEvent={onEvent} />);
+      await waitFor(() => expect(sent()).toContainEqual({ tipo: 'ver', video: ['h264'] }));
+      receive(videoFrame(true, KEY_DATA));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      const before = sent().filter((m) => m['tipo'] === 'completo').length;
+
+      await act(() => vi.advanceTimersByTimeAsync(STALL_FULL_MS + 1000));
+      expect(sent().filter((m) => m['tipo'] === 'completo').length).toBe(before + 1);
+      expect(onEvent).not.toHaveBeenCalledWith({ kind: 'sin_respuesta' });
+
+      await act(() => vi.advanceTimersByTimeAsync(STALL_RECONNECT_MS - STALL_FULL_MS));
+      expect(onEvent).toHaveBeenCalledWith({ kind: 'sin_respuesta' });
+
+      receive(videoFrame(false, DELTA_DATA));
+      expect(onEvent).toHaveBeenCalledWith({ kind: 'respondiendo' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('confirma también lo que no puede leer, para que el equipo no se quede esperando', async () => {
+    vi.stubGlobal('VideoDecoder', undefined);
+    const { socket, sent, receive } = fakeSocket();
+    render(<DesktopView socket={socket} />);
+    await waitFor(() => expect(sent()).toContainEqual({ tipo: 'ver' }));
+    receive(new Uint8Array([9, 9, 9]).buffer);
+    expect(sent()).toContainEqual({ tipo: 'ack' });
+  });
+});
+
+describe('decodificador trabado (decisión 89)', () => {
+  it('si deja de entregar cuadros, crea otro por software y pide un cuadro clave', async () => {
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'],
+    });
+    try {
+      const { socket, sent, receive } = fakeSocket();
+      const onEvent = vi.fn();
+      render(<DesktopView socket={socket} onEvent={onEvent} />);
+      await waitFor(() => expect(sent()).toContainEqual({ tipo: 'ver', video: ['h264'] }));
+      receive(videoFrame(true, KEY_DATA));
+      await waitFor(() => expect(drawImage).toHaveBeenCalledTimes(1));
+      expect(FakeDecoder.configs[0]).toMatchObject({ hardwareAcceleration: 'no-preference' });
+
+      // Llegan cuadros pero el decodificador ya no los entrega.
+      FakeDecoder.silent = true;
+      const before = sent().filter((m) => m['tipo'] === 'completo').length;
+      for (let i = 0; i < 3; i++) receive(videoFrame(false, DELTA_DATA));
+      await act(() => vi.advanceTimersByTimeAsync(1500));
+
+      expect(sent().filter((m) => m['tipo'] === 'completo').length).toBe(before + 1);
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'aviso' }));
+      // El cuadro clave siguiente arma un decodificador nuevo, por software.
+      FakeDecoder.silent = false;
+      receive(videoFrame(true, KEY_DATA));
+      expect(FakeDecoder.configs.at(-1)).toMatchObject({ hardwareAcceleration: 'prefer-software' });
+      await waitFor(() => expect(drawImage).toHaveBeenCalledTimes(2));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

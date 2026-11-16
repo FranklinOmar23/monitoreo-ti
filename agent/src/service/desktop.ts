@@ -97,7 +97,19 @@ class DesktopSession implements SessionHandler {
     const child = this.child;
     child.stdout.on('data', (chunk: Buffer) =>
       this.reader.push(chunk, (type, data) => {
-        if (type === TEXT_FRAME) this.channel.sendText(data.toString('utf8'));
+        if (type === TEXT_FRAME) {
+          const text = data.toString('utf8');
+          // Lo que el asistente informa para soporte (pantalla trabada, errores): queda en el registro del agente.
+          if (text.includes('"diagnostico"')) {
+            try {
+              const parsed = JSON.parse(text) as { tipo?: string; mensaje?: string };
+              if (parsed.tipo === 'diagnostico') log('error', 'Escritorio remoto', { detalle: parsed.mensaje ?? '' });
+            } catch {
+              // No era JSON.
+            }
+          }
+          this.channel.sendText(text);
+        }
         else if (type === BINARY_FRAME) this.channel.sendBinary(data);
       }),
     );

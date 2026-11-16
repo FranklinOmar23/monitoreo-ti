@@ -107,6 +107,67 @@ function MetricCard({ label, icon, value, unit, caption, series, levelOf = metri
 
 const temperatureLevel = (celsius: number) => (celsius > 90 ? 'critico' : celsius > 80 ? 'advertencia' : 'sano');
 
+/** Cuánto se espera lo que manda el agente tras "Actualizar" antes de volver a leer procesos y servicios. */
+const REPORT_NOW_REFRESH_MS = [4_000, 12_000];
+
+/**
+ * "Actualizar" (decisión 85): pide al agente que reporte ya. Las métricas llegan en vivo a las tarjetas; procesos,
+ * servicios y volúmenes se vuelven a leer cuando el agente tuvo tiempo de mandarlos.
+ */
+function ReportNowButton({ machineId }: { machineId: number }) {
+  const api = usePanelApi();
+  const queries = useQueryClient();
+  const [state, setState] = useState<{ kind: 'idle' | 'asking' | 'waiting' } | { kind: 'message'; text: string }>({
+    kind: 'idle',
+  });
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  const ask = async () => {
+    setState({ kind: 'asking' });
+    try {
+      const result = await api.reportNow(machineId);
+      if (!result.enviado) {
+        setState({ kind: 'message', text: `Recién pedido: espere ${result.segundos} s` });
+        return;
+      }
+      setState({ kind: 'waiting' });
+      REPORT_NOW_REFRESH_MS.forEach((ms, i) =>
+        timers.current.push(
+          setTimeout(() => {
+            for (const key of ['maquina', 'procesos', 'servicios'])
+              void queries.invalidateQueries({ queryKey: [key, machineId] });
+            if (i === REPORT_NOW_REFRESH_MS.length - 1) setState({ kind: 'idle' });
+          }, ms),
+        ),
+      );
+    } catch (error) {
+      setState({ kind: 'message', text: error instanceof Error ? error.message : 'No se pudo pedir la actualización.' });
+    }
+  };
+
+  const busy = state.kind === 'asking' || state.kind === 'waiting';
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-outline btn-sm ficha-refresh"
+        onClick={() => void ask()}
+        disabled={busy}
+        title="Pedir al agente las métricas, procesos, servicios y discos en este momento"
+      >
+        <Icon name="refresh" size={12} />
+        {state.kind === 'asking' ? 'Pidiendo…' : state.kind === 'waiting' ? 'Actualizando…' : 'Actualizar'}
+      </button>
+      {state.kind === 'message' && (
+        <span className="ficha-refresh-note" role="status">
+          {state.text}
+        </span>
+      )}
+    </>
+  );
+}
+
 const CLASSIC_NOTE =
   'Agente clásico anterior a la 0.2.0: no tiene escritorio remoto, terminal ni archivos. Reinstale el agente para actualizarlo.';
 
@@ -225,7 +286,8 @@ export function FichaPage({
         </span>
         <div className="ficha-id">
           <div className="ficha-title">
-            <h1 className="mono">{machine.name}</h1>
+            <h1 className="mono">{machine.alias ?? machine.name}</h1>
+            {machine.alias && <span className="ficha-name mono">{machine.name}</span>}
             <StatusBadge status={machine.status} label={STATUS_TITLE[machine.status]} />
           </div>
           <ul className="ficha-meta">
@@ -248,6 +310,7 @@ export function FichaPage({
             <li>
               <Icon name="clock" size={14} />
               Último reporte {timeAgo(machine.lastReportAt)}
+              {machine.hasAgent && machine.status !== 'baja' && <ReportNowButton machineId={machine.id} />}
             </li>
           </ul>
         </div>

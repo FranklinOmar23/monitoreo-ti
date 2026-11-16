@@ -110,7 +110,9 @@ public static class AgentGatewayExtensions
 
     public static WebApplication UseAgentGateway(this WebApplication app)
     {
-        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
+        // 15 s: mantiene vivas las conexiones quietas (agentes, relay del escritorio remoto) a través de routers y NAT que
+        // cortan los enlaces sin tráfico (decisión 86).
+        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(15) });
 
         app.MapAgentEndpoints();
         app.Map("/agent/ws", (HttpContext http, AgentGateway gateway) => gateway.HandleAsync(http));

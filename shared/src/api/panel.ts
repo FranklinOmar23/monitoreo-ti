@@ -63,6 +63,8 @@ export interface MachineListItem {
   status: MachineStatus;
   metrics: LatestMetrics | null;
   lastReportAt: string | null;
+  /** Nombre corto que puso el técnico (decisión 87). */
+  alias?: string | null;
 }
 
 export interface MachineList {
@@ -94,6 +96,7 @@ export interface MachineOption {
   name: string;
   branchId: number;
   ipAddress: string | null;
+  alias?: string | null;
 }
 
 export interface MachineDetail {
@@ -138,6 +141,8 @@ export interface MachineDetail {
   volumes: VolumeItem[];
   /** Impresoras consultadas por SNMP. */
   snmp?: PrinterSnmpInfo | null;
+  /** Nombre corto que puso el técnico (decisión 87). */
+  alias?: string | null;
 }
 
 /** Problema abierto con su explicación en lenguaje simple (motor de alertas). */
@@ -244,6 +249,8 @@ export interface MachineQr {
 
 export interface MachineInput {
   nombre: string;
+  /** Nombre corto para reconocerlo (decisión 87); vacío lo quita. Único en la sucursal. */
+  alias?: string | null;
   tipo: MachineType;
   sucursalId: number;
   departamentoId?: number | null;
@@ -627,6 +634,11 @@ export interface PanelApi {
   events(id: number): Promise<ErrorEventItem[]>;
   processes(id: number): Promise<ProcessItem[]>;
   services(id: number): Promise<ServiceItem[]>;
+  /**
+   * "Actualizar" (decisión 85): el agente manda ya métricas, volúmenes, procesos y servicios. enviado=false si se pidió
+   * hace menos de 10 s (segundos que faltan); 409 si el agente no está conectado o es viejo.
+   */
+  reportNow(id: number): Promise<{ enviado: boolean; segundos: number }>;
   maintenances(filter: MaintenanceFilter): Promise<MaintenanceList>;
   saveMaintenance(id: number | null, input: MaintenanceInput): Promise<{ id: number }>;
   completeMaintenance(id: number, fecha?: string | null, nota?: string | null): Promise<{ id: number }>;
@@ -718,6 +730,7 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     events: (id) => get(`/maquinas/${id}/eventos`),
     processes: (id) => get(`/maquinas/${id}/procesos`),
     services: (id) => get(`/maquinas/${id}/servicios`),
+    reportNow: (id) => send('POST', `/maquinas/${id}/actualizar`),
     maintenances: (filter) => get('/mantenimientos', { ...filter }),
     saveMaintenance: (id, input) =>
       id === null ? send('POST', '/mantenimientos', input) : send('PUT', `/mantenimientos/${id}`, input),

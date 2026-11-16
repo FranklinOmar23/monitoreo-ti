@@ -267,6 +267,7 @@ CREATE TABLE dbo.maquinas (
     departamento_id     INT NULL,
     codigo_qr           UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() UNIQUE,
     nombre              NVARCHAR(100) NOT NULL,
+    alias               NVARCHAR(60) NULL,            -- nombre corto que pone el técnico ("Caja 3"); único en la sucursal (decisión 87)
     tipo                VARCHAR(20) NOT NULL DEFAULT 'computadora'
                         CHECK (tipo IN ('computadora','laptop','servidor','impresora','otro')),
     tipo_fijo           BIT NOT NULL DEFAULT 0,       -- elegido a mano: el inventario no lo cambia (decisión 82)
@@ -1126,6 +1127,8 @@ CREATE INDEX IX_usuario_sucursal_sucursal   ON dbo.usuario_sucursal (empresa_id,
 -- Inventario
 CREATE INDEX IX_maquinas_sucursal        ON dbo.maquinas (empresa_id, sucursal_id, estado);
 CREATE INDEX IX_maquinas_estado          ON dbo.maquinas (empresa_id, estado) INCLUDE (nombre, sucursal_id, ultimo_reporte);
+-- Alias único dentro de la sucursal (puede repetirse en otra sucursal de la empresa).
+CREATE UNIQUE INDEX UX_maquinas_alias    ON dbo.maquinas (empresa_id, sucursal_id, alias) WHERE alias IS NOT NULL;
 CREATE INDEX IX_componentes_maquina      ON dbo.componentes (empresa_id, maquina_id);
 CREATE INDEX IX_software_maquina         ON dbo.software_instalado (empresa_id, maquina_id);
 CREATE INDEX IX_interfaces_maquina       ON dbo.interfaces_red (empresa_id, maquina_id);
@@ -1245,7 +1248,7 @@ GO
 CREATE OR ALTER VIEW dbo.vw_maquinas_lista
 AS
 SELECT
-    m.empresa_id, m.id, m.nombre, m.tipo, m.marca, m.modelo, m.serie, m.sistema_operativo, m.ip, m.mac, m.responsable,
+    m.empresa_id, m.id, m.nombre, m.alias, m.tipo, m.marca, m.modelo, m.serie, m.sistema_operativo, m.ip, m.mac, m.responsable,
     m.codigo_qr, m.estado, m.ultimo_reporte, m.creado, m.sucursal_id, s.nombre AS sucursal, m.departamento_id,
     d.nombre AS departamento,
     CASE m.estado WHEN 'critico' THEN 0 WHEN 'advertencia' THEN 1 WHEN 'desconectado' THEN 2 ELSE 3 END AS orden_estado,

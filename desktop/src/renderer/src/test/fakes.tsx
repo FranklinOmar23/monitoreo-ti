@@ -426,6 +426,7 @@ export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
     interfaces: () => Promise.resolve([]),
     events: missing,
     processes: () => Promise.resolve([]),
+    reportNow: () => Promise.resolve({ enviado: true, segundos: 0 }),
     services: () => Promise.resolve([]),
     networkConnection: () => Promise.resolve(null),
     maintenances: () => Promise.resolve({ items: [], overdue: 0 }),

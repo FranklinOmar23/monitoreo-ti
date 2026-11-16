@@ -26,6 +26,30 @@
 !define AGENT_HOST "$INSTDIR\resources\host\MonitoreoTI.AgentHost.exe"
 !define AGENT_CLASSIC "$INSTDIR\resources\host\MonitoreoTI.AgenteClasico.exe"
 
+; Registro de la instalación (decisión 88): C:\ProgramData\MonitoreoTI\instalacion.log. Dice hasta dónde llegó el
+; instalador (lo lee la instalación remota cuando falla). Nunca se escribe el token.
+!macro _InstallLog Text
+  Push $9
+  Push $8
+  Push $7
+  ReadEnvStr $9 "PROGRAMDATA"
+  CreateDirectory "$9\MonitoreoTI"
+  ClearErrors
+  FileOpen $8 "$9\MonitoreoTI\instalacion.log" a
+  ${IfNot} ${Errors}
+    FileSeek $8 0 END $7
+    ${If} $7 == 0
+      FileWriteWord $8 0xFEFF ; BOM de UTF-16
+    ${EndIf}
+    FileWriteUTF16LE $8 "${Text}$\r$\n"
+    FileClose $8
+  ${EndIf}
+  Pop $7
+  Pop $8
+  Pop $9
+!macroend
+!define InstallLog "!insertmacro _InstallLog"
+
 ; $R9 = 1 si este Windows necesita el agente clásico (anterior a Windows 10).
 !macro _DetectClassic
   StrCpy $R9 0
@@ -57,15 +81,13 @@
 !ifndef BUILD_UNINSTALLER
 
 ; /SERVER= y /TOKEN= desde la línea de comandos (instalación silenciosa o valores sugeridos).
+; No se usa GetOptions: toma cada "/" como el comienzo de otra opción y cortaba la dirección en "https:" (decisión 88).
 !macro customInit
   ${GetParameters} $R0
-  ClearErrors
-  ${GetOptions} $R0 "/SERVER=" $AgentServer
-  ClearErrors
-  ${GetOptions} $R0 "/TOKEN=" $AgentToken
-  ClearErrors
-  ${GetOptions} $R0 "/TIPO=" $AgentType
-  ClearErrors
+  ${ParamValue} $AgentServer $R0 "/SERVER="
+  ${ParamValue} $AgentToken $R0 "/TOKEN="
+  ${ParamValue} $AgentType $R0 "/TIPO="
+  ${InstallLog} "Instalador ${VERSION} iniciado."
 !macroend
 
 !macro customPageAfterChangeDir
@@ -79,6 +101,45 @@
   Pop ${Out}
 !macroend
 !define Trim "!insertmacro _TrimString"
+
+; El valor de una opción (/SERVER=…) hasta la opción siguiente (" /") o el final, sin espacios ni comillas alrededor.
+; Las barras de adentro (https://) no cortan el valor.
+!macro _ParamValue Out Params Name
+  Push "${Params}"
+  Push "${Name}"
+  Call ParamValue
+  Pop ${Out}
+!macroend
+!define ParamValue "!insertmacro _ParamValue"
+
+Function ParamValue
+  Exch $R1 ; nombre de la opción
+  Exch
+  Exch $R2 ; parámetros
+  Push $R3
+  ClearErrors
+  ${WordFind} "$R2" "$R1" "E+1}" $R3
+  ${If} ${Errors}
+    StrCpy $R3 ""
+  ${Else}
+    ${WordFind} "$R3" " /" "+1{" $R3
+    ${Trim} $R3 $R3
+    StrCpy $R1 $R3 1
+    ${If} $R1 == '"'
+      StrCpy $R3 $R3 "" 1
+    ${EndIf}
+    StrCpy $R1 $R3 1 -1
+    ${If} $R1 == '"'
+      StrCpy $R3 $R3 -1
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+  StrCpy $R2 $R3
+  Pop $R3
+  Exch $R2
+  Exch
+  Pop $R1
+FunctionEnd
 
 Function TrimString
   Exch $R0
@@ -148,16 +209,17 @@ Function AgentConfigLeave
   ${EndIf}
 
   ; Si se pegó el comando completo ("... /SERVER=... /TOKEN=...") en cualquiera de los campos, se toman de ahí.
-  ${GetOptions} "$AgentServer $AgentToken" "/SERVER=" $1
-  ${IfNot} ${Errors}
-    StrCpy $AgentServer $1
+  ${ParamValue} $1 " $AgentServer $AgentToken" "/SERVER="
+  ${If} $1 != ""
+    StrCpy $2 $1
+  ${Else}
+    StrCpy $2 $AgentServer
   ${EndIf}
-  ClearErrors
-  ${GetOptions} "$AgentServer $AgentToken" "/TOKEN=" $1
-  ${IfNot} ${Errors}
+  ${ParamValue} $1 " $AgentServer $AgentToken" "/TOKEN="
+  ${If} $1 != ""
     StrCpy $AgentToken $1
   ${EndIf}
-  ClearErrors
+  StrCpy $AgentServer $2
   ${Trim} $AgentServer $AgentServer
   ${Trim} $AgentToken $AgentToken
   ${NSD_SetText} $AgentServerField $AgentServer
@@ -193,6 +255,7 @@ FunctionEnd
 
 
 !macro customInstall
+  ${InstallLog} "Archivos copiados en $INSTDIR."
   ${DetectClassic}
   ${If} $R9 == 1
     !insertmacro InstallClassic
@@ -208,6 +271,7 @@ FunctionEnd
   ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" "Release"
   ${If} $0 == ""
   ${OrIf} $0 < 379893
+    ${InstallLog} "ERROR: falta .NET Framework 4.5.2 o posterior (se recomienda 4.8)."
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "Este equipo necesita .NET Framework 4.5.2 o posterior (se recomienda 4.8) para el agente de MonitoreoTI.$\r$\n$\r$\nInstálelo desde Windows Update o el sitio de Microsoft y vuelva a ejecutar este instalador."
     ${EndIf}
@@ -224,13 +288,14 @@ FunctionEnd
   ${EndIf}
   ${If} $AgentToken == ""
     ; Actualización: conserva el registro del equipo y reemplaza el programa.
-    nsExec::ExecToStack '"${AGENT_CLASSIC}" instalar'
+    nsExec::ExecToStack /OEM '"${AGENT_CLASSIC}" instalar'
   ${Else}
-    nsExec::ExecToStack '"${AGENT_CLASSIC}" instalar "/SERVER=$AgentServer" "/TOKEN=$AgentToken"$3'
+    nsExec::ExecToStack /OEM '"${AGENT_CLASSIC}" instalar "/SERVER=$AgentServer" "/TOKEN=$AgentToken"$3'
   ${EndIf}
   Pop $0
   Pop $1
   DetailPrint $1
+  ${InstallLog} "Agente clásico: código $0. $1"
   ${If} $0 != 0
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "No se pudo instalar el agente clásico (código $0).$\r$\n$\r$\n$1$\r$\nDetalle en C:\ProgramData\MonitoreoTI\Agent\agente-clasico.log"
@@ -248,13 +313,14 @@ FunctionEnd
   ${EndIf}
   ${If} $AgentToken == ""
     ; Actualización: el anfitrión conserva la configuración existente.
-    nsExec::ExecToStack '"${AGENT_HOST}" install --server "$AgentServer" --app "$INSTDIR"$3'
+    nsExec::ExecToStack /OEM '"${AGENT_HOST}" install --server "$AgentServer" --app "$INSTDIR"$3'
   ${Else}
-    nsExec::ExecToStack '"${AGENT_HOST}" install --server "$AgentServer" --token "$AgentToken" --app "$INSTDIR"$3'
+    nsExec::ExecToStack /OEM '"${AGENT_HOST}" install --server "$AgentServer" --token "$AgentToken" --app "$INSTDIR"$3'
   ${EndIf}
   Pop $0 ; código de salida
   Pop $1 ; lo que explicó el anfitrión
   DetailPrint $1
+  ${InstallLog} "Servicio del agente: código $0. $1"
   ; La autoridad propia (si vino junto al instalador) va a la carpeta de datos, que solo ven SYSTEM y los administradores.
   ${If} $0 == 0
   ${AndIf} ${FileExists} "$EXEDIR\MonitoreoTI-CA.pem"

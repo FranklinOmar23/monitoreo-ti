@@ -55,6 +55,46 @@ public sealed class PanelWriteTests(TestDatabase database) : IAsyncLifetime
     // ---------------------------------------------------------------- equipos (W-13)
 
     [DatabaseFact]
+    public async Task An_alias_is_unique_within_the_branch_and_finds_the_machine()
+    {
+        using var admin = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));
+        var alias = $"Caja {Random.Shared.Next(100000)}";
+        object Body(string name, string branch, int branchId, string? aliasValue) => new
+        {
+            nombre = name, tipo = "computadora", sucursalId = branchId, alias = aliasValue,
+        };
+        var sd = await BranchIdAsync(Caribe, "Santo Domingo");
+        var stgo = await BranchIdAsync(Caribe, "Santiago");
+
+        var first = await admin.PostAsJsonAsync("/api/v1/maquinas", Body("PRUEBA-ALIAS-1", "Santo Domingo", sd, $"  {alias}  "));
+        first.StatusCode.Should().Be(HttpStatusCode.Created);
+        var id = (await JsonAsync(first)).GetProperty("id").GetInt32();
+        (await JsonAsync(await admin.GetAsync($"/api/v1/maquinas/{id}"))).GetProperty("alias").GetString().Should().Be(alias);
+
+        // Otro equipo con el mismo alias en la misma sucursal: no.
+        var clash = await admin.PostAsJsonAsync("/api/v1/maquinas", Body("PRUEBA-ALIAS-2", "Santo Domingo", sd, alias));
+        clash.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await clash.Content.ReadAsStringAsync()).Should().Contain("PRUEBA-ALIAS-1");
+        // En otra sucursal, sí.
+        (await admin.PostAsJsonAsync("/api/v1/maquinas", Body("PRUEBA-ALIAS-3", "Santiago", stgo, alias)))
+            .StatusCode.Should().Be(HttpStatusCode.Created);
+        // Volver a guardar el mismo equipo con su alias no choca consigo mismo.
+        (await admin.PutAsJsonAsync($"/api/v1/maquinas/{id}", Body("PRUEBA-ALIAS-1", "Santo Domingo", sd, alias)))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Se encuentra por el alias, y la lista lo trae.
+        var found = await JsonAsync(await admin.GetAsync($"/api/v1/maquinas?q={Uri.EscapeDataString(alias)}&sucursal={sd}"));
+        var row = found.GetProperty("data").GetProperty("data").EnumerateArray().Single();
+        row.GetProperty("id").GetInt32().Should().Be(id);
+        row.GetProperty("alias").GetString().Should().Be(alias);
+
+        // Vacío lo quita.
+        (await admin.PutAsJsonAsync($"/api/v1/maquinas/{id}", Body("PRUEBA-ALIAS-1", "Santo Domingo", sd, "")))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await _api.ScalarAsync("SELECT alias FROM dbo.maquinas WHERE id = @id", ("@id", id))).Should().Be(DBNull.Value);
+    }
+
+    [DatabaseFact]
     public async Task An_editor_creates_edits_and_retires_a_machine_with_audit_trail()
     {
         using var admin = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));

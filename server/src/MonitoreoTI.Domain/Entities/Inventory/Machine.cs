@@ -17,6 +17,9 @@ public class Machine : ITenantEntity
     /// <summary>Código de la etiqueta QR; lo genera la base al insertar.</summary>
     public Guid QrCode { get; set; }
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>Nombre corto que pone el técnico para reconocerlo ("Caja 3 – Recepción"); único en la sucursal.</summary>
+    public string? Alias { get; set; }
     public MachineType Type { get; set; } = MachineType.Desktop;
 
     /// <summary>El tipo lo eligió una persona en el panel: el inventario del agente ya no lo cambia (decisión 82).</summary>

@@ -2713,3 +2713,46 @@ svg[data-focus] .topology-bus:not([data-path]) {
   grid-column: 1 / -1;
   justify-self: start;
 }
+
+/* "Actualizar" de la ficha (decisión 86). */
+.ficha-meta .ficha-refresh {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.ficha-refresh-note {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+/* Escritorio remoto trabado: se ve la última imagen atenuada y el aviso de reconexión (decisión 86). */
+.desktop-overlay.desktop-stalled {
+  background: rgba(10, 14, 17, 0.72);
+}
+
+.desktop-stalled > div {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 18px 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.desktop-stalled span {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+/* Alias en la ficha (decisión 87): el nombre del equipo debajo, más chico. */
+.ficha-title .ficha-name {
+  font-size: 13px;
+  color: var(--color-muted);
+}

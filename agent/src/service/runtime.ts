@@ -51,6 +51,9 @@ export const HEALTH_SCHEDULE: { key: keyof HealthCollectors; tipo: string; first
   { key: 'security', tipo: 'seguridad', firstMs: 70_000, everyMs: 6 * 60 * 60_000 },
 ];
 
+/** Entre dos "reportar_ahora" (el servidor también los limita). */
+export const REPORT_NOW_MIN_MS = 10_000;
+
 export interface Gateway {
   start(): void;
   stop(): void;
@@ -202,6 +205,8 @@ export class AgentRuntime {
       const id = (message.datos as { dispositivo_id?: unknown } | null)?.dispositivo_id;
       if (typeof id === 'number' && !this.snmp?.pollById(id))
         this.options.log('error', 'Sondeo pedido de un dispositivo que este recolector no tiene', { dispositivo: id });
+    } else if (message.tipo === 'reportar_ahora') {
+      void this.guarded(() => this.reportNow(), 'reporte a pedido');
     } else if (message.tipo === 'probar_api' && this.options.snmp) {
       void this.guarded(() => this.testApi(message.datos), 'prueba de API');
     } else if (message.tipo === 'detectar_switches' && this.options.snmp) {
@@ -296,6 +301,30 @@ export class AgentRuntime {
 
   private async collectMetrics(): Promise<void> {
     this.submit(createEnvelope('metricas', await this.options.collectors.metrics()));
+  }
+
+  /**
+   * "Actualizar" en la ficha (decisión 85): las métricas y lo que más cambia (volúmenes, procesos, servicios) sin
+   * esperar su horario. Uno a la vez y como mucho cada 10 s: cada uno lanza consultas de PowerShell/WMI.
+   */
+  private reportingNow = false;
+  private lastReportNow = 0;
+
+  private async reportNow(): Promise<void> {
+    const now = Date.now();
+    if (this.reportingNow || now - this.lastReportNow < REPORT_NOW_MIN_MS) return;
+    this.reportingNow = true;
+    this.lastReportNow = now;
+    try {
+      await this.collectMetrics();
+      for (const key of ['volumes', 'processes', 'services'] as const) {
+        const collect = this.options.health?.[key];
+        const item = HEALTH_SCHEDULE.find((h) => h.key === key);
+        if (collect && item) await this.guarded(async () => this.submit(createEnvelope(item.tipo, await collect())), item.tipo);
+      }
+    } finally {
+      this.reportingNow = false;
+    }
   }
 
   private async collectHardware(): Promise<void> {

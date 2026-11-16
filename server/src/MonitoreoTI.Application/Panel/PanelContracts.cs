@@ -73,7 +73,7 @@ public sealed record MachineFilter
     public int Limit { get; init; } = Paging.DefaultLimit;
 }
 
-public sealed record MachineOption(int Id, string Name, int BranchId, string? IpAddress);
+public sealed record MachineOption(int Id, string Name, int BranchId, string? IpAddress, string? Alias = null);
 
 public sealed record LatestMetrics(DateTime At, decimal? Cpu, decimal? Ram, decimal? Disk, decimal? Temperature);
 
@@ -87,7 +87,8 @@ public sealed record MachineListItem(
     string? IpAddress,
     string Status,
     LatestMetrics? Metrics,
-    DateTime? LastReportAt);
+    DateTime? LastReportAt,
+    string? Alias = null);
 
 public sealed record MachineList(PagedResult<MachineListItem> Data, StatusCounts Counts, IReadOnlyList<string> OperatingSystems);
 
@@ -124,7 +125,9 @@ public sealed record MachineDetail(
     int? ProcessCount,
     IReadOnlyList<VolumeItem> Volumes,
     /// <summary>Impresoras consultadas por SNMP (nunca incluye la comunidad ni las claves).</summary>
-    PrinterSnmpInfo? Snmp = null);
+    PrinterSnmpInfo? Snmp = null,
+    /// <summary>Nombre corto que puso el técnico (decisión 87).</summary>
+    string? Alias = null);
 
 public sealed record PrinterSnmpInfo(
     string Version, string? User, bool HasCredential, int? CollectorId, string? CollectorName, DateTime? LastPollAt, string? LastError);

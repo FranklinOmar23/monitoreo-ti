@@ -18,7 +18,19 @@ export type DesktopEvent =
   | { kind: 'portapapeles'; text: string; automatic: boolean }
   | { kind: 'modo'; viewOnly: boolean }
   | { kind: 'entrada_bloqueada'; active: boolean }
-  | { kind: 'pantalla_negra'; active: boolean; message: string | null };
+  | { kind: 'pantalla_negra'; active: boolean; message: string | null }
+  /** El asistente se destrabó solo (una confirmación se perdió): veces en la sesión. */
+  | { kind: 'recuperada'; times: number }
+  /** No llega nada del equipo (ni la respuesta al ping) hace STALL_RECONNECT_MS: el canal está muerto. */
+  | { kind: 'sin_respuesta' }
+  /** Volvió a llegar algo después de "sin_respuesta". */
+  | { kind: 'respondiendo' };
+
+/** Sin nada del equipo en este tiempo se pide la pantalla entera; en el doble, la sesión se da por trabada. */
+export const STALL_FULL_MS = 4_000;
+/** Cuadros de video que no salen del decodificador (en más de 1 s cada uno) antes de crear otro. */
+export const DECODER_STUCK_FRAMES = 3;
+export const STALL_RECONNECT_MS = 8_000;
 
 /** Latencia (ida y vuelta, ms), cuadros por segundo y consumo (Mb/s) del último segundo. */
 export interface DesktopStats {
@@ -154,6 +166,8 @@ export function desktopEvent(message: Record<string, unknown>): DesktopEvent | n
       return { kind: 'modo', viewOnly: message['soloVer'] === true };
     case 'entrada_bloqueada':
       return { kind: 'entrada_bloqueada', active: message['activo'] === true };
+    case 'recuperada':
+      return { kind: 'recuperada', times: Number(message['veces'] ?? 1) };
     case 'pantalla_negra':
       return {
         kind: 'pantalla_negra',
@@ -252,6 +266,31 @@ export function DesktopView({
 
     // Latencia (ping cada 2 s) y estadísticas cada segundo.
     const pinger = setInterval(() => send({ tipo: 'ping', t: performance.now() }), 2000);
+    // ¿Sigue vivo el canal? Desde la primera imagen, el equipo responde el ping cada 2 s aunque la pantalla no cambie.
+    // Sin nada en STALL_FULL_MS se pide la pantalla entera; en STALL_RECONNECT_MS la sesión se da por trabada.
+    let lastAlive = performance.now();
+    let askedFull = false;
+    let stalled = false;
+    const alive = () => {
+      lastAlive = performance.now();
+      askedFull = false;
+      if (stalled) {
+        stalled = false;
+        callbacks.current.onEvent?.({ kind: 'respondiendo' });
+      }
+    };
+    const liveness = setInterval(() => {
+      if (first) return; // antes de la primera imagen puede estar esperando el permiso del usuario
+      const gap = performance.now() - lastAlive;
+      if (gap > STALL_FULL_MS && !askedFull) {
+        askedFull = true;
+        send({ tipo: 'completo' });
+      }
+      if (gap > STALL_RECONNECT_MS && !stalled) {
+        stalled = true;
+        callbacks.current.onEvent?.({ kind: 'sin_respuesta' });
+      }
+    }, 1000);
     const stats = setInterval(() => {
       callbacks.current.onStats?.({
         latency,
@@ -288,8 +327,29 @@ export function DesktopView({
     const ackVideo = () => {
       if (pending.shift() !== undefined) send({ tipo: 'ack' });
     };
+    // El decodificador de video del navegador a veces deja de entregar cuadros sin avisar error (la imagen se queda
+    // quieta aunque lleguen datos): tras DECODER_STUCK_FRAMES cuadros sin salir se crea otro, ahora por software, y se
+    // pide un cuadro clave (decisión 89).
+    let stuckFrames = 0;
+    let preferSoftware = false;
     const watchdog = setInterval(() => {
-      while (pending.length && performance.now() - pending[0]! > 1000) ackVideo();
+      let late = 0;
+      while (pending.length && performance.now() - pending[0]! > 1000) {
+        ackVideo();
+        late++;
+      }
+      if (late === 0) return;
+      stuckFrames += late;
+      if (stuckFrames >= DECODER_STUCK_FRAMES && decoder) {
+        stuckFrames = 0;
+        preferSoftware = true;
+        resetDecoder();
+        requestKey();
+        callbacks.current.onEvent?.({
+          kind: 'aviso',
+          message: 'La imagen se trabó en este equipo; se reinició el video.',
+        });
+      }
     }, 250);
     const resetDecoder = () => {
       if (decoder && decoder.state !== 'closed') decoder.close();
@@ -317,6 +377,7 @@ export function DesktopView({
                 shown();
               }
               frame.close();
+              stuckFrames = 0;
               ackVideo();
             },
             error: () => {
@@ -325,7 +386,11 @@ export function DesktopView({
               requestKey();
             },
           });
-          decoder.configure({ codec: exact, optimizeForLatency: true });
+          decoder.configure({
+            codec: exact,
+            optimizeForLatency: true,
+            hardwareAcceleration: preferSoftware ? 'prefer-software' : 'no-preference',
+          });
         }
         needKey = false;
         askedKey = false;
@@ -360,6 +425,7 @@ export function DesktopView({
     };
 
     const onMessage = (event: MessageEvent) => {
+      alive();
       if (event.data instanceof ArrayBuffer) {
         bytes += event.data.byteLength;
         const video = typeof VideoDecoder === 'undefined' ? null : parseVideoUpdate(event.data);
@@ -370,7 +436,11 @@ export function DesktopView({
         }
         const update = parseScreenUpdate(event.data);
         if (update) codec = 'jpeg';
-        if (!update) return;
+        if (!update) {
+          // Algo que no se pudo leer también se confirma: si no, el equipo se queda esperando la confirmación.
+          send({ tipo: 'ack' });
+          return;
+        }
         // En orden, y se confirma cuando ya está dibujada: así la pantalla nunca se atrasa más de dos actualizaciones.
         drawing = drawing
           .then(() => draw(update))
@@ -469,6 +539,7 @@ export function DesktopView({
     return () => {
       disposed = true;
       clearInterval(pinger);
+      clearInterval(liveness);
       clearInterval(stats);
       clearInterval(watchdog);
       if (decoder && decoder.state !== 'closed') decoder.close();

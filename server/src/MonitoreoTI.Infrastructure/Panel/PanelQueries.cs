@@ -142,11 +142,11 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         {
             var q = filter.Query.Trim();
             var qr = Guid.TryParse(q, out var code) ? code : (Guid?)null;
-            query = query.Where(m => m.Name.Contains(q) || (m.IpAddress != null && m.IpAddress.Contains(q))
+            query = query.Where(m => m.Name.Contains(q) || (m.Alias != null && m.Alias.Contains(q)) || (m.IpAddress != null && m.IpAddress.Contains(q))
                 || (m.MacAddress != null && m.MacAddress.Contains(q)) || (qr != null && m.QrCode == qr));
         }
         if (Has(filter.Name))
-            query = query.Where(m => m.Name.Contains(filter.Name!.Trim()));
+            query = query.Where(m => m.Name.Contains(filter.Name!.Trim()) || (m.Alias != null && m.Alias.Contains(filter.Name!.Trim())));
         if (filter.BranchId is int branchId)
             query = query.Where(m => m.BranchId == branchId);
         if (filter.DepartmentId is int departmentId)
@@ -190,7 +190,7 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             m.Id, m.Name, m.OperatingSystem ?? m.Model, m.BranchId, m.Branch, Text(m.Type), m.IpAddress, Text(m.Status),
             // Un equipo desconectado no muestra métricas viejas como si fueran actuales.
             m.Status == MachineStatus.Disconnected || m.MetricAt is null ? null : new LatestMetrics(m.MetricAt.Value, m.Cpu, m.Ram, m.Disk, m.Temperature),
-            m.LastReportAt));
+            m.LastReportAt, m.Alias));
         return new MachineList(items, counts, systems);
     }
 
@@ -203,7 +203,7 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
         if (branchId is int branch)
             query = query.Where(m => m.BranchId == branch);
         return await query.OrderBy(m => m.Name).Take(5000)
-            .Select(m => new MachineOption(m.Id, m.Name, m.BranchId, m.IpAddress)).ToListAsync(ct);
+            .Select(m => new MachineOption(m.Id, m.Name, m.BranchId, m.IpAddress, m.Alias)).ToListAsync(ct);
     }
 
     // ------------------------------------------------------------------ ficha
@@ -261,7 +261,8 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             volumes,
             m.SnmpVersion is null ? null
                 : new PrinterSnmpInfo(m.SnmpVersion, m.SnmpUser, m.SnmpEncryptedCredential is not null, m.CollectorAgentId, machine.Collector,
-                    m.LastSnmpPollAt, m.LastSnmpError));
+                    m.LastSnmpPollAt, m.LastSnmpError),
+            m.Alias);
     }
 
     public async Task<IReadOnlyList<MetricPoint>?> MetricsAsync(int machineId, MetricRange range, CancellationToken ct)

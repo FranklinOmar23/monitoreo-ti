@@ -321,9 +321,11 @@ function MachineRow({ item, selected, onToggle, onOpen }: MachineRowProps) {
       </td>
       <td>
         <button type="button" className="row-name mono" onClick={onOpen}>
-          {item.name}
+          {item.alias ?? item.name}
         </button>
-        <span className="row-sub">{item.detail ?? '—'}</span>
+        <span className="row-sub">
+          {item.alias ? `${item.name} · ${item.detail ?? '—'}` : (item.detail ?? '—')}
+        </span>
       </td>
       <td>{item.branchName}</td>
       <td>

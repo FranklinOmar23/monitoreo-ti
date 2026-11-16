@@ -219,6 +219,6 @@ namespace MonitoreoTI.AgenteClasico
         /// Versión que ve el servidor. "-clasico": nunca se le ofrece el instalador del agente normal, y al ser 0.x no
         /// recibe funciones de recolector (SNMP, barridos, API, instalación remota).
         /// </summary>
-        public const string Version = "0.2.0-clasico";
+        public const string Version = "0.2.2-clasico";
     }
 }

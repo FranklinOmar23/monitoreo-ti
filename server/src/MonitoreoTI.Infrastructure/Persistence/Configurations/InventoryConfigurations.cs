@@ -74,6 +74,7 @@ internal sealed class MachineConfiguration : IEntityTypeConfiguration<Machine>
         b.Property(x => x.DepartmentId).HasColumnName("departamento_id");
         b.Property(x => x.QrCode).HasColumnName("codigo_qr").DefaultNewGuid();
         b.Property(x => x.Name).HasColumnName("nombre").HasMaxLength(100);
+        b.Property(x => x.Alias).HasColumnName("alias").HasMaxLength(60);
         b.Property(x => x.Type).HasColumnName("tipo");
         b.Property(x => x.TypeLocked).HasColumnName("tipo_fijo");
         b.Property(x => x.Brand).HasColumnName("marca").HasMaxLength(100);

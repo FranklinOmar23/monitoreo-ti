@@ -137,7 +137,9 @@ public sealed record TopologyEndpoint(
     int? MachineId, string? MachineName, string? MachineStatus, bool HasAgent, string Category, bool CategoryInferred, string Kind,
     DateTime? FirstSeenAt, DateTime? LastSeenAt,
     /// <summary>Nombre que dio en la red (NetBIOS o DNS) según el inventario de direcciones IP.</summary>
-    string? Hostname = null);
+    string? Hostname = null,
+    /// <summary>Alias del equipo conocido (decisión 87).</summary>
+    string? MachineAlias = null);
 
 /// <param name="Kind">lldp (lo ve SNMP) o cable (solo documentado).</param>
 public sealed record TopologyLink(int SourceId, int TargetId, string SourcePort, string TargetPort, string Kind);

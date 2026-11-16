@@ -155,6 +155,8 @@ public static class RemoteInstaller
                 File.Copy(request.Ca, Path.Combine(folder, CaName), overwrite: true);
 
             Step("instalando", null, sistema);
+            // El registro de esta instalación (lo escribe el instalador): se empieza de cero para leer solo el de ahora.
+            TryDelete(SetupLogPath(share));
             LaunchAsSystem(request.Ip, updateClassic
                 ? ClassicUpdateCommandLine()
                 : classic ? ClassicCommandLine(request.Servidor, request.Token) : CommandLine(request.Servidor, request.Token));
@@ -190,7 +192,7 @@ public static class RemoteInstaller
                 {
                     Step("error", classic
                         ? ClassicFailure(share)
-                        : "El instalador terminó pero el servicio del agente no quedó instalado. Revise el registro en C:\\ProgramData\\MonitoreoTI\\Agent de ese equipo.", sistema, fin: true);
+                        : SetupFailure(share), sistema, fin: true);
                     return 1;
                 }
             }
@@ -273,6 +275,39 @@ public static class RemoteInstaller
         {
             return null;
         }
+    }
+
+    private static string SetupLogPath(string share) =>
+        Path.Combine(share.Replace("ADMIN$", "C$"), "ProgramData", "MonitoreoTI", "instalacion.log");
+
+    /// <summary>
+    /// Por qué no quedó el servicio (decisión 88): sin registro, el instalador ni siquiera arrancó (casi siempre el
+    /// antivirus lo bloqueó); con registro, hasta dónde llegó y qué dijo.
+    /// </summary>
+    private static string SetupFailure(string share)
+    {
+        string[] lines;
+        try
+        {
+            lines = File.Exists(SetupLogPath(share)) ? File.ReadAllLines(SetupLogPath(share)) : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lines = [];
+        }
+        return SetupFailureMessage(lines);
+    }
+
+    public static string SetupFailureMessage(IReadOnlyList<string> log)
+    {
+        var lines = log.Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => l.Trim()).ToList();
+        if (lines.Count == 0)
+            return "El instalador no llegó a ejecutarse en ese equipo (no dejó registro). Casi siempre es el antivirus (ESET, Defender…) " +
+                   "que lo bloqueó: revise sus detecciones o la cuarentena y agregue una exclusión para C:\\Windows\\Temp\\Centinela, o instálelo a mano.";
+        var last = lines[^1];
+        if (lines.Count == 1)
+            return "El instalador arrancó pero se detuvo antes de copiar los archivos (¿antivirus o disco lleno?). Registro: C:\\ProgramData\\MonitoreoTI\\instalacion.log.";
+        return $"El servicio del agente no quedó instalado. Último paso del instalador: {last}";
     }
 
     /// <summary>La última línea con error del registro del agente clásico en el equipo (dice por qué no se instaló).</summary>
