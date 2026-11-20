@@ -436,11 +436,19 @@ export function Shell({ session, menu, onProfileChanged }: ShellProps) {
                 machineId={equipoId}
                 onBack={() => setEquipoId(null)}
                 canManageBackups={can('respaldos.gestionar')}
+                canManageErrors={can('alertas.gestionar')}
                 onEdit={can('equipos.editar') ? (machine) => setForm({ kind: 'editar', machine }) : undefined}
                 onRetire={can('equipos.editar') ? (machine) => setForm({ kind: 'baja', machine }) : undefined}
                 onCreateTicket={
                   canTickets
-                    ? (machine) => setNewTicket({ machineId: machine.id, machineName: machineLabel(machine) })
+                    ? (machine, prefill) =>
+                        setNewTicket({
+                          machineId: machine.id,
+                          machineName: machineLabel(machine),
+                          title: prefill?.title,
+                          description: prefill?.description,
+                          priority: prefill?.priority,
+                        })
                     : undefined
                 }
                 onScheduleMaintenance={

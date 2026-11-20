@@ -7,7 +7,7 @@ import { Card } from '@components/Card';
 import { Icon } from '@components/Icon';
 import { KpiCard } from '@components/KpiCard';
 import { StatusBadge } from '@components/StatusBadge';
-import { timeAgo } from '../../data/format';
+import { count, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
 import { useDebounced } from '../../data/useDebounced';
 import { DEVICE_STATUS_LABEL, DEVICE_STATUS_TONE } from './netLabels';
@@ -92,7 +92,7 @@ export function NetworkSummaryView({
                   <span className="muted">
                     {d.branchName}
                     {d.rackName && ` · ${d.rackName}`}
-                    {d.portsWithProblems > 0 && ` · ${d.portsWithProblems} puertos con problemas`}
+                    {d.portsWithProblems > 0 && ` · ${count(d.portsWithProblems, 'puerto')} con problemas`}
                   </span>
                 </li>
               ))}

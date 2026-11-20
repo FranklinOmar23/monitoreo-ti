@@ -71,6 +71,28 @@ internal sealed class ErrorEventConfiguration : IEntityTypeConfiguration<ErrorEv
     }
 }
 
+internal sealed class ErrorGroupStateConfiguration : IEntityTypeConfiguration<ErrorGroupState>
+{
+    public void Configure(EntityTypeBuilder<ErrorGroupState> b)
+    {
+        b.ToTable("errores_estado");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.CompanyId).HasColumnName("empresa_id");
+        b.Property(x => x.MachineId).HasColumnName("maquina_id");
+        b.Property(x => x.Source).HasColumnName("origen").HasMaxLength(200);
+        b.Property(x => x.Code).HasColumnName("codigo");
+        b.Property(x => x.IsIgnored).HasColumnName("ignorado");
+        b.Property(x => x.Note).HasColumnName("nota").HasMaxLength(500);
+        b.Property(x => x.UserId).HasColumnName("usuario_id");
+        b.Property(x => x.At).HasColumnName("fecha");
+
+        b.HasOne<Machine>().WithMany()
+            .HasForeignKey(x => new { x.CompanyId, x.MachineId })
+            .HasPrincipalKey(x => new { x.CompanyId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 internal sealed class ProcessSnapshotConfiguration : IEntityTypeConfiguration<ProcessSnapshot>
 {
     public void Configure(EntityTypeBuilder<ProcessSnapshot> b)

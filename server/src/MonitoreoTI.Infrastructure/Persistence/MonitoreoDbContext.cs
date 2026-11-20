@@ -75,6 +75,7 @@ public class MonitoreoDbContext(DbContextOptions<MonitoreoDbContext> options, IT
     public DbSet<HourlyMetric> HourlyMetrics => Set<HourlyMetric>();
     public DbSet<DailyFleetStatus> DailyFleetStatus => Set<DailyFleetStatus>();
     public DbSet<ErrorEvent> ErrorEvents => Set<ErrorEvent>();
+    public DbSet<ErrorGroupState> ErrorGroupStates => Set<ErrorGroupState>();
     public DbSet<ProcessSnapshot> ProcessSnapshots => Set<ProcessSnapshot>();
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
     public DbSet<Alert> Alerts => Set<Alert>();

@@ -4,7 +4,7 @@ import type { BackupJobItem, BackupKind, BackupRunItem, BackupRunStatus, Machine
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
 import { Icon } from '@components/Icon';
-import { dateTime, timeAgo } from '../../data/format';
+import { count, dateTime, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
 import { needsTwoFactor, TwoFactorPrompt } from '../remoto/TwoFactorPrompt';
 import { BackupJobDialog } from './BackupJobDialog';
@@ -56,8 +56,8 @@ export function jobSummary(job: BackupJobItem): { what: string; where: string; w
       ? `Diario ${job.time}`
       : `${job.weekDays.map((d) => DAYS[d]).join(', ')} ${job.time}`;
   const how = [
-    job.strategy === 'completo' ? 'Completo cada vez' : `Solo lo nuevo (completa cada ${job.fullEveryDays} días)`,
-    job.mode === 'frio' ? `en frío (${job.stopServices.length} servicios)` : 'en caliente',
+    job.strategy === 'completo' ? 'Completo cada vez' : `Solo lo nuevo (completa cada ${count(job.fullEveryDays, 'día')})`,
+    job.mode === 'frio' ? `en frío (${count(job.stopServices.length, 'servicio')})` : 'en caliente',
   ].join(' · ');
   return { what, where, when, how };
 }

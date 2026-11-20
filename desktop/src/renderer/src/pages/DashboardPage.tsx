@@ -7,7 +7,7 @@ import { PageHeader } from '@components/PageHeader';
 import { StackedBars } from '@components/StackedBars';
 import { useLeaving } from '@components/useLeaving';
 import type { DashboardData, StatusCounts } from '@monitoreoti/shared';
-import { dayLabel, timeAgo } from '../data/format';
+import { count, dayLabel, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
 
 interface DashboardPageProps {
@@ -131,7 +131,7 @@ function DashboardContent({ data, onOpenEquipo, onNavigate }: { data: DashboardD
                       {branch.name}
                     </span>
                     <span className="branch-meta mono">
-                      {branch.counts.total} equipos
+                      {count(branch.counts.total, 'equipo')}
                       {branch.counts.critical > 0 && ` · ${branch.counts.critical} crit.`}
                       {branch.counts.warning > 0 && ` · ${branch.counts.warning} adv.`}
                     </span>
@@ -189,7 +189,7 @@ function DashboardContent({ data, onOpenEquipo, onNavigate }: { data: DashboardD
                     {machine.name}
                   </button>
                   <span className="problem-desc">{machine.summary}</span>
-                  <span className="problem-count mono">{machine.events} eventos</span>
+                  <span className="problem-count mono">{count(machine.events, 'evento')}</span>
                 </li>
               ))}
             </ol>

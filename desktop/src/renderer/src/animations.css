@@ -231,18 +231,18 @@
 @media (prefers-reduced-motion: no-preference) {
   /* Al cambiar de página el contenido nuevo entra subiendo; en el acceso, cada paso entra desde el lado. */
   .content > * {
-    animation: rise-in 0.28s var(--ease-out) both;
+    animation: rise-in 0.28s var(--ease-out) backwards;
   }
 
   .auth-step {
-    animation: slide-in 0.3s var(--ease-out) both;
+    animation: slide-in 0.3s var(--ease-out) backwards;
   }
 
   /* Tarjetas e indicadores aparecen uno tras otro. */
   .card,
   .kpi,
   .table-card {
-    animation: rise-in 0.36s var(--ease-out) both;
+    animation: rise-in 0.36s var(--ease-out) backwards;
   }
 
   .kpi-grid > :nth-child(2),
@@ -269,12 +269,12 @@
   .data-table tbody tr,
   .problem-list li,
   .notif-panel > * {
-    animation: fade-in 0.3s var(--ease-out) both;
+    animation: fade-in 0.3s var(--ease-out) backwards;
   }
 
   /* Alertas: las nuevas entran deslizándose. */
   .alert-list li {
-    animation: slide-in 0.3s var(--ease-out) both;
+    animation: slide-in 0.3s var(--ease-out) backwards;
   }
 
   .data-table tbody tr:nth-child(2),
@@ -410,7 +410,7 @@
   .usage-bar span,
   .rack-usage span {
     transform-origin: left center;
-    animation: bar-grow 0.7s var(--ease-out) both;
+    animation: bar-grow 0.7s var(--ease-out) backwards;
   }
 
   /* Mensajes: el error se sacude, el aviso aparece. */
@@ -469,11 +469,11 @@
   }
 
   .auth-qr {
-    animation: pop-in 0.35s 0.1s var(--ease-out) both;
+    animation: pop-in 0.35s 0.1s var(--ease-out) backwards;
   }
 
   .auth-steps li {
-    animation: slide-in 0.3s var(--ease-out) both;
+    animation: slide-in 0.3s var(--ease-out) backwards;
   }
 
   .auth-qr + .auth-steps li {
@@ -619,7 +619,7 @@
 @media (prefers-reduced-motion: no-preference) {
   /* El esqueleto aparece tras un instante (lo que carga rápido no parpadea) y un brillo lo recorre. */
   .state-loading {
-    animation: fade-in 0.2s 0.12s ease-out both;
+    animation: fade-in 0.2s 0.12s ease-out backwards;
   }
 
   .skeleton {
@@ -639,7 +639,7 @@
   .sk-list-row,
   .sk-kpi,
   .sk-card {
-    animation: rise-in 0.35s var(--ease-out) both;
+    animation: rise-in 0.35s var(--ease-out) backwards;
     animation-delay: calc(var(--i, 0) * 45ms);
   }
 
@@ -651,14 +651,19 @@
   }
 
   /* Gráficas: la línea se dibuja, el área aparece y las columnas crecen desde la base. */
-  .chart-line,
-  .sparkline polyline {
+  /* La línea de la gráfica se dibuja. La mini-gráfica no: con vector-effect el trazo discontinuo de la animación se
+     calcula mal y quedaba cortada en tramos; entra con un desvanecido. */
+  .chart-line {
     stroke-dasharray: 1;
     animation: line-draw 1s var(--ease-out) both;
   }
 
+  .sparkline {
+    animation: fade-in 0.5s ease-out backwards;
+  }
+
   .chart-area {
-    animation: fade-in 0.8s 0.35s ease-out both;
+    animation: fade-in 0.8s 0.35s ease-out backwards;
   }
 
   .series-ram .chart-line {
@@ -667,7 +672,7 @@
 
   .stacked-bar {
     transform-origin: bottom center;
-    animation: col-grow 0.55s var(--ease-out) both;
+    animation: col-grow 0.55s var(--ease-out) backwards;
   }
 
   .stacked-col:nth-child(2) .stacked-bar {
@@ -698,12 +703,12 @@
   .kpi-value strong,
   .metric-value strong {
     display: inline-block;
-    animation: number-in 0.45s 0.08s var(--ease-out) both;
+    animation: number-in 0.45s 0.08s var(--ease-out) backwards;
   }
 
   /* Puertos del switch: se encienden en cascada. */
   .port {
-    animation: pop-in 0.3s var(--ease-out) both;
+    animation: pop-in 0.3s var(--ease-out) backwards;
     transition:
       transform 0.15s var(--ease-out),
       outline-color 0.15s;
@@ -738,13 +743,13 @@
 
   .nav-badge,
   .tab-count {
-    animation: pop-in 0.3s var(--ease-spring) both;
+    animation: pop-in 0.3s var(--ease-spring) backwards;
   }
 
   /* Franjas de error y avisos: bajan desde arriba. */
   .device-error,
   .update-banner {
-    animation: drop-in 0.3s var(--ease-out) both;
+    animation: drop-in 0.3s var(--ease-out) backwards;
   }
 
   /* Filas de tabla: al pasar el mouse, una barra de acento a la izquierda. */
@@ -782,11 +787,11 @@
 
   .page-header h1,
   .ficha-title h1 {
-    animation: slide-in-left 0.35s var(--ease-out) both;
+    animation: slide-in-left 0.35s var(--ease-out) backwards;
   }
 
   .status-orb span {
-    animation: pop-in 0.35s var(--ease-spring) both;
+    animation: pop-in 0.35s var(--ease-spring) backwards;
   }
 }
 

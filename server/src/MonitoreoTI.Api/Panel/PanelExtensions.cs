@@ -23,6 +23,9 @@ public static class PanelExtensions
         services.AddScoped<PanelCommands>();
         services.AddScoped<AlertQueries>();
         services.AddScoped<AlertCommands>();
+        services.AddScoped<ErrorGroups>();
+        services.AddSingleton<IValidator<ErrorGroupMarkInput>, ErrorGroupMarkInputValidator>();
+        services.AddSingleton<IValidator<ErrorGroupKeyInput>, ErrorGroupKeyInputValidator>();
         services.AddSingleton<IValidator<AlertActionInput>, AlertActionInputValidator>();
         services.AddSingleton<IValidator<RuleInput>, RuleInputValidator>();
         services.AddScoped<TicketQueries>();
@@ -98,6 +101,7 @@ public static class PanelExtensions
         app.MapPanelEndpoints();
         app.MapPanelWriteEndpoints();
         app.MapAlertEndpoints();
+        app.MapErrorGroupEndpoints();
         app.MapTicketEndpoints();
         app.MapNetworkEndpoints();
         app.MapMaintenanceEndpoints();

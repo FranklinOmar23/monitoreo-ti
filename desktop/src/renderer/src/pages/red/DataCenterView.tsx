@@ -10,6 +10,7 @@ import { DeviceForm, RackForm, RoomForm } from './NetworkForms';
 import { DEVICE_STATUS_LABEL, DEVICE_STATUS_TONE, DEVICE_TYPE_LABEL } from './netLabels';
 import { planRows } from './scene3d';
 import { useOpenView3D } from './View3DWindows';
+import { count } from '../../data/format';
 
 // three.js pesa: se carga solo al abrir una vista 3D.
 const DataCenter3D = lazy(() => import('./DataCenter3D'));
@@ -64,7 +65,7 @@ export function DataCenterView({ canEdit, onOpenDevice }: DataCenterViewProps) {
                 >
                   <strong>{r.name}</strong>
                   <span className="muted">
-                    {r.branchName} · {r.rackCount} gabinetes · {r.deviceCount} equipos
+                    {r.branchName} · {count(r.rackCount, 'gabinete')} · {count(r.deviceCount, 'equipo')}
                   </span>
                 </button>
               </li>
@@ -191,7 +192,7 @@ function RoomRacks({
                 <span style={{ width: `${Math.min(100, (100 * rack.usedUnits) / rack.heightUnits)}%` }} />
               </span>
               <span className="mono muted">
-                {rack.usedUnits}/{rack.heightUnits} U · {rack.deviceCount} equipos
+                {rack.usedUnits}/{rack.heightUnits} U · {count(rack.deviceCount, 'equipo')}
                 {!rack.isActive && ' · inactivo'}
               </span>
             </button>
@@ -227,7 +228,7 @@ function FloorPlan({ racks, onOpenRack }: { racks: RackItem[]; onOpenRack: (id: 
                   <span className="rack-usage" aria-hidden="true">
                     <span style={{ width: `${Math.min(100, (100 * full.usedUnits) / full.heightUnits)}%` }} />
                   </span>
-                  <span className="muted mono">{full.deviceCount} equipos</span>
+                  <span className="muted mono">{count(full.deviceCount, 'equipo')}</span>
                 </button>
               );
             })}

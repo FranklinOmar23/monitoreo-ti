@@ -9,16 +9,22 @@ import { metricLevel } from '@components/MiniBar';
 import { Sparkline } from '@components/Sparkline';
 import { StatusBadge } from '@components/StatusBadge';
 import { Tabs, type TabItem } from '@components/Tabs';
-import { clock, dateTime, megabytes, timeAgo, typeLabel, usedOfTotal, whole, shortDateTime } from '../data/format';
+import { clock, count, dateTime, megabytes, shortDateTime, timeAgo, typeLabel, usedOfTotal, whole } from '../data/format';
 import { usePanelApi, useRealtime } from '../data/PanelData';
+import type { ErrorTicketPrefill } from './ErrorsTab';
 import { FichaTabs } from './FichaTabs';
 import { BackupsTab } from './respaldos/BackupsTab';
 import { serviceFromAlertCode, StartServiceButton } from './remoto/StartServiceButton';
 
-const RANGES: { value: MetricRange; label: string; title: string }[] = [
-  { value: '1h', label: '1H', title: 'última hora' },
-  { value: '24h', label: '24H', title: 'últimas 24 h' },
-  { value: '7d', label: '7D', title: 'últimos 7 días' },
+const HOUR = 3_600_000;
+/**
+ * spanMs: el eje de la gráfica cubre siempre todo el rango hasta ahora. maxGapMs: tres intervalos del servidor (muestras
+ * crudas en 1H, promedios de 5 min en 24H y de 1 h en 7D); más separadas que eso, se marca "sin datos".
+ */
+const RANGES: { value: MetricRange; label: string; title: string; spanMs: number; maxGapMs: number }[] = [
+  { value: '1h', label: '1H', title: 'última hora', spanMs: HOUR, maxGapMs: 3 * 60_000 },
+  { value: '24h', label: '24H', title: 'últimas 24 h', spanMs: 24 * HOUR, maxGapMs: 15 * 60_000 },
+  { value: '7d', label: '7D', title: 'últimos 7 días', spanMs: 7 * 24 * HOUR, maxGapMs: 3 * HOUR },
 ];
 
 const STATUS_TITLE: Partial<Record<MachineDetail['status'], string>> = { critico: 'Falla crítica' };
@@ -184,7 +190,8 @@ interface FichaPageProps {
   onEdit?: (machine: MachineDetail) => void;
   onRetire?: (machine: MachineDetail) => void;
   /** Solo si el usuario puede crear tickets. */
-  onCreateTicket?: (machine: MachineDetail) => void;
+  /** Con prefill: el ticket sale de un error del equipo (decisión 91). */
+  onCreateTicket?: (machine: MachineDetail, prefill?: ErrorTicketPrefill) => void;
   /** Solo si el usuario gestiona tickets (y con ellos, el calendario de mantenimiento). */
   onScheduleMaintenance?: (machine: MachineDetail) => void;
   /** Solo con scripts.ejecutar. */
@@ -194,6 +201,8 @@ interface FichaPageProps {
   onOpenSession?: (machine: MachineDetail, type: SessionType) => void;
   /** respaldos.gestionar: crear, editar y lanzar respaldos (decisión 82). */
   canManageBackups?: boolean;
+  /** alertas.gestionar: marcar errores resueltos o ignorados. */
+  canManageErrors?: boolean;
 }
 
 /** W-06 a W-12 Ficha del equipo. */
@@ -208,6 +217,7 @@ export function FichaPage({
   remoteTypes = [],
   onOpenSession,
   canManageBackups = false,
+  canManageErrors = false,
 }: FichaPageProps) {
   const api = usePanelApi();
   const realtime = useRealtime();
@@ -246,6 +256,9 @@ export function FichaPage({
   const recent = lastHour.data ?? [];
   const series = (pick: (p: MetricPoint) => number | null) => recent.map(pick).filter((v): v is number => v !== null);
   const chartPoints = range === '1h' ? recent : (chart.data ?? []);
+  const rangeDef = RANGES.find((r) => r.value === range)!;
+  const chartEnd = Date.now();
+  const chartDomain = [chartEnd - rangeDef.spanMs, chartEnd] as const;
   const metrics = machine.metrics;
   const disconnected = machine.status === 'desconectado';
 
@@ -385,7 +398,16 @@ export function FichaPage({
       {tab === 'respaldos' ? (
         <BackupsTab machine={machine} canManage={canManageBackups} />
       ) : tab !== 'resumen' ? (
-        <FichaTabs tab={tab} machine={machine} />
+        <FichaTabs
+          tab={tab}
+          machine={machine}
+          errors={{
+            canManage: canManageErrors,
+            canFix: !!onRunScript && machine.hasAgent && machine.status !== 'baja',
+            canIgnoreCompanyWide: canManageErrors,
+            onCreateTicket: onCreateTicket ? (prefill) => onCreateTicket(machine, prefill) : undefined,
+          }}
+        />
       ) : (
         <div className="ficha-grid">
           <div className="ficha-main">
@@ -438,7 +460,7 @@ export function FichaPage({
             )}
 
             <Card
-              title={`CPU y RAM · ${RANGES.find((r) => r.value === range)!.title}`}
+              title={`CPU y RAM · ${rangeDef.title}`}
               aside={
                 <div className="chart-controls">
                   <ul className="legend legend-lines">
@@ -466,11 +488,14 @@ export function FichaPage({
               ) : (
                 <LineChart
                   threshold={90}
-                  xLabels={axisLabels(chartPoints, range)}
+                  xLabels={axisLabels(chartDomain, range)}
                   pointLabels={chartPoints.map((p) => (range === '7d' ? shortDateTime(p.at) : clock(p.at)))}
+                  times={chartPoints.map((p) => Date.parse(p.at))}
+                  domain={chartDomain}
+                  maxGapMs={rangeDef.maxGapMs}
                   series={[
-                    { name: 'CPU', color: 'cpu', values: chartPoints.map((p) => p.cpu ?? 0), area: true },
-                    { name: 'RAM', color: 'ram', values: chartPoints.map((p) => p.ram ?? 0) },
+                    { name: 'CPU', color: 'cpu', values: chartPoints.map((p) => p.cpu), area: true },
+                    { name: 'RAM', color: 'ram', values: chartPoints.map((p) => p.ram) },
                   ]}
                 />
               )}
@@ -518,7 +543,7 @@ export function FichaPage({
               title="Problemas detectados"
               aside={
                 machine.problems.length > 0 ? (
-                  <span className="eyebrow eyebrow-critico">{machine.problems.length} activos</span>
+                  <span className="eyebrow eyebrow-critico">{count(machine.problems.length, 'activo')}</span>
                 ) : undefined
               }
             >
@@ -707,14 +732,15 @@ function Breadcrumb({ onBack, branch, name }: { onBack: () => void; branch?: str
 }
 
 /** Cinco o siete marcas repartidas en el eje X: horas (1H, 24H) o días (7D). */
-function axisLabels(points: readonly MetricPoint[], range: MetricRange): string[] {
-  const marks = range === '7d' ? 7 : 5;
+/** Marcas del eje X repartidas en el tiempo del rango (el eje es de tiempo real). */
+function axisLabels([from, to]: readonly [number, number], range: MetricRange): string[] {
+  const marks = range === '7d' ? 8 : 5;
   return Array.from({ length: marks }, (_, i) => {
-    const point = points[Math.round((i / (marks - 1)) * (points.length - 1))]!;
-    if (i === marks - 1 && range !== '7d') return 'Ahora';
+    if (i === marks - 1) return 'Ahora';
+    const at = new Date(from + (i / (marks - 1)) * (to - from));
     return range === '7d'
-      ? new Date(point.at).toLocaleDateString('es-DO', { weekday: 'short' }).replace('.', '').toUpperCase()
-      : clock(point.at);
+      ? at.toLocaleDateString('es-DO', { weekday: 'short' }).replace('.', '').toUpperCase()
+      : clock(at.toISOString());
   });
 }
 

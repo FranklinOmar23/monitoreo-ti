@@ -244,9 +244,8 @@ public sealed class PanelQueries(MonitoreoDbContext db, ICurrentUser user, TimeP
             .Select(v => new VolumeItem(v.Drive, v.Label, v.TotalGb, v.FreeGb, v.UpdatedAt))
             .ToListAsync(ct);
 
-        var since = Now.AddDays(-7);
-        var errors = await db.ErrorEvents.CountAsync(e => e.MachineId == id && e.Timestamp >= since
-            && (e.Level == EventLevel.Error || e.Level == EventLevel.Critical), ct);
+        // Errores abiertos de la semana: no cuentan los resueltos ni los ignorados desde Centinela (decisión 91).
+        var errors = await ErrorGroups.OpenCountAsync(db, id, Now.AddDays(-MonitoreoTI.Application.Health.ErrorGroupRules.DefaultDays), ct);
 
         return new MachineDetail(
             m.Id, m.QrCode, m.Name, Text(m.Type), Text(m.Status), m.Brand, m.Model, m.SerialNumber, m.OperatingSystem,

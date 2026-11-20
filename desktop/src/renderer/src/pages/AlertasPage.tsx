@@ -12,7 +12,7 @@ import { PageHeader } from '@components/PageHeader';
 import { StatusBadge } from '@components/StatusBadge';
 import { Tabs } from '@components/Tabs';
 import { useLeaving } from '@components/useLeaving';
-import { dateTime, timeAgo } from '../data/format';
+import { count, dateTime, timeAgo } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
 import { useDebounced } from '../data/useDebounced';
 import { ReglasPage } from './ReglasPage';
@@ -526,7 +526,7 @@ function AlertDetailBody({
             <div>
               <dt>Repeticiones (30 días)</dt>
               <dd className={alert.recurrences > 0 ? 'is-late' : undefined}>
-                {alert.recurrences === 0 ? 'Primera vez' : `${alert.recurrences} veces antes`}
+                {alert.recurrences === 0 ? 'Primera vez' : `${count(alert.recurrences, 'vez', 'veces')} antes`}
               </dd>
             </div>
           </dl>

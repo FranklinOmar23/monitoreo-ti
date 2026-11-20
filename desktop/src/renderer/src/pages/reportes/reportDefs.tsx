@@ -544,8 +544,8 @@ const performance = define<PerformanceReport>({
               xLabels={data.trend.map((d) => dayLabel(d.date))}
               pointLabels={data.trend.map((d) => d.date)}
               series={[
-                { name: 'CPU', color: 'cpu', values: data.trend.map((d) => d.cpu ?? 0) },
-                { name: 'RAM', color: 'ram', values: data.trend.map((d) => d.ram ?? 0), area: true },
+                { name: 'CPU', color: 'cpu', values: data.trend.map((d) => d.cpu) },
+                { name: 'RAM', color: 'ram', values: data.trend.map((d) => d.ram), area: true },
               ]}
             />
           </Card>

@@ -52,6 +52,10 @@ public sealed class AlertEngine(IServiceScopeFactory scopes, IRealtimeNotifier n
         var events = await db.ErrorEvents.AsNoTracking()
             .Where(e => ids.Contains(e.MachineId) && e.Timestamp >= since24h && e.Level == EventLevel.Critical)
             .Select(e => new { e.MachineId, e.Timestamp, e.Source, e.Code }).ToListAsync(cancellationToken);
+        // Errores resueltos o ignorados desde Centinela (decisión 91) no vuelven a abrir "errores críticos".
+        var marks = (await db.ErrorGroupStates.AsNoTracking().ToListAsync(cancellationToken))
+            .Select(MonitoreoTI.Infrastructure.Panel.ErrorGroups.ToMark).ToList();
+        events = events.Where(e => !ErrorGroupRules.Hides(ErrorGroupRules.MarkFor(marks, e.MachineId, e.Source, e.Code), e.Timestamp)).ToList();
         var services = await db.Services.AsNoTracking().Where(s => ids.Contains(s.MachineId) && s.StoppedSince != null)
             .Select(s => new { s.MachineId, s.Name, s.DisplayName }).ToListAsync(cancellationToken);
         var components = await db.Components.AsNoTracking()

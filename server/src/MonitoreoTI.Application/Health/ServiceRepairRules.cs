@@ -38,6 +38,22 @@ public static partial class ServiceRepairRules
         return $"$ErrorActionPreference = 'Stop'\nStart-Service -Name '{service}'\n(Get-Service -Name '{service}').Status";
     }
 
+    /// <summary>
+    /// Reinicia el servicio (o lo inicia si estaba detenido) desde un error de la ficha (decisión 91). Los servicios que
+    /// dependen de él y estaban en ejecución (el Agente SQL Server de MSSQLSERVER) se vuelven a iniciar: Restart-Service
+    /// -Force los detiene y no los levanta. Deja en la salida el estado final.
+    /// </summary>
+    public static string RestartScript(string service)
+    {
+        if (!IsValidName(service))
+            throw new ArgumentException("Nombre de servicio no válido.", nameof(service));
+        return "$ErrorActionPreference = 'Stop'\n"
+            + $"$dependientes = @(Get-Service -Name '{service}' -DependentServices | Where-Object Status -eq 'Running')\n"
+            + $"Restart-Service -Name '{service}' -Force\n"
+            + "$dependientes | Start-Service\n"
+            + $"(Get-Service -Name '{service}').Status";
+    }
+
     /// <summary>El servicio de un comando de reparación; null si el comando es otro.</summary>
     public static string? ServiceFromScript(string? content) =>
         content is not null && RepairScript().Match(content) is { Success: true } match ? match.Groups[1].Value : null;

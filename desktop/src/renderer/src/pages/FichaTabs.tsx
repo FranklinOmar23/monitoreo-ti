@@ -3,21 +3,32 @@ import { useQuery } from '@tanstack/react-query';
 import type { MachineDetail } from '@monitoreoti/shared';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { Card } from '@components/Card';
-import { dateTime, megabytes, timeAgo, typeLabel, usedOfTotal } from '../data/format';
+import { count, dateTime, megabytes, timeAgo, typeLabel, usedOfTotal } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
+import { ErrorsTab, type ErrorsTabProps } from './ErrorsTab';
 
 interface FichaTabsProps {
   tab: string;
   machine: MachineDetail;
+  /** Lo que puede hacer el usuario con los errores del equipo (decisión 91). */
+  errors?: Omit<ErrorsTabProps, 'machine'>;
 }
 
 /** Pestañas W-07 a W-12 de la ficha (la de Resumen está en FichaPage). */
-export function FichaTabs({ tab, machine }: FichaTabsProps) {
+export function FichaTabs({ tab, machine, errors }: FichaTabsProps) {
   switch (tab) {
     case 'componentes':
       return <ComponentsTab machine={machine} />;
     case 'errores':
-      return <ErrorsTab machineId={machine.id} />;
+      return (
+        <ErrorsTab
+          machine={machine}
+          canManage={errors?.canManage ?? false}
+          canFix={errors?.canFix ?? false}
+          canIgnoreCompanyWide={errors?.canIgnoreCompanyWide ?? false}
+          onCreateTicket={errors?.onCreateTicket}
+        />
+      );
     case 'procesos':
       return <ProcessesTab machine={machine} />;
     case 'software':
@@ -118,34 +129,6 @@ function ComponentsTab({ machine }: { machine: MachineDetail }) {
         </div>
       )}
     </>
-  );
-}
-
-const LEVEL_STATUS = { info: undefined, advertencia: 'advertencia', error: 'critico', critico: 'critico' } as const;
-
-function ErrorsTab({ machineId }: { machineId: number }) {
-  const api = usePanelApi();
-  const query = useTab('eventos', machineId, () => api.events(machineId));
-  return (
-    <TabState query={query} empty="Sin errores del sistema registrados">
-      {() => (
-        <ul className="event-list">
-          {query.data!.map((event) => (
-            <li key={event.id} className="card">
-              <span className="dot" data-status={LEVEL_STATUS[event.level]} aria-hidden="true" />
-              <div>
-                <strong>{event.plainMessage ?? event.message ?? 'Error del sistema'}</strong>
-                <span className="mono muted">
-                  {event.source ?? '—'}
-                  {event.code !== null && ` ${event.code}`} · {dateTime(event.at)}
-                </span>
-                {event.plainMessage && event.message && <p className="event-raw mono">{event.message}</p>}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </TabState>
   );
 }
 
@@ -261,7 +244,7 @@ function SoftwareTab({ machineId }: { machineId: number }) {
                 <input
                   type="search"
                   value={filter}
-                  placeholder={`Buscar entre ${query.data!.length} programas`}
+                  placeholder={`Buscar entre ${count(query.data!.length, 'programa')}`}
                   aria-label="Buscar programa"
                   onChange={(e) => setFilter(e.target.value)}
                 />

@@ -212,6 +212,44 @@ export interface ErrorEventItem {
   plainMessage: string | null;
 }
 
+/** Errores del equipo agrupados por origen y código, resueltos desde Centinela (decisión 91). */
+export type ErrorGroupState = 'abierto' | 'resuelto' | 'reaparecio' | 'ignorado';
+
+export interface ErrorGroupItem {
+  source: string | null;
+  code: number | null;
+  level: 'error' | 'critico';
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  title: string | null;
+  detail: string | null;
+  advice: string | null;
+  lastMessage: string | null;
+  state: ErrorGroupState;
+  stateScope: 'equipo' | 'empresa' | null;
+  stateBy: string | null;
+  stateAt: string | null;
+  stateNote: string | null;
+  /** Ocurrencias que siguen abiertas (tras resolverlo, solo las nuevas). */
+  openCount: number;
+  /** Servicio que "Reiniciar servicio" reinicia; null si el error no tiene esa acción. */
+  service: string | null;
+  /** Ruido de Windows: se sugiere ignorarlo. */
+  noise: boolean;
+}
+
+export interface ErrorGroupList {
+  days: number;
+  openTotal: number;
+  groups: ErrorGroupItem[];
+}
+
+export interface ErrorGroupKey {
+  origen: string | null;
+  codigo: number | null;
+}
+
 export interface ProcessItem {
   name: string;
   pid: number | null;
@@ -632,6 +670,17 @@ export interface PanelApi {
   software(id: number): Promise<SoftwareItem[]>;
   interfaces(id: number): Promise<NetworkInterfaceItem[]>;
   events(id: number): Promise<ErrorEventItem[]>;
+  /** Errores agrupados de los últimos días (decisión 91). */
+  errorGroups(id: number, dias?: number): Promise<ErrorGroupList>;
+  errorOccurrences(id: number, key: ErrorGroupKey): Promise<ErrorEventItem[]>;
+  /** Resuelto vale en el equipo; ignorado, en el equipo o en toda la empresa. */
+  markErrorGroup(
+    id: number,
+    input: ErrorGroupKey & { estado: 'resuelto' | 'ignorado'; alcance?: 'equipo' | 'empresa'; nota?: string | null },
+  ): Promise<{ id: number }>;
+  reopenErrorGroup(id: number, input: ErrorGroupKey & { alcance?: 'equipo' | 'empresa' }): Promise<{ id: number }>;
+  /** Reinicia el servicio del error con un comando firmado (pide 2FA reciente). */
+  fixErrorGroup(id: number, key: ErrorGroupKey): Promise<{ lote: string; servicio: string }>;
   processes(id: number): Promise<ProcessItem[]>;
   services(id: number): Promise<ServiceItem[]>;
   /**
@@ -728,6 +777,12 @@ export function createPanelApi(serverUrl: string, accessToken: () => string | nu
     software: (id) => get(`/maquinas/${id}/software`),
     interfaces: (id) => get(`/maquinas/${id}/interfaces`),
     events: (id) => get(`/maquinas/${id}/eventos`),
+    errorGroups: (id, dias) => get(`/maquinas/${id}/errores`, { dias }),
+    errorOccurrences: (id, key) =>
+      get(`/maquinas/${id}/errores/ocurrencias`, { origen: key.origen ?? undefined, codigo: key.codigo ?? undefined }),
+    markErrorGroup: (id, input) => send('PUT', `/maquinas/${id}/errores/estado`, input),
+    reopenErrorGroup: (id, input) => send('POST', `/maquinas/${id}/errores/reabrir`, input),
+    fixErrorGroup: (id, key) => send('POST', `/maquinas/${id}/errores/reparar`, key),
     processes: (id) => get(`/maquinas/${id}/procesos`),
     services: (id) => get(`/maquinas/${id}/servicios`),
     reportNow: (id) => send('POST', `/maquinas/${id}/actualizar`),

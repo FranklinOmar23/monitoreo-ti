@@ -12,7 +12,7 @@ import { Pager } from '@components/Pager';
 import { usePanelApi } from '../../data/PanelData';
 import { useDebounced } from '../../data/useDebounced';
 import { usePaged } from '../../data/usePaged';
-import { dateTime, timeAgo } from '../../data/format';
+import { count, dateTime, timeAgo } from '../../data/format';
 import { RolesView } from './RolesView';
 
 /** Rol del sistema que ve todas las sucursales aunque tenga algunas marcadas (decisión 28). */
@@ -41,7 +41,7 @@ export function UsuariosPage() {
         title="Usuarios"
         subtitle={
           all.data
-            ? `${all.data.data.total} usuarios · ${active} activos. Cada uno entra con su correo, su contraseña y, si su rol lo exige, el 2FA.`
+            ? `${count(all.data.data.total, 'usuario')} · ${count(active, 'activo')}. Cada uno entra con su correo, su contraseña y, si su rol lo exige, el 2FA.`
             : 'Cargando…'
         }
         actions={

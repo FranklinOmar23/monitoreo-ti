@@ -425,6 +425,11 @@ export function fakePanelApi(overrides: Partial<PanelApi>): PanelApi {
     // La ficha consulta procesos y red desde el Resumen: vacíos salvo que la prueba los defina.
     interfaces: () => Promise.resolve([]),
     events: missing,
+    errorGroups: missing,
+    errorOccurrences: missing,
+    markErrorGroup: missing,
+    reopenErrorGroup: missing,
+    fixErrorGroup: missing,
     processes: () => Promise.resolve([]),
     reportNow: () => Promise.resolve({ enviado: true, segundos: 0 }),
     services: () => Promise.resolve([]),

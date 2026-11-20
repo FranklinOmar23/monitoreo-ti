@@ -1,12 +1,21 @@
 import type { MachineType } from '@monitoreoti/shared';
 import type { IconName } from '@components/Icon';
 
-/** "hace 3 min", "hace 2 h", "hace 4 d"; null o fecha futura → "—" / "ahora". */
 /** "Caja 3 (PC-042076)" si el equipo tiene alias (decisión 87); si no, su nombre. */
 export function machineLabel(machine: { name: string; alias?: string | null }): string {
   return machine.alias ? `${machine.alias} (${machine.name})` : machine.name;
 }
 
+/**
+ * "1 equipo", "3 equipos", "0 equipos": cantidad con la palabra en singular o plural. El plural regular agrega "s" (o
+ * "es" tras consonante); los irregulares se pasan.
+ */
+export function count(n: number, singular: string, plural?: string): string {
+  const many = plural ?? (/[aeiouáéíóú]$/i.test(singular) ? `${singular}s` : `${singular}es`);
+  return `${n.toLocaleString('es-DO')} ${n === 1 ? singular : many}`;
+}
+
+/** "hace 3 min", "hace 2 h", "hace 4 d"; null o fecha futura → "—" / "ahora". */
 export function timeAgo(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) return '—';
   const seconds = Math.round((now - new Date(iso).getTime()) / 1000);

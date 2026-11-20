@@ -5,7 +5,7 @@ import { Card } from '@components/Card';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
 import { Icon } from '@components/Icon';
-import { dateTime, timeAgo } from '../../data/format';
+import { count, dateTime, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
 import { DEVICE_STATUS_LABEL, DEVICE_TYPE_LABEL } from './netLabels';
 
@@ -767,7 +767,7 @@ export function TopologyMap({
           className="topology-card"
           aside={
             <span className="eyebrow mono">
-              {view.nodes.length} equipos de red · {view.total} equipos finales
+              {count(view.nodes.length, 'equipo de red', 'equipos de red')} · {count(view.total, 'equipo final', 'equipos finales')}
             </span>
           }
         >

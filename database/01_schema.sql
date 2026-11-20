@@ -862,6 +862,24 @@ CREATE TABLE dbo.eventos_error (
 );
 GO
 
+/* Errores resueltos o ignorados desde Centinela (decisión 91): por grupo (origen + código), en un equipo o, para ignorar,
+   en toda la empresa (maquina_id NULL). Resuelto vale hasta "fecha": si el error vuelve a ocurrir, reaparece. */
+CREATE TABLE dbo.errores_estado (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    empresa_id      INT NOT NULL REFERENCES dbo.empresas(id),
+    maquina_id      INT NULL,
+    origen          NVARCHAR(200) NULL,
+    codigo          INT NULL,
+    ignorado        BIT NOT NULL,
+    nota            NVARCHAR(500) NULL,
+    usuario_id      INT NULL REFERENCES dbo.usuarios(id),
+    fecha           DATETIME2(0) NOT NULL,
+    CONSTRAINT FK_errores_estado_maquina FOREIGN KEY (empresa_id, maquina_id)
+        REFERENCES dbo.maquinas(empresa_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IX_errores_estado_grupo ON dbo.errores_estado (empresa_id, origen, codigo);
+GO
+
 CREATE TABLE dbo.procesos_snapshot (
     id              BIGINT IDENTITY(1,1) PRIMARY KEY,
     empresa_id      INT NOT NULL REFERENCES dbo.empresas(id),

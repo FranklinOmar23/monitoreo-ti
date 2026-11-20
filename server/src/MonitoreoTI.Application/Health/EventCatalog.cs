@@ -1,7 +1,23 @@
 namespace MonitoreoTI.Application.Health;
 
-/// <summary>Un error de Windows explicado para el técnico.</summary>
-public sealed record EventExplanation(string Title, string Detail, string Advice);
+/// <summary>Qué puede hacer Centinela con un error desde la ficha (decisión 91).</summary>
+public enum EventFix
+{
+    /// <summary>Solo explicación: lo resuelve el técnico (o un script de la biblioteca).</summary>
+    None,
+
+    /// <summary>Reiniciar (o iniciar, si quedó detenido) el servicio del error, con un comando firmado.</summary>
+    RestartService,
+}
+
+/// <summary>
+/// Un error de Windows explicado para el técnico. <paramref name="Fix"/>: la acción que se ofrece.
+/// <paramref name="ServiceIsSource"/>: el servicio es el origen del evento (SQL Server: "MSSQLSERVER", "MSSQL$INSTANCIA");
+/// si no, se busca en el mensaje entre los servicios conocidos del equipo. <paramref name="Noise"/>: ruido de Windows que
+/// conviene ignorar.
+/// </summary>
+public sealed record EventExplanation(
+    string Title, string Detail, string Advice, EventFix Fix = EventFix.None, bool ServiceIsSource = false, bool Noise = false);
 
 /// <summary>
 /// Traducción de los eventos de Windows más comunes a lenguaje simple (sección 8.2). Se amplía agregando entradas.
@@ -32,12 +48,28 @@ public static class EventCatalog
     private static readonly EventExplanation ServiceCrashed = new(
         "Un servicio se cerró inesperadamente",
         "Un servicio de Windows terminó por un error.",
-        "Revisa si el servicio volvió a iniciar; si se repite, revisa el programa que lo instaló.");
+        "Reinícialo desde aquí; si se repite, revisa o actualiza el programa que lo instaló.",
+        EventFix.RestartService);
 
     private static readonly EventExplanation ServiceFailedToStart = new(
         "Un servicio no pudo iniciar",
         "Un servicio configurado para iniciar no arrancó.",
-        "Revisa la configuración del servicio y el programa que lo instaló.");
+        "Intenta iniciarlo desde aquí; si vuelve a fallar, revisa su configuración y el programa que lo instaló.",
+        EventFix.RestartService);
+
+    private static readonly EventExplanation SqlOutOfMemory = new(
+        "SQL Server se quedó sin memoria",
+        "SQL Server no tiene memoria para atender consultas ni sus tareas internas: el sistema que lo usa se pone lento o falla.",
+        "Reiniciar el servicio libera la memoria ya. Para que no vuelva, limita la memoria máxima de SQL Server " +
+        "(max server memory) dejando 2 a 4 GB a Windows, o agrega RAM.",
+        EventFix.RestartService,
+        ServiceIsSource: true);
+
+    private static readonly EventExplanation DcomPermission = new(
+        "Aviso de permisos DCOM",
+        "Un componente de Windows pidió un permiso DCOM que no tiene. Es muy común y casi nunca afecta al usuario.",
+        "Normalmente se ignora en toda la empresa.",
+        Noise: true);
 
     private static readonly EventExplanation FileSystemErrors = new(
         "El sistema de archivos tiene errores",
@@ -73,16 +105,30 @@ public static class EventCatalog
         [("ntfs", 98)] = FileSystemErrors,
         [("microsoft-windows-ntfs", 55)] = FileSystemErrors,
         [("microsoft-windows-ntfs", 98)] = FileSystemErrors,
+        [("service control manager", 7023)] = ServiceCrashed,
+        [("service control manager", 7024)] = ServiceCrashed,
+        [("mssqlserver", 701)] = SqlOutOfMemory,
+        [("mssqlserver", 802)] = SqlOutOfMemory,
+        [("mssqlserver", 9602)] = SqlOutOfMemory,
+        [("mssqlserver", 17189)] = SqlOutOfMemory,
+        [("mssqlserver", 17300)] = SqlOutOfMemory,
+        [("mssqlserver", 17312)] = SqlOutOfMemory,
+        [("mssqlserver", 28709)] = SqlOutOfMemory,
+        [("microsoft-windows-distributedcom", 10016)] = DcomPermission,
+        [("distributedcom", 10016)] = DcomPermission,
         [("application error", 1000)] = AppCrashed,
         [("application hang", 1002)] = AppHang,
     };
 
-    public static EventExplanation? Explain(string? source, int code)
+    public static EventExplanation? Explain(string? source, int? code)
     {
         if (string.IsNullOrEmpty(source))
             return null;
         // Windows no es consistente con mayúsculas en los orígenes ("Ntfs", "disk"): se compara en minúsculas.
         var key = source.ToLowerInvariant();
-        return Entries.GetValueOrDefault((key, code)) ?? Entries.GetValueOrDefault((key, null));
+        // Las instancias con nombre de SQL Server ("MSSQL$CONTABILIDAD") dicen lo mismo que la predeterminada.
+        if (key.StartsWith("mssql$", StringComparison.Ordinal))
+            key = "mssqlserver";
+        return (code is null ? null : Entries.GetValueOrDefault((key, code))) ?? Entries.GetValueOrDefault((key, null));
     }
 }

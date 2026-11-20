@@ -56,8 +56,8 @@ public class ModelMatchesDatabaseTests(TestDatabase database)
         while (await reader.ReadAsync())
             tables.Add(reader.GetString(0));
 
-        // 54 + instalaciones_remotas (decisión 77) + respaldo_trabajos y respaldo_ejecuciones (decisión 82).
-        tables.Should().HaveCount(57);
+        // 54 + instalaciones_remotas (decisión 77) + respaldo_trabajos y respaldo_ejecuciones (decisión 82) + errores_estado (decisión 91).
+        tables.Should().HaveCount(58);
         tables.Where(t => !mapped.Contains(t)).Should().BeEmpty("cada tabla del script debe tener su entidad");
     }
 

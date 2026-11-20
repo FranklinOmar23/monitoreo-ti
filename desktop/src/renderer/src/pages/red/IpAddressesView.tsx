@@ -5,7 +5,7 @@ import { Card } from '@components/Card';
 import { EmptyState, ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
 import { KpiCard } from '@components/KpiCard';
-import { dateTime, shortDateTime, timeAgo } from '../../data/format';
+import { count, dateTime, shortDateTime, timeAgo } from '../../data/format';
 import { usePanelApi } from '../../data/PanelData';
 import { BranchSelect, FormModal, numberOrNull, textOrNull, useNetworkSave } from './NetworkForms';
 import { canInstallOn, InstallAgentDialog, looksLikeWindows, RemoteInstallsCard } from './RemoteInstall';
@@ -231,7 +231,7 @@ function SubnetView({
               )}
             </span>
             <span>{SWEEP_OPTIONS.find(([h]) => h === subnet.sweepHours)?.[1] ?? `Cada ${subnet.sweepHours} h`}</span>
-            <span>Libre tras {subnet.freeAfterDays} días sin verse</span>
+            <span>Libre tras {count(subnet.freeAfterDays, 'día')} sin verse</span>
           </p>
         </div>
         {canEdit && (
@@ -517,7 +517,7 @@ function IpDetail({
 }) {
   const note =
     ip.state === 'libre'
-      ? `Nadie la usó en los últimos ${subnet.freeAfterDays} días: se puede asignar.`
+      ? `Nadie la usó en ${subnet.freeAfterDays === 1 ? 'el último día' : `los últimos ${subnet.freeAfterDays} días`}: se puede asignar.`
       : ip.state === 'reciente'
         ? `Se vio ${timeAgo(ip.lastSeenAt)}: puede ser un equipo apagado. Mejor no asignarla.`
         : ip.state === 'sin_identificar'

@@ -12,6 +12,7 @@ import { PageHeader } from '@components/PageHeader';
 import { usePanelApi } from '../data/PanelData';
 import { BranchDepartments } from './BranchDepartments';
 import { StatusBar, worst } from './DashboardPage';
+import { count } from '../data/format';
 
 interface SucursalesPageProps {
   canEdit: boolean;
@@ -38,7 +39,7 @@ export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps)
     <>
       <PageHeader
         title="Sucursales"
-        subtitle={branches.data ? `${branches.data.length} sucursales` : 'Cargando…'}
+        subtitle={branches.data ? count(branches.data.length, 'sucursal') : 'Cargando…'}
         actions={
           canEdit && (
             <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
@@ -88,7 +89,7 @@ export function SucursalesPage({ canEdit, onOpenMachines }: SucursalesPageProps)
               </span>
               <span className="muted">{branch.province ?? 'Sin provincia'}</span>
               <span className="branch-meta mono">
-                {branch.counts.total} equipos · {branch.counts.critical} crít. · {branch.counts.warning} adv. ·{' '}
+                {count(branch.counts.total, 'equipo')} · {branch.counts.critical} crít. · {branch.counts.warning} adv. ·{' '}
                 {branch.counts.disconnected} descon.
               </span>
               <StatusBar counts={branch.counts} label={`Estado de ${branch.name}`} />
@@ -183,7 +184,7 @@ function BranchDetail({
           </ul>
           <StatusBar counts={counts} label={`Estado de ${branch.name}`} />
           <button type="button" className="btn btn-primary branch-machines" onClick={() => onOpenMachines()}>
-            <Icon name="monitor" size={16} /> Ver sus {counts.total} equipos
+            <Icon name="monitor" size={16} /> Ver {counts.total === 1 ? 'su equipo' : `sus ${counts.total} equipos`}
           </button>
         </Card>
       </div>

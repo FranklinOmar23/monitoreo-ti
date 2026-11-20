@@ -9,7 +9,7 @@ import { Pager } from '@components/Pager';
 import { MiniBar } from '@components/MiniBar';
 import { PageHeader } from '@components/PageHeader';
 import { StatusBadge } from '@components/StatusBadge';
-import { isLate, MACHINE_TYPES, timeAgo, typeIcon, typeLabel, whole } from '../data/format';
+import { count, isLate, MACHINE_TYPES, timeAgo, typeIcon, typeLabel, whole } from '../data/format';
 import { usePanelApi } from '../data/PanelData';
 import { useDebounced } from '../data/useDebounced';
 
@@ -131,7 +131,7 @@ export function EquiposPage({
     <>
       <PageHeader
         title="Equipos"
-        subtitle={counts ? `${counts.total} equipos registrados · ${counts.online} en línea` : 'Cargando…'}
+        subtitle={counts ? `${count(counts.total, 'equipo registrado', 'equipos registrados')} · ${counts.online} en línea` : 'Cargando…'}
         actions={
           onAddMachine && (
             <button type="button" className="btn btn-primary" onClick={onAddMachine}>
