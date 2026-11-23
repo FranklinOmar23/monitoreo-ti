@@ -70,6 +70,36 @@ public sealed class NetworkApiTests(TestDatabase database) : IAsyncLifetime
     };
 
     [DatabaseFact]
+    public async Task The_room_layout_swaps_racks_in_one_go_and_rejects_two_in_the_same_place()
+    {
+        var admin = await ClientAsync();
+        var (_, room, first) = await RackAsync(admin);
+        var second = await CreateAsync(admin, "gabinetes", new { nombre = $"PRUEBA-{Random.Shared.Next(100000)}", salaId = room, alturaU = 42, fila = "A", posicion = 2 });
+        var other = (await RackAsync(admin)).Rack;
+
+        // Intercambio: el primero (sin ubicar) pasa a A-2 y el segundo a B-1, de una vez.
+        (await admin.PutAsJsonAsync($"/api/v1/red/salas/{room}/plano", new
+        {
+            gabinetes = new[] { new { gabineteId = first, fila = "a", posicion = (int?)2 }, new { gabineteId = second, fila = "B", posicion = (int?)1 } },
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+        var racks = (await JsonAsync(await admin.GetAsync($"/api/v1/red/gabinetes?sala={room}"))).EnumerateArray().ToList();
+        var a = racks.Single(r => r.GetProperty("id").GetInt32() == first);
+        (a.GetProperty("row").GetString(), a.GetProperty("position").GetInt32()).Should().Be(("A", 2));
+
+        // Dos en el mismo lugar: no se guarda nada.
+        var clash = await admin.PutAsJsonAsync($"/api/v1/red/salas/{room}/plano", new
+        {
+            gabinetes = new[] { new { gabineteId = second, fila = "A", posicion = (int?)2 } },
+        });
+        clash.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        // Un gabinete de otra sala tampoco.
+        (await admin.PutAsJsonAsync($"/api/v1/red/salas/{room}/plano", new
+        {
+            gabinetes = new[] { new { gabineteId = other, fila = "C", posicion = (int?)1 } },
+        })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [DatabaseFact]
     public async Task The_seed_path_goes_from_the_outlet_to_the_core()
     {
         var admin = await ClientAsync();

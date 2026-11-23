@@ -337,6 +337,13 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     private int _generation;
     private int _restarts;
     private Thread? _watchdog;
+    /// <summary>Cuándo se mandó la última parte de pantalla y cuándo se aplicó la última entrada del técnico.</summary>
+    private long _lastSent = Environment.TickCount64;
+    private long _lastInput;
+    private long _lastStillReport;
+    /// <summary>Capturas creadas en la sesión y el último error de la de video (para el diagnóstico).</summary>
+    private int _sources;
+    private string? _lastVideoError;
 
     /// <summary>Sin una vuelta del bucle de la pantalla en este tiempo, se da por trabado y se abre otro (decisión 89).</summary>
     public const int FrozenMilliseconds = 6000;
@@ -439,6 +446,7 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
                 try
                 {
                     action(_area ?? Area());
+                    Interlocked.Exchange(ref _lastInput, Environment.TickCount64);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
@@ -481,6 +489,7 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
     /// <summary>V2 si se puede; si no, V1. "Todos los monitores" va siempre por la V1 (DXGI duplica de a un monitor).</summary>
     private IScreenSource CreateSource(MonitorArea area)
     {
+        _sources++;
         if (VideoAllowed && !_videoDisabled && _monitor != AllMonitors && _videoFailures < 3)
         {
             try
@@ -590,8 +599,10 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
 
                 // Si una confirmación se perdió en el camino (corte de red, cuadro descartado), el visor ya no va a
                 // confirmar: lo pendiente se da por perdido y se manda la pantalla entera (en H.264, un cuadro clave).
-                if (Volatile.Read(ref _inFlight) >= DesktopHelper.MaxInFlight && _sentAt.TryPeek(out var oldest)
-                    && Environment.TickCount64 - oldest > StallMilliseconds)
+                // También por tiempo: si las cuentas de lo enviado y lo confirmado se desfasan, no se espera para siempre.
+                if (Volatile.Read(ref _inFlight) >= DesktopHelper.MaxInFlight
+                    && ((_sentAt.TryPeek(out var oldest) && Environment.TickCount64 - oldest > StallMilliseconds)
+                        || Environment.TickCount64 - Interlocked.Read(ref _lastSent) > StallMilliseconds))
                 {
                     while (_sentAt.TryDequeue(out _))
                     {
@@ -613,11 +624,14 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
                     try
                     {
                         update = capture.Capture(_quality);
-                        if (capture is VideoScreenCapture)
+                        // Solo una captura que entregó algo cuenta como buena: si la duplicación se pierde una y otra vez
+                        // sin dar imagen, tras tres fallas se sigue con la V1.
+                        if (capture is VideoScreenCapture && update is not null)
                             _videoFailures = 0;
                     }
                     catch (Exception ex) when (capture is VideoScreenCapture && ex is not OutOfMemoryException)
                     {
+                        _lastVideoError = $"{ex.GetType().Name}: {ex.Message}";
                         // Se perdió la duplicación (cambio de resolución, pantalla completa, UAC): se vuelve a crear, y
                         // después de tres fallas seguidas se sigue con la V1.
                         _videoFailures++;
@@ -630,7 +644,20 @@ public sealed class ScreenWorker(Action<byte[]> sendFrame, Action<object> sendTe
                         Interlocked.Increment(ref _inFlight);
                         _sentAt.Enqueue(Environment.TickCount64);
                         sendFrame(update);
+                        Interlocked.Exchange(ref _lastSent, Environment.TickCount64);
                     }
+                }
+
+                // Imagen quieta mientras el técnico mueve el mouse o escribe: se anota el estado para soporte (decisión 94).
+                var now = Environment.TickCount64;
+                if (_viewing.IsSet && now - Interlocked.Read(ref _lastSent) > 5000 && now - Interlocked.Read(ref _lastInput) < 3000
+                    && now - _lastStillReport > 15000)
+                {
+                    _lastStillReport = now;
+                    Diagnose($"imagen quieta hace {(now - Interlocked.Read(ref _lastSent)) / 1000} s con entrada del técnico: "
+                        + $"sin confirmar={Volatile.Read(ref _inFlight)} pendientes={_sentAt.Count} escritorio={desktop} "
+                        + $"cursor={ScreenCapture.CursorState()} fuente={(capture is VideoScreenCapture v ? v.State : "jpeg")} calidad={_quality} "
+                        + $"capturas creadas={_sources} fallas de video={_videoFailures} último error={_lastVideoError ?? "ninguno"}");
                 }
 
                 // Portapapeles sincronizado: una vez por segundo se mira si cambió en el equipo.

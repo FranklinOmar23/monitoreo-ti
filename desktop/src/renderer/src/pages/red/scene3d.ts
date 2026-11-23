@@ -1,4 +1,4 @@
-import type { DeviceStatus, RackDevice, RackItem } from '@monitoreoti/shared';
+import type { DeviceStatus, RackDevice, RackItem, RackPlacementInput } from '@monitoreoti/shared';
 
 /** Medidas reales aproximadas, en metros: una U mide 44.45 mm; un gabinete estándar, 60 × 100 cm. */
 export const U_METERS = 0.04445;
@@ -61,7 +61,14 @@ export interface PlacedRack {
   x: number;
   z: number;
   height: number;
+  /** Giro sobre el eje vertical: las filas se miran de a pares (A con B, C con D), con el pasillo frío entre ellas. */
+  rotation: number;
+  row: string | null;
 }
+
+/** Distancia entre gabinetes vecinos de una fila y entre filas (con el pasillo). */
+export const SLOT = RACK_WIDTH + 0.05;
+export const ROW_PITCH = RACK_DEPTH + AISLE;
 
 /** Gabinetes de la sala en 3D (W-43), con el mismo orden que el plano. */
 export function layoutRoom(racks: readonly RackPlace[]): PlacedRack[] {
@@ -69,11 +76,108 @@ export function layoutRoom(racks: readonly RackPlace[]): PlacedRack[] {
     row.racks.map(({ rack, column }) => ({
       id: rack.id,
       name: rack.name,
-      x: (column - 1) * (RACK_WIDTH + 0.05),
-      z: rowIndex * (RACK_DEPTH + AISLE),
+      x: (column - 1) * SLOT,
+      z: rowIndex * ROW_PITCH,
       height: rack.heightUnits * U_METERS,
+      rotation: rowIndex % 2 === 1 ? Math.PI : 0,
+      row: row.row,
     })),
   );
+}
+
+/** Las filas con nombre, en orden, con dónde quedan en el piso (para sus nombres y las vistas de frente). */
+export function rowBands(
+  racks: readonly RackPlace[],
+): { name: string; z: number; from: number; to: number; facing: 1 | -1 }[] {
+  return planRows(racks)
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.row !== null)
+    .map(({ row, index }) => {
+      const columns = row.racks.map((r) => r.column);
+      return {
+        name: row.row!,
+        z: index * ROW_PITCH,
+        from: (Math.min(...columns) - 1) * SLOT,
+        to: (Math.max(...columns) - 1) * SLOT,
+        facing: index % 2 === 1 ? -1 : 1,
+      };
+    });
+}
+
+/** El nombre de la fila siguiente: después de C, D; después de 3, 4; si no, la cantidad más uno. */
+export function nextRowName(names: readonly string[]): string {
+  if (names.length === 0) return 'A';
+  if (names.every((n) => /^[A-Z]$/.test(n))) {
+    const last = names.reduce((a, b) => (a > b ? a : b));
+    return last === 'Z' ? `${names.length + 1}` : String.fromCharCode(last.charCodeAt(0) + 1);
+  }
+  if (names.every((n) => /^\d+$/.test(n))) return String(Math.max(...names.map(Number)) + 1);
+  return String(names.length + 1);
+}
+
+/** Un lugar del plano: la fila y la posición (columna, desde 1). */
+export interface Cell {
+  row: string;
+  position: number;
+}
+
+/** La celda bajo un punto del piso del 3D. Más allá de la última fila se ofrece una fila nueva (solo una). */
+export function cellAt(racks: readonly RackPlace[], x: number, z: number): Cell {
+  const names = planRows(racks).flatMap((r) => (r.row ? [r.row] : []));
+  const index = Math.max(0, Math.round(z / ROW_PITCH));
+  return {
+    row: index < names.length ? names[index]! : nextRowName(names),
+    position: Math.max(1, Math.round(x / SLOT) + 1),
+  };
+}
+
+/** El centro en el piso de una celda (para mostrar dónde va a quedar el gabinete que se arrastra). */
+export function cellCenter(racks: readonly RackPlace[], cell: Cell): { x: number; z: number } {
+  const names = planRows(racks).flatMap((r) => (r.row ? [r.row] : []));
+  const index = names.indexOf(cell.row);
+  return { x: (cell.position - 1) * SLOT, z: (index < 0 ? names.length : index) * ROW_PITCH };
+}
+
+/** ¿Qué gabinete está en esa celda? (según el plano, con las posiciones que faltan ya resueltas). */
+export function occupantOf(racks: readonly RackPlace[], cell: Cell): number | null {
+  for (const row of planRows(racks)) {
+    if (row.row !== cell.row) continue;
+    return row.racks.find((r) => r.column === cell.position)?.rack.id ?? null;
+  }
+  return null;
+}
+
+/**
+ * Mover un gabinete a otra celda (o sacarlo del plano con null). Si la celda está ocupada, los dos se intercambian;
+ * desde «Sin ubicar» no se puede soltar sobre otro (devuelve null). Devuelve lo que hay que guardar: el gabinete movido
+ * y todos los de las filas tocadas cuya posición guardada no era la que se veía (así el plano no se reacomoda solo).
+ */
+export function moveRack(racks: readonly RackPlace[], id: number, target: Cell | null): RackPlacementInput[] | null {
+  const where = new Map<number, Cell | null>();
+  for (const row of planRows(racks))
+    for (const { rack, column } of row.racks) where.set(rack.id, row.row ? { row: row.row, position: column } : null);
+  const from = where.get(id);
+  if (from === undefined) return null;
+  if (target && from && from.row === target.row && from.position === target.position) return [];
+
+  const occupant = target ? occupantOf(racks, target) : null;
+  if (occupant !== null && occupant !== id) {
+    if (!from) return null;
+    where.set(occupant, from);
+  }
+  where.set(id, target ? { row: target.row.trim().toUpperCase(), position: target.position } : null);
+
+  const touched = new Set([from?.row, target?.row.trim().toUpperCase()].filter(Boolean));
+  return racks.flatMap((rack) => {
+    const cell = where.get(rack.id) ?? null;
+    const storedRow = rack.row?.trim() ? rack.row.trim().toUpperCase() : null;
+    const moved = rack.id === id || rack.id === occupant;
+    const inTouchedRow = cell !== null && touched.has(cell.row);
+    const differs = (cell?.row ?? null) !== storedRow || (cell?.position ?? null) !== (rack.position ?? null);
+    return (moved || inTouchedRow) && differs
+      ? [{ gabineteId: rack.id, fila: cell?.row ?? null, posicion: cell?.position ?? null }]
+      : [];
+  });
 }
 
 export interface DeviceBox {

@@ -1,6 +1,13 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DesktopView, h264Codec, parseVideoUpdate, STALL_FULL_MS, STALL_RECONNECT_MS } from './DesktopView';
+import {
+  DesktopView,
+  h264Codec,
+  parseVideoUpdate,
+  KEY_RETRY_MS,
+  STALL_FULL_MS,
+  STALL_RECONNECT_MS,
+} from './DesktopView';
 
 /** SPS (perfil base restringido, nivel 4), PPS y una porción IDR, como los manda el codificador de Windows. */
 const KEY_DATA = [0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xab, 0, 0, 0, 1, 0x68, 0xce, 0, 0, 0, 1, 0x65, 0x88, 0x84];
@@ -156,6 +163,66 @@ describe('canal trabado (decisión 86)', () => {
 });
 
 describe('decodificador trabado (decisión 89)', () => {
+  it('si el técnico mueve el mouse y no llega imagen, pide la pantalla entera (decisión 94)', async () => {
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance', 'requestAnimationFrame'],
+    });
+    try {
+      const { socket, sent, receive } = fakeSocket();
+      const { container } = render(<DesktopView socket={socket} />);
+      await waitFor(() => expect(sent()).toContainEqual({ tipo: 'ver', video: ['h264'] }));
+      receive(videoFrame(true, KEY_DATA));
+      await waitFor(() => expect(drawImage).toHaveBeenCalledTimes(1));
+      const asked = () => sent().filter((m) => m['tipo'] === 'completo').length;
+      const before = asked();
+      const canvas = container.querySelector('canvas')!;
+
+      // El canal responde (pong) pero no llega imagen mientras se mueve el mouse.
+      for (let i = 0; i < 5; i++) {
+        canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: 10 + i, clientY: 10 }));
+        act(
+          () =>
+            void socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ tipo: 'pong', t: 0 }) })),
+        );
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+      }
+      expect(asked()).toBeGreaterThan(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('mientras no llega el cuadro clave lo vuelve a pedir cada segundo (decisión 93)', async () => {
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'],
+    });
+    try {
+      const { socket, sent, receive } = fakeSocket();
+      render(<DesktopView socket={socket} />);
+      await waitFor(() => expect(sent()).toContainEqual({ tipo: 'ver', video: ['h264'] }));
+      const asked = () => sent().filter((m) => m['tipo'] === 'completo').length;
+
+      // Solo cuadros intermedios: el pedido se repite, no se queda en uno.
+      receive(videoFrame(false, DELTA_DATA));
+      expect(asked()).toBe(1);
+      receive(videoFrame(false, DELTA_DATA));
+      expect(asked()).toBe(1);
+      await act(() => vi.advanceTimersByTimeAsync(KEY_RETRY_MS * 3 + 100));
+      expect(asked()).toBeGreaterThanOrEqual(3);
+
+      // Llegó: ya no se pide más.
+      receive(videoFrame(true, KEY_DATA));
+      await waitFor(() => expect(drawImage).toHaveBeenCalledTimes(1));
+      const after = asked();
+      await act(() => vi.advanceTimersByTimeAsync(KEY_RETRY_MS * 2));
+      expect(asked()).toBe(after);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('si deja de entregar cuadros, crea otro por software y pide un cuadro clave', async () => {
     vi.useFakeTimers({
       shouldAdvanceTime: true,

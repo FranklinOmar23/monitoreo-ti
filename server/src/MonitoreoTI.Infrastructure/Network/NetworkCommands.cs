@@ -73,6 +73,38 @@ public sealed class NetworkCommands(
 
     // ------------------------------------------------------------------ gabinetes
 
+    /// <summary>
+    /// Plano de la sala (decisión 96): guarda de una vez la fila y la posición de los gabinetes que se movieron (arrastrar en
+    /// el plano o en el 3D; un intercambio son dos). Todos deben ser de esa sala, y dos gabinetes no comparten lugar.
+    /// </summary>
+    public async Task<CommandResult> SaveRoomLayoutAsync(int roomId, RoomLayoutInput input, CancellationToken ct)
+    {
+        if (!await (await queries.VisibleRoomsAsync(ct)).AnyAsync(r => r.Id == roomId, ct))
+            return CommandResult.NotFound();
+        var racks = await db.Racks.Where(r => r.RoomId == roomId).ToListAsync(ct);
+        var changes = input.Gabinetes.ToDictionary(g => g.GabineteId);
+        if (changes.Keys.Any(id => racks.All(r => r.Id != id)))
+            return CommandResult.Invalid("Algún gabinete no es de esta sala.");
+
+        var before = racks.Where(r => changes.ContainsKey(r.Id)).Select(r => new { r.Id, r.Name, fila = r.Row, posicion = r.Position }).ToList();
+        foreach (var rack in racks)
+        {
+            if (!changes.TryGetValue(rack.Id, out var change))
+                continue;
+            rack.Row = Clean(change.Fila)?.ToUpperInvariant();
+            rack.Position = rack.Row is null ? null : change.Posicion;
+        }
+        var clash = racks.Where(r => r.Row is not null && r.Position is not null)
+            .GroupBy(r => (r.Row, r.Position)).FirstOrDefault(g => g.Count() > 1);
+        if (clash is not null)
+            return CommandResult.Conflict($"{string.Join(" y ", clash.Select(r => r.Name))} quedarían en el mismo lugar (fila {clash.Key.Row}, posición {clash.Key.Position}).");
+        await db.SaveChangesAsync(ct);
+
+        var after = racks.Where(r => changes.ContainsKey(r.Id)).Select(r => new { r.Id, r.Name, fila = r.Row, posicion = r.Position }).ToList();
+        await audit.RecordAsync("sala.plano", "salas", roomId.ToString(), new { gabinetes = before }, new { gabinetes = after }, ct);
+        return CommandResult.Ok(roomId);
+    }
+
     public async Task<CommandResult> SaveRackAsync(int? id, RackInput input, CancellationToken ct)
     {
         var room = await (await queries.VisibleRoomsAsync(ct)).FirstOrDefaultAsync(r => r.Id == input.SalaId, ct);

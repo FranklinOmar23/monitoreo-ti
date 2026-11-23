@@ -3411,6 +3411,117 @@ button.profile:hover {
   background: color-mix(in srgb, var(--color-primary) 90%, transparent);
 }
 
+/* Plano editable y 3D con gabinetes que se mueven (decisión 96). */
+.floor-plan-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.floor-plan-spacer {
+  flex: 1;
+}
+
+.floor-row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.floor-row-facing {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.floor-cell {
+  display: grid;
+  min-height: 96px;
+  border-radius: var(--radius);
+}
+
+.floor-cell-free {
+  border: 1px dashed var(--color-border);
+}
+
+.floor-cell[data-over],
+.floor-row-unplaced[data-over] {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.floor-rack[data-editing] {
+  cursor: grab;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+}
+
+.floor-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 48px;
+  align-items: center;
+}
+
+.floor-tray .floor-rack {
+  width: 140px;
+}
+
+.dc-3d-tools {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.dc-3d-tools > * {
+  pointer-events: auto;
+}
+
+.dc-3d-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  font-size: 12px;
+}
+
+.dc-3d-row-label {
+  padding: 2px 6px;
+  border: 1px solid #5b6770;
+  border-radius: var(--radius-sm);
+  background: rgb(243 240 232 / 92%);
+  color: #20313a;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.loose-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+}
+
+.loose-device .component-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .topology {
   overflow: auto;
   padding: 12px;
@@ -5351,184 +5462,7 @@ button.file-row {
   object-fit: contain;
 }
 
-/* ---------- Reportes (W-35) ---------- */
-
-.report-group {
-  margin: 8px 0 10px;
-}
-
-.report-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
-  margin-bottom: 22px;
-}
-
-.report-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  color: var(--color-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.report-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
-}
-
-.report-card:disabled {
-  cursor: default;
-  opacity: 0.75;
-}
-
-.report-card > .muted {
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.report-card-icon {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  margin-bottom: 4px;
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
-  color: var(--color-primary);
-}
-
-.report-card[data-locked] .report-card-icon {
-  background: var(--color-surface-muted);
-  color: var(--color-muted);
-}
-
-.report-lock {
-  margin-top: 4px;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-muted);
-  color: var(--color-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.report-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
-.report-dates {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.report-dates input,
-.report-search input {
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-}
-
-.report-search {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-muted);
-}
-
-.report-search input {
-  width: 240px;
-}
-
-.report-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  transition: opacity 0.2s;
-}
-
-.report-body[data-refreshing] {
-  opacity: 0.6;
-}
-
-.report-kpis {
-  margin: 0;
-}
-
-.report-two {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-@media (max-width: 1100px) {
-  .report-two {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.report-table {
-  overflow-x: auto;
-}
-
-.report-sub {
-  display: block;
-  font-size: 12px;
-}
-
-.report-chip {
-  display: inline-block;
-  margin: 1px 4px 1px 0;
-  padding: 1px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.report-usage {
-  display: inline-block;
-  width: 80px;
-  margin-right: 8px;
-  vertical-align: middle;
-}
-
-.report-issues {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.report-issues li {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.report-issues .status-dot {
-  margin-top: 6px;
-  background: var(--dot);
-}
-
-.report-maintenance {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
+/* ---------- Reportes (W-35): el resto vive en reports.css (decisión 92) ---------- */
 
 .bar-list {
   display: flex;

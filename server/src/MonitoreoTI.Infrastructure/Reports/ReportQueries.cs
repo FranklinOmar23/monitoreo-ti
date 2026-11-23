@@ -101,19 +101,33 @@ public sealed class ReportQueries(MonitoreoDbContext db, ICurrentUser user, Time
             .Where(m => m.CreatedAt < end)
             .Select(m => new { m.Id, m.Name, Branch = m.Branch!.Name, m.CreatedAt, m.LastReportAt })
             .ToListAsync(ct);
-        var hours = await db.HourlyMetrics.AsNoTracking()
-            .Where(h => h.Hour >= start && h.Hour < end && machines.Select(m => m.Id).Contains(h.MachineId))
-            .GroupBy(h => h.MachineId)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToDictionaryAsync(g => g.Key, g => g.Count, ct);
+        // Horas con métricas por equipo y día: dan el total del periodo y las celdas del mapa de calor.
+        var perDay = (await db.HourlyMetrics.AsNoTracking()
+                .Where(h => h.Hour >= start && h.Hour < end && machines.Select(m => m.Id).Contains(h.MachineId))
+                .GroupBy(h => new { h.MachineId, h.Hour.Date })
+                .Select(g => new { g.Key.MachineId, g.Key.Date, Count = g.Count() })
+                .ToListAsync(ct))
+            .ToLookup(d => d.MachineId);
 
+        var buckets = ReportRules.Buckets(filter);
+        var size = ReportRules.BucketDays(filter);
         var rows = list.Select(m =>
             {
                 // El reloj de SQL Server puede ir unos segundos por delante: un equipo recién dado de alta cuenta una hora.
                 var from = m.CreatedAt > start ? m.CreatedAt : start;
                 var inPeriod = Math.Max(1, (int)Math.Ceiling((until - from).TotalHours));
-                var online = Math.Min(inPeriod, hours.GetValueOrDefault(m.Id));
-                return new AvailabilityRow(m.Id, m.Name, m.Branch, online, inPeriod, Math.Round(100m * online / inPeriod, 1), m.LastReportAt);
+                var measured = perDay[m.Id].ToList();
+                var online = Math.Min(inPeriod, measured.Sum(d => d.Count));
+                var cells = buckets.Select(b =>
+                    {
+                        var bucketStart = b.ToDateTime(TimeOnly.MinValue);
+                        var bucketEnd = bucketStart.AddDays(size) < end ? bucketStart.AddDays(size) : end;
+                        var hoursOnline = measured.Where(d => d.Date >= bucketStart && d.Date < bucketEnd).Sum(d => d.Count);
+                        return ReportRules.Cell(bucketStart, bucketEnd, m.CreatedAt, Now, hoursOnline);
+                    })
+                    .ToList();
+                return new AvailabilityRow(
+                    m.Id, m.Name, m.Branch, online, inPeriod, Math.Round(100m * online / inPeriod, 1), m.LastReportAt, cells);
             })
             .OrderBy(r => r.Percent).ThenBy(r => r.Name)
             .ToList();
@@ -126,7 +140,9 @@ public sealed class ReportQueries(MonitoreoDbContext db, ICurrentUser user, Time
                 .Select(d => new DailyHealth(d.Date, d.Healthy, d.Warning, d.Critical, d.Disconnected))
                 .ToListAsync(ct);
 
-        return new AvailabilityReport(rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.Percent), 1), days, rows);
+        return new AvailabilityReport(
+            rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.Percent), 1), days, rows,
+            buckets, size, ReportRules.ColumnAverages(rows.Select(r => r.Cells).ToList(), buckets.Count));
     }
 
     // ------------------------------------------------------------------ alertas
@@ -374,5 +390,79 @@ public sealed class ReportQueries(MonitoreoDbContext db, ICurrentUser user, Time
             rows.GroupBy(r => r.UserName).Select(g => new RemoteTechnician(g.Key, g.Count(), g.Sum(r => r.Minutes)))
                 .OrderByDescending(t => t.Sessions).ToList(),
             rows.Take(500).ToList());
+    }
+
+    // ------------------------------------------------------------------ resumen (decisión 92)
+
+    /// <summary>
+    /// Los indicadores de todos los reportes frente al periodo anterior de igual duración, lo que requiere atención y el
+    /// reparto por sucursal. Reutiliza las consultas de cada reporte para que los números coincidan con los que se ven al
+    /// abrirlo. Los indicadores avanzados solo salen si el plan incluye reportes_avanzados.
+    /// </summary>
+    public async Task<ReportSummary> SummaryAsync(ReportFilter filter, CancellationToken ct)
+    {
+        var previous = ReportRules.Previous(filter);
+        var advanced = await AdvancedAsync(ct);
+
+        // El DbContext no admite consultas en paralelo: van una tras otra.
+        var availability = await AvailabilityAsync(filter, ct);
+        var availabilityBefore = await AvailabilityAsync(previous, ct);
+        var alerts = await AlertsAsync(filter, ct);
+        var alertsBefore = await AlertsAsync(previous, ct);
+        var disks = await DiskSecurityAsync(filter, ct);
+
+        static decimal? Dec(double? value) => value is double v ? (decimal)v : null;
+        var fleetSeries = availability.BucketDays == 1 ? availability.FleetTrend : [];
+        var kpis = new List<SummaryKpi>
+        {
+            new("disponibilidad", availability.Machines.Count == 0 ? null : availability.AveragePercent,
+                availabilityBefore.Machines.Count == 0 ? null : availabilityBefore.AveragePercent, fleetSeries),
+            new("equipos", availability.Machines.Count, availabilityBefore.Machines.Count, []),
+            new("alertas", alerts.Total, alertsBefore.Total,
+                ReportRules.Daily(filter, alerts.PerDay, d => d.Date, d => d.Critical + d.Warning)),
+            new("alertas_criticas", alerts.Critical, alertsBefore.Critical,
+                ReportRules.Daily(filter, alerts.PerDay, d => d.Date, d => d.Critical)),
+            new("resolucion_alertas", Dec(alerts.AverageResolutionHours), Dec(alertsBefore.AverageResolutionHours), []),
+            new("discos_riesgo",
+                disks.LowDisks.Select(d => d.MachineId).Union(disks.DiskHealth.Select(d => d.MachineId)).Count(), null, []),
+            new("seguridad", disks.Security.Select(s => s.MachineId).Distinct().Count(), null, []),
+        };
+
+        PerformanceReport? performance = null;
+        TicketReport? tickets = null;
+        if (advanced)
+        {
+            performance = await PerformanceAsync(filter, ct);
+            var performanceBefore = await PerformanceAsync(previous, ct);
+            tickets = await TicketsAsync(filter, ct);
+            var ticketsBefore = await TicketsAsync(previous, ct);
+            var remote = await RemoteAsync(filter, ct);
+            var remoteBefore = await RemoteAsync(previous, ct);
+
+            static decimal? Average(IEnumerable<decimal?> values)
+            {
+                var list = values.OfType<decimal>().ToList();
+                return list.Count == 0 ? null : Math.Round(list.Average(), 1);
+            }
+
+            kpis.AddRange(
+            [
+                new("cpu", Average(performance.Trend.Select(t => t.Cpu)), Average(performanceBefore.Trend.Select(t => t.Cpu)),
+                    ReportRules.Daily(filter, performance.Trend, t => t.Date, t => t.Cpu, missing: null)),
+                new("ram", Average(performance.Trend.Select(t => t.Ram)), Average(performanceBefore.Trend.Select(t => t.Ram)),
+                    ReportRules.Daily(filter, performance.Trend, t => t.Date, t => t.Ram, missing: null)),
+                new("tickets_creados", tickets.Created, ticketsBefore.Created, []),
+                new("tickets_abiertos", tickets.Open, null, []),
+                new("resolucion_tickets", Dec(tickets.AverageResolutionHours), Dec(ticketsBefore.AverageResolutionHours), []),
+                new("sesiones_remotas", remote.Sessions, remoteBefore.Sessions,
+                    ReportRules.Daily(filter, remote.Rows.GroupBy(r => DateOnly.FromDateTime(r.StartedAt)), g => g.Key, g => g.Count())),
+                new("horas_remotas", Math.Round(remote.Minutes / 60m, 1), Math.Round(remoteBefore.Minutes / 60m, 1), []),
+            ]);
+        }
+
+        return new ReportSummary(
+            previous.From, previous.To, advanced, kpis,
+            ReportRules.Attention(new AttentionInput(disks, availability, alerts, performance, tickets)),
+            ReportRules.Branches(availability, alerts));
     }
 }

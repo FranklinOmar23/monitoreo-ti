@@ -21,6 +21,11 @@ public sealed record RackDetail(RackItem Rack, IReadOnlyList<RackDevice> Devices
 
 public sealed record RackInput(string Nombre, int SalaId, int AlturaU, string? Fila, int? Posicion, bool Activo = true);
 
+/// <summary>El plano de una sala (decisión 96): la fila y la posición de cada gabinete que se movió. Sin fila = sin ubicar.</summary>
+public sealed record RoomLayoutInput(IReadOnlyList<RackPlacementInput> Gabinetes);
+
+public sealed record RackPlacementInput(int GabineteId, string? Fila, int? Posicion);
+
 // ------------------------------------------------------------------ catálogo de modelos (W-56, W-57)
 
 public sealed record DeviceModelItem(
@@ -228,6 +233,22 @@ public sealed class RoomInputValidator : AbstractValidator<RoomInput>
         RuleFor(x => x.Nombre).NotEmpty().WithMessage("Escriba el nombre de la sala.").MaximumLength(100);
         RuleFor(x => x.Ubicacion).MaximumLength(200);
         RuleFor(x => x.SucursalId).GreaterThan(0).WithMessage("Elija la sucursal.");
+    }
+}
+
+public sealed class RoomLayoutInputValidator : AbstractValidator<RoomLayoutInput>
+{
+    public RoomLayoutInputValidator()
+    {
+        RuleFor(x => x.Gabinetes).NotNull().Must(g => g.Count is > 0 and <= 500).WithMessage("Indique de 1 a 500 gabinetes.");
+        RuleForEach(x => x.Gabinetes).ChildRules(g =>
+        {
+            g.RuleFor(x => x.GabineteId).GreaterThan(0);
+            g.RuleFor(x => x.Fila).MaximumLength(10);
+            g.RuleFor(x => x.Posicion).InclusiveBetween(1, 1000).When(x => x.Posicion is not null);
+        });
+        RuleFor(x => x.Gabinetes).Must(g => g.Select(x => x.GabineteId).Distinct().Count() == g.Count)
+            .WithMessage("Hay un gabinete repetido.").When(x => x.Gabinetes is not null);
     }
 }
 

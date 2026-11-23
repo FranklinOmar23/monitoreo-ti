@@ -414,6 +414,13 @@ export interface RackInput {
   activo?: boolean;
 }
 
+/** Plano de la sala (decisión 96): fila y posición de cada gabinete que se movió; sin fila = sin ubicar. */
+export interface RackPlacementInput {
+  gabineteId: number;
+  fila: string | null;
+  posicion: number | null;
+}
+
 export interface DeviceModelInput {
   marca: string;
   modelo: string;
@@ -710,6 +717,8 @@ export interface NetworkApi {
   saveRoom(id: number | null, input: RoomInput): Promise<Id>;
   deleteRoom(id: number): Promise<Id>;
   saveRack(id: number | null, input: RackInput): Promise<Id>;
+  /** Guarda de una vez dónde quedó cada gabinete movido en el plano o en el 3D. */
+  saveRoomLayout(roomId: number, racks: RackPlacementInput[]): Promise<Id>;
   deleteRack(id: number): Promise<Id>;
   saveModel(id: number | null, input: DeviceModelInput): Promise<Id>;
   saveDevice(id: number | null, input: DeviceInput): Promise<Id>;
@@ -777,6 +786,7 @@ export function createNetworkApi(
     saveRoom: (id, input) => save('/red/salas', id, input),
     deleteRoom: (id) => send('DELETE', `/red/salas/${id}`),
     saveRack: (id, input) => save('/red/gabinetes', id, input),
+    saveRoomLayout: (roomId, racks) => send('PUT', `/red/salas/${roomId}/plano`, { gabinetes: racks }),
     deleteRack: (id) => send('DELETE', `/red/gabinetes/${id}`),
     saveModel: (id, input) => save('/red/modelos', id, input),
     saveDevice: (id, input) => save('/red/dispositivos', id, input),

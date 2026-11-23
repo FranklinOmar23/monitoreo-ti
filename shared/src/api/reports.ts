@@ -50,6 +50,8 @@ export interface AvailabilityRow {
   hoursInPeriod: number;
   percent: number;
   lastReportAt: string | null;
+  /** Porcentaje en línea de cada tramo de `buckets`; null si el equipo aún no existía o el tramo no ha empezado. */
+  cells: (number | null)[];
 }
 
 export interface AvailabilityReport {
@@ -57,6 +59,12 @@ export interface AvailabilityReport {
   /** Foto diaria de toda la empresa: vacía si se ven solo algunas sucursales o un departamento. */
   days: { date: string; healthy: number; warning: number; critical: number; disconnected: number }[];
   machines: AvailabilityRow[];
+  /** Inicio (yyyy-mm-dd) de cada tramo del mapa de calor (decisión 92). */
+  buckets: string[];
+  /** 1 (por día) o 7 (por semana, si el periodo pasa de 92 días). */
+  bucketDays: number;
+  /** Promedio de la flota en cada tramo. */
+  fleetTrend: (number | null)[];
 }
 
 export interface AlertReport {
@@ -163,8 +171,66 @@ export interface RemoteReport {
   }[];
 }
 
+// ------------------------------------------------------------------ resumen (decisión 92)
+
+export type SummaryKpiKey =
+  | 'disponibilidad'
+  | 'equipos'
+  | 'alertas'
+  | 'alertas_criticas'
+  | 'resolucion_alertas'
+  | 'discos_riesgo'
+  | 'seguridad'
+  | 'cpu'
+  | 'ram'
+  | 'tickets_creados'
+  | 'tickets_abiertos'
+  | 'resolucion_tickets'
+  | 'sesiones_remotas'
+  | 'horas_remotas';
+
+export interface SummaryKpi {
+  key: SummaryKpiKey;
+  value: number | null;
+  /** El periodo anterior de igual duración; null si es la foto de hoy. */
+  previous: number | null;
+  /** Un valor por día del periodo (vacía si no aplica). */
+  series: (number | null)[];
+}
+
+export type AttentionCode =
+  | 'disco_falla'
+  | 'sin_proteccion'
+  | 'disco_lleno'
+  | 'antivirus_desactualizado'
+  | 'baja_disponibilidad'
+  | 'alertas_abiertas'
+  | 'ampliar_ram'
+  | 'revisar_cpu'
+  | 'mantenimientos_vencidos';
+
+export interface AttentionItem {
+  code: AttentionCode;
+  level: 'critico' | 'advertencia';
+  /** El reporte que lo explica. */
+  report: string;
+  count: number;
+  /** Hasta 5 equipos de ejemplo. */
+  machines: { id: number; name: string }[];
+}
+
+export interface ReportSummary {
+  previousFrom: string;
+  previousTo: string;
+  advanced: boolean;
+  kpis: SummaryKpi[];
+  attention: AttentionItem[];
+  branches: { name: string; machines: number; availability: number | null; alerts: number }[];
+}
+
 export interface ReportsApi {
   info(): Promise<{ advanced: boolean }>;
+  summary(filter?: ReportFilter): Promise<ReportSummary>;
   inventory(filter?: ReportFilter): Promise<InventoryReport>;
   availability(filter?: ReportFilter): Promise<AvailabilityReport>;
   alerts(filter?: ReportFilter): Promise<AlertReport>;
@@ -180,6 +246,7 @@ export function createReportsApi(
 ): ReportsApi {
   return {
     info: () => get('/reportes'),
+    summary: (filter = {}) => get('/reportes/resumen', { ...filter }),
     inventory: (filter = {}) => get('/reportes/inventario', { ...filter }),
     availability: (filter = {}) => get('/reportes/disponibilidad', { ...filter }),
     alerts: (filter = {}) => get('/reportes/alertas', { ...filter }),

@@ -4,6 +4,7 @@ import { App } from './App';
 import './styles.css';
 import './tecnico.css';
 import './animations.css';
+import './reports.css';
 import { startDeepLinks } from './data/deepLinks';
 import { applyBrandColor, cachedAppearance } from './theme/brand';
 

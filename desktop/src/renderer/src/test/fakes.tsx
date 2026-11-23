@@ -241,6 +241,7 @@ export function fakeNetworkApi(overrides: Partial<NetworkApi> = {}): NetworkApi 
     saveRoom: missing,
     deleteRoom: missing,
     saveRack: missing,
+    saveRoomLayout: missing,
     deleteRack: missing,
     saveModel: missing,
     saveDevice: missing,
@@ -380,6 +381,7 @@ export function fakeReportsApi(overrides: Partial<ReportsApi> = {}): ReportsApi 
   const missing = () => Promise.reject(new Error('no esperado'));
   return {
     info: () => Promise.resolve({ advanced: true }),
+    summary: missing,
     inventory: missing,
     availability: missing,
     alerts: missing,

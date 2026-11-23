@@ -1631,8 +1631,35 @@ body {
 }
 
 /* Cambio de MAC: esquina roja. */
+/* Cambió de MAC en los últimos 7 días: un «!» rojo en la esquina (y en la leyenda), no una línea que se confunde con el borde. */
 .ip-cell[data-warn] {
-  box-shadow: inset -6px 6px 0 -3px var(--st-critico);
+  position: relative;
+  border-color: var(--st-critico);
+}
+
+.ip-cell-flag,
+.ip-legend-mac b {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--st-critico);
+  color: #fff;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ip-cell-flag {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+}
+
+.ip-legend-mac {
+  cursor: help;
 }
 
 .ip-detail {

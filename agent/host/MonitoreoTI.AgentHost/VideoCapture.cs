@@ -43,6 +43,19 @@ public sealed unsafe class VideoScreenCapture : IScreenSource
     private readonly long _start = Environment.TickCount64;
     private int _quality = 60;
     private long _lastRateChange;
+    private long _lastKeyRebuild;
+    /// <summary>Cuadros seguidos que el codificador recibió sin devolver nada.</summary>
+    private int _emptyEncodes;
+    private int _rebuilds;
+    private const int EmptyEncodesLimit = 15;
+
+    /// <summary>Veces que se volvió a crear el codificador porque dejó de entregar (para el diagnóstico).</summary>
+    public int Rebuilt { get; private set; }
+
+    /// <summary>Estado para el diagnóstico de la imagen quieta.</summary>
+    public string State => $"h264 vacíos={_emptyEncodes} recreado={Rebuilt} clavePendiente={_forceKey}";
+
+    private static bool IsKey(byte[]? encoded) => encoded is { Length: > 0 } && H264Encoder.HasKeyFrame(encoded);
 
     public VideoScreenCapture(MonitorArea area)
     {
@@ -89,6 +102,11 @@ public sealed unsafe class VideoScreenCapture : IScreenSource
         var cursor = ScreenCapture.CursorState();
         var cursorChanged = cursor != _cursor;
         _cursor = cursor;
+        // Una duplicación recién creada no entrega imagen hasta que algo cambie en la pantalla (el cursor no cuenta): con
+        // una ventana quieta no se mandaba nada y la imagen del visor quedaba congelada (PC-CAJA15, decisión 95). Mientras
+        // tanto, la imagen se toma con GDI.
+        if (!_hasImage)
+            GrabWithGdi();
         if (!_hasImage || (!desktopChanged && !cursorChanged && !_forceKey))
             return null;
 
@@ -99,11 +117,40 @@ public sealed unsafe class VideoScreenCapture : IScreenSource
         Nv12.FromBgra(new ReadOnlySpan<byte>((void*)_bits, _clean.Length), _area.Width * 4, _width, _height, _nv12);
 
         var key = _forceKey;
-        _forceKey = false;
         var timestamp = (Environment.TickCount64 - _start) * 10_000;
         var encoded = _encoder.Encode(_nv12, timestamp, key);
+        if (key && !IsKey(encoded) && Environment.TickCount64 - _lastKeyRebuild > 1000)
+        {
+            // Hay codificadores que ignoran el pedido de cuadro clave (ForceKeyFrame): uno nuevo empieza siempre con uno.
+            // Sin esto el visor, que lo espera después de perder un cuadro, se queda con la imagen quieta (0 fps).
+            _lastKeyRebuild = Environment.TickCount64;
+            var bitrate = _encoder.Bitrate;
+            _encoder.Dispose();
+            _encoder = new H264Encoder(_width, _height, FramesPerSecond, bitrate);
+            encoded = _encoder.Encode(_nv12, timestamp, true);
+        }
+        // El pedido sigue en pie hasta que sale de verdad un cuadro clave.
+        _forceKey = key && !IsKey(encoded);
         if (encoded is null || encoded.Length == 0)
+        {
+            // Algunos codificadores dejan de entregar video sin dar error: reciben cuadros y no devuelven nada (en
+            // PC-CAJA15 la imagen quedaba quieta con el canal vivo). Tras EmptyEncodesLimit cuadros vacíos seguidos se crea
+            // otro; si tampoco entrega, se lanza y el hilo de la pantalla pasa a la V1 (JPEG) tras tres fallas.
+            if (++_emptyEncodes >= EmptyEncodesLimit)
+            {
+                _emptyEncodes = 0;
+                if (++_rebuilds > 2)
+                    throw new InvalidOperationException("El codificador H.264 dejó de entregar cuadros.");
+                var bitrate = _encoder.Bitrate;
+                _encoder.Dispose();
+                _encoder = new H264Encoder(_width, _height, FramesPerSecond, bitrate);
+                _forceKey = true;
+                Rebuilt++;
+            }
             return null;
+        }
+        _emptyEncodes = 0;
+        _rebuilds = 0;
 
         var message = new byte[6 + encoded.Length];
         message[0] = VideoFrame;
@@ -147,6 +194,15 @@ public sealed unsafe class VideoScreenCapture : IScreenSource
         }
         _quality = quality;
         _lastRateChange = now;
+    }
+
+    /// <summary>La imagen actual con GDI (BitBlt), para cuando la duplicación todavía no dio ninguna.</summary>
+    private void GrabWithGdi()
+    {
+        if (!ScreenCapture.Native.BitBlt(_memoryDc, 0, 0, _area.Width, _area.Height, _screenDc, _area.X, _area.Y, ScreenCapture.Native.SrcCopy))
+            return;
+        Marshal.Copy(_bits, _clean, 0, _clean.Length);
+        _hasImage = true;
     }
 
     /// <summary>Copia el nuevo cuadro del escritorio a la imagen limpia. false si no cambió.</summary>

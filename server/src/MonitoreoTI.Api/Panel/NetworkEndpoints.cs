@@ -69,6 +69,9 @@ public static class NetworkEndpoints
         edit.MapPut("/salas/{id:int}", async (int id, RoomInput input, IValidator<RoomInput> v, NetworkCommands c, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? ToResult(await c.SaveRoomAsync(id, input, ct)));
         edit.MapDelete("/salas/{id:int}", async (int id, NetworkCommands c, CancellationToken ct) => ToResult(await c.DeleteRoomAsync(id, ct)));
+        // Plano de la sala (decisión 96): mover gabinetes arrastrando en el plano o en el 3D.
+        edit.MapPut("/salas/{id:int}/plano", async (int id, RoomLayoutInput input, IValidator<RoomLayoutInput> v, NetworkCommands c, CancellationToken ct) =>
+            await ValidateAsync(input, v, ct) ?? ToResult(await c.SaveRoomLayoutAsync(id, input, ct)));
 
         edit.MapPost("/gabinetes", async (RackInput input, IValidator<RackInput> v, NetworkCommands c, CancellationToken ct) =>
             await ValidateAsync(input, v, ct) ?? ToResult(await c.SaveRackAsync(null, input, ct), created: true));

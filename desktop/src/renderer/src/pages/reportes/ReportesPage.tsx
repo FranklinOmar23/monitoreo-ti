@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import type { ReportFilter } from '@monitoreoti/shared';
+import type { ReportFilter, ReportSummary } from '@monitoreoti/shared';
 import { ErrorState, Loading } from '@components/AsyncState';
 import { FilterSelect } from '@components/FilterSelect';
 import { Icon } from '@components/Icon';
-import { PageHeader } from '@components/PageHeader';
 import { usePanelApi } from '../../data/PanelData';
 import { useDebounced } from '../../data/useDebounced';
-import { csvFileName, downloadCsv } from './csv';
-import { REPORTS, type ReportDef, type ReportId } from './reportDefs';
+import { csvFileName, downloadCsv, type CsvTable } from './csv';
+import { REPORTS, type ReportId } from './reportDefs';
+import { findKpi, KPI_META } from './summaryLabels';
+import { SummaryView } from './SummaryView';
 
 interface ReportesPageProps {
   onOpenEquipo: (id: number) => void;
@@ -18,68 +19,7 @@ interface ReportesPageProps {
   logo?: string | null;
 }
 
-/** W-35 Reportes: un catálogo de tarjetas; cada reporte con sus filtros, CSV e impresión. */
-export function ReportesPage({ onOpenEquipo, initialReport, companyName, logo }: ReportesPageProps) {
-  const api = usePanelApi();
-  const info = useQuery({ queryKey: ['reportes', 'info'], queryFn: () => api.reportes.info() });
-  const [selected, setSelected] = useState<ReportId | null>(initialReport ?? null);
-  const report = REPORTS.find((r) => r.id === selected);
-
-  if (report && (!report.advanced || info.data?.advanced))
-    return (
-      <ReportView
-        report={report}
-        onBack={() => setSelected(null)}
-        onOpenEquipo={onOpenEquipo}
-        companyName={companyName}
-        logo={logo}
-      />
-    );
-
-  const advanced = info.data?.advanced ?? false;
-  return (
-    <>
-      <PageHeader title="Reportes" subtitle="Elija un reporte. Todos se pueden exportar a CSV o imprimir como PDF." />
-      {info.isError && <ErrorState error={info.error} onRetry={() => void info.refetch()} />}
-      <section aria-label="Reportes básicos">
-        <h2 className="eyebrow report-group">Básicos</h2>
-        <div className="report-grid">
-          {REPORTS.filter((r) => !r.advanced).map((r) => (
-            <ReportCard key={r.id} report={r} onOpen={() => setSelected(r.id)} />
-          ))}
-        </div>
-      </section>
-      <section aria-label="Reportes avanzados">
-        <h2 className="eyebrow report-group">Avanzados</h2>
-        <div className="report-grid">
-          {REPORTS.filter((r) => r.advanced).map((r) => (
-            <ReportCard key={r.id} report={r} locked={!info.isPending && !advanced} onOpen={() => setSelected(r.id)} />
-          ))}
-        </div>
-      </section>
-    </>
-  );
-}
-
-function ReportCard({ report, locked, onOpen }: { report: ReportDef<unknown>; locked?: boolean; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      className="report-card card"
-      onClick={onOpen}
-      disabled={locked}
-      data-locked={locked || undefined}
-    >
-      <span className="report-card-icon" aria-hidden="true">
-        <Icon name={locked ? 'lock' : report.icon} size={20} />
-      </span>
-      <strong>{report.title}</strong>
-      <span className="muted">{report.description}</span>
-      {locked && <span className="report-lock">Disponible en el plan Empresarial</span>}
-    </button>
-  );
-}
-
+type Selected = 'resumen' | ReportId;
 type Period = '7' | '30' | '90' | 'custom';
 
 const iso = (date: Date) =>
@@ -95,20 +35,26 @@ export function periodRange(
   return { desde: iso(from), hasta: iso(today) };
 }
 
-function ReportView({
-  report,
-  onBack,
-  onOpenEquipo,
-  companyName,
-  logo,
-}: {
-  report: ReportDef<unknown>;
-  onBack: () => void;
-  onOpenEquipo: (id: number) => void;
-  companyName?: string;
-  logo?: string | null;
-}) {
+/** CSV del resumen: cada indicador con su valor y el del periodo anterior. */
+function summaryCsv(data: ReportSummary): CsvTable {
+  return {
+    columns: ['Indicador', 'Valor', 'Periodo anterior', 'Unidad'],
+    rows: data.kpis.map((k) => [KPI_META[k.key].label, k.value, k.previous, KPI_META[k.key].unit ?? '']),
+  };
+}
+
+/**
+ * W-35 Reportes (decisión 92): menú lateral con el Resumen como portada y los reportes básicos y avanzados. El periodo,
+ * la sucursal y el departamento se quedan al cambiar de reporte; cada uno se exporta a CSV o se imprime como PDF.
+ */
+export function ReportesPage({ onOpenEquipo, initialReport, companyName, logo }: ReportesPageProps) {
   const api = usePanelApi();
+  const info = useQuery({ queryKey: ['reportes', 'info'], queryFn: () => api.reportes.info() });
+  const advanced = info.data?.advanced ?? false;
+  const [selected, setSelected] = useState<Selected>(initialReport ?? 'resumen');
+  const report = REPORTS.find((r) => r.id === selected);
+  const locked = Boolean(report?.advanced && !info.isPending && !advanced);
+
   const [period, setPeriod] = useState<Period>('30');
   const [custom, setCustom] = useState(() => periodRange('30'));
   const [branch, setBranch] = useState('');
@@ -120,51 +66,101 @@ function ReportView({
   const departments = useQuery({ queryKey: ['departamentos'], queryFn: () => api.departments() });
 
   const range = period === 'custom' ? custom : periodRange(period);
-  const validRange = range.desde && range.hasta && range.desde <= range.hasta;
-  const filter: ReportFilter & { buscar?: string } = {
-    ...(report.period ? range : {}),
+  const validRange = Boolean(range.desde && range.hasta && range.desde <= range.hasta);
+  const usesPeriod = selected === 'resumen' || Boolean(report?.period);
+  const common: ReportFilter = {
     sucursal: branch ? Number(branch) : undefined,
     departamento: department ? Number(department) : undefined,
-    buscar: report.search && term ? term : undefined,
   };
-  const data = useQuery({
-    queryKey: ['reporte', report.id, filter],
-    queryFn: () => report.load(api, filter),
-    enabled: !report.period || Boolean(validRange),
+  const periodFilter: ReportFilter = { ...range, ...common };
+
+  // El resumen es la portada y, en cada reporte, da la variación frente al periodo anterior.
+  const summary = useQuery({
+    queryKey: ['reporte', 'resumen', periodFilter],
+    queryFn: () => api.reportes.summary(periodFilter),
+    enabled: validRange,
     placeholderData: keepPreviousData,
   });
 
-  const periodText = report.period ? `Del ${dayText(range.desde)} al ${dayText(range.hasta)}` : 'Estado actual';
+  const filter: ReportFilter & { buscar?: string } = {
+    ...(report?.period ? range : {}),
+    ...common,
+    buscar: report?.search && term ? term : undefined,
+  };
+  const data = useQuery({
+    queryKey: ['reporte', report?.id, filter],
+    queryFn: () => report!.load(api, filter),
+    enabled: Boolean(report) && !locked && (!report?.period || validRange),
+    // Mientras cambian los filtros se ve el dato anterior, pero solo del mismo reporte: los datos de otro reporte
+    // tienen otra forma y romperían su render.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === report?.id ? previous : undefined),
+  });
+
+  const open = (id: string) => {
+    const target = REPORTS.find((r) => r.id === id);
+    if (target && (!target.advanced || advanced)) setSelected(target.id);
+  };
+
+  const title = report?.title ?? 'Resumen';
+  const description =
+    report?.description ??
+    'Los indicadores de todos los reportes frente al periodo anterior y lo que requiere atención.';
+  const current = selected === 'resumen' ? summary : data;
+  const csv = (): CsvTable | null =>
+    selected === 'resumen'
+      ? summary.data
+        ? summaryCsv(summary.data)
+        : null
+      : data.data && report
+        ? report.csv(data.data)
+        : null;
+  const periodText = usesPeriod ? `Del ${dayText(range.desde)} al ${dayText(range.hasta)}` : 'Estado actual';
 
   return (
-    <div className="report-view">
-      <div className="no-print">
-        <PageHeader
-          title={report.title}
-          subtitle={report.description}
-          actions={
-            <>
-              <button type="button" className="btn btn-outline" onClick={onBack}>
-                Todos los reportes
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                disabled={!data.data}
-                onClick={() => data.data && downloadCsv(report.csv(data.data), csvFileName(report.id))}
-              >
-                <Icon name="download" size={16} /> Exportar CSV
-              </button>
-              <button type="button" className="btn btn-primary" disabled={!data.data} onClick={() => window.print()}>
-                Imprimir / PDF
-              </button>
-            </>
-          }
+    <div className="reports">
+      <nav className="reports-nav no-print" aria-label="Reportes">
+        <h1 className="reports-nav-title">Reportes</h1>
+        <NavItem
+          icon="dashboard"
+          label="Resumen"
+          active={selected === 'resumen'}
+          onClick={() => setSelected('resumen')}
         />
-        <div className="report-filters" role="group" aria-label="Filtros del reporte">
-          {report.period && (
+        {(['Básicos', 'Avanzados'] as const).map((group) => (
+          <div key={group} className="reports-nav-group" role="group" aria-label={`Reportes ${group.toLowerCase()}`}>
+            <h2 className="eyebrow">{group}</h2>
+            {REPORTS.filter((r) => r.advanced === (group === 'Avanzados')).map((r) => {
+              const isLocked = r.advanced && !info.isPending && !advanced;
+              const kpi = findKpi(
+                summary.data?.kpis,
+                r.id === 'discos-seguridad' ? 'discos_riesgo' : r.id === 'alertas' ? 'alertas_criticas' : 'equipos',
+              );
+              const badge =
+                !isLocked && (r.id === 'alertas' || r.id === 'discos-seguridad') && kpi?.value ? kpi.value : null;
+              return (
+                <NavItem
+                  key={r.id}
+                  icon={isLocked ? 'lock' : r.icon}
+                  label={r.short}
+                  active={selected === r.id}
+                  locked={isLocked}
+                  badge={badge}
+                  onClick={() => setSelected(r.id)}
+                />
+              );
+            })}
+          </div>
+        ))}
+        {!info.isPending && !advanced && (
+          <p className="reports-nav-lock">Los avanzados están en el plan Empresarial.</p>
+        )}
+      </nav>
+
+      <div className="reports-main">
+        <div className="reports-toolbar no-print" role="group" aria-label="Filtros del reporte">
+          {usesPeriod ? (
             <>
-              <div className="segmented segmented-lg" role="group" aria-label="Periodo">
+              <div className="segmented" role="group" aria-label="Periodo">
                 {(['7', '30', '90'] as const).map((p) => (
                   <button key={p} type="button" aria-pressed={period === p} onClick={() => setPeriod(p)}>
                     {p} días
@@ -176,30 +172,31 @@ function ReportView({
               </div>
               {period === 'custom' && (
                 <span className="report-dates">
-                  <label>
-                    <span className="visually-hidden">Desde</span>
-                    <input
-                      type="date"
-                      aria-label="Desde"
-                      value={custom.desde}
-                      max={custom.hasta}
-                      onChange={(e) => setCustom({ ...custom, desde: e.target.value })}
-                    />
-                  </label>
+                  <input
+                    type="date"
+                    aria-label="Desde"
+                    value={custom.desde}
+                    max={custom.hasta}
+                    onChange={(e) => setCustom({ ...custom, desde: e.target.value })}
+                  />
                   <span className="muted">a</span>
-                  <label>
-                    <span className="visually-hidden">Hasta</span>
-                    <input
-                      type="date"
-                      aria-label="Hasta"
-                      value={custom.hasta}
-                      min={custom.desde}
-                      onChange={(e) => setCustom({ ...custom, hasta: e.target.value })}
-                    />
-                  </label>
+                  <input
+                    type="date"
+                    aria-label="Hasta"
+                    value={custom.hasta}
+                    min={custom.desde}
+                    onChange={(e) => setCustom({ ...custom, hasta: e.target.value })}
+                  />
                 </span>
               )}
             </>
+          ) : (
+            <span
+              className="report-snapshot mono"
+              title="Este reporte muestra cómo están los equipos ahora; no depende del periodo."
+            >
+              <Icon name="clock" size={14} /> FOTO DE HOY
+            </span>
           )}
           <FilterSelect
             label="Sucursal"
@@ -215,7 +212,7 @@ function ReportView({
             options={(departments.data ?? []).map((d) => ({ value: String(d.id), label: d.nombre }))}
             onChange={setDepartment}
           />
-          {report.search && (
+          {report?.search && (
             <label className="report-search">
               <Icon name="search" size={16} />
               <input
@@ -227,33 +224,102 @@ function ReportView({
               />
             </label>
           )}
+          <span className="reports-toolbar-spacer" />
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={!current.data || locked}
+            onClick={() => {
+              const table = csv();
+              if (table) downloadCsv(table, csvFileName(selected));
+            }}
+          >
+            <Icon name="download" size={16} /> Exportar CSV
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!current.data || locked}
+            onClick={() => window.print()}
+          >
+            Imprimir / PDF
+          </button>
         </div>
+
+        <header className="reports-head no-print">
+          <h1>{title}</h1>
+          <p className="muted">
+            {description} <span className="mono reports-period">{periodText}</span>
+          </p>
+        </header>
+
+        {/* Encabezado de la hoja impresa: el logo y el color de la empresa. */}
+        <header className="print-only report-print-header">
+          {logo && <img src={logo} alt="" />}
+          <div>
+            <strong>{companyName}</strong>
+            <h1>{title}</h1>
+            <span>
+              {periodText} · Generado el {new Date().toLocaleString('es-DO', { dateStyle: 'long', timeStyle: 'short' })}
+            </span>
+          </div>
+        </header>
+
+        {locked ? (
+          <div className="report-locked report-locked-lg">
+            <Icon name="lock" size={20} />
+            <span>
+              <strong>{report?.title}</strong> es parte de los reportes avanzados, disponibles en el plan Empresarial.
+            </span>
+          </div>
+        ) : usesPeriod && !validRange ? (
+          <p className="auth-error">La fecha inicial debe ser anterior a la final.</p>
+        ) : current.isPending ? (
+          <Loading variant="table" columns={6} label="Preparando el reporte…" />
+        ) : current.isError ? (
+          <ErrorState error={current.error} onRetry={() => void current.refetch()} />
+        ) : (
+          <div className="report-body" data-refreshing={current.isFetching || undefined} key={selected}>
+            {selected === 'resumen' ? (
+              <SummaryView data={summary.data!} onOpenReport={open} onOpenEquipo={onOpenEquipo} />
+            ) : (
+              report!.render(data.data, { onOpenEquipo, summary: report!.period ? summary.data : undefined })
+            )}
+          </div>
+        )}
       </div>
-
-      {/* Encabezado de la hoja impresa: el logo y el color de la empresa. */}
-      <header className="print-only report-print-header">
-        {logo && <img src={logo} alt="" />}
-        <div>
-          <strong>{companyName}</strong>
-          <h1>{report.title}</h1>
-          <span>
-            {periodText} · Generado el {new Date().toLocaleString('es-DO', { dateStyle: 'long', timeStyle: 'short' })}
-          </span>
-        </div>
-      </header>
-
-      {report.period && !validRange ? (
-        <p className="auth-error">La fecha inicial debe ser anterior a la final.</p>
-      ) : data.isPending ? (
-        <Loading variant="table" columns={6} label="Preparando el reporte…" />
-      ) : data.isError ? (
-        <ErrorState error={data.error} onRetry={() => void data.refetch()} />
-      ) : (
-        <div className="report-body" data-refreshing={data.isFetching || undefined}>
-          {report.render(data.data, { onOpenEquipo })}
-        </div>
-      )}
     </div>
+  );
+}
+
+function NavItem({
+  icon,
+  label,
+  active,
+  locked,
+  badge,
+  onClick,
+}: {
+  icon: Parameters<typeof Icon>[0]['name'];
+  label: string;
+  active: boolean;
+  locked?: boolean;
+  badge?: number | null;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="reports-nav-item"
+      aria-current={active ? 'page' : undefined}
+      data-locked={locked || undefined}
+      title={locked ? 'Disponible en el plan Empresarial' : undefined}
+      onClick={onClick}
+    >
+      <Icon name={icon} size={16} />
+      <span>{label}</span>
+      {badge ? <span className="reports-nav-badge mono">{badge}</span> : null}
+    </button>
   );
 }
 

@@ -12,6 +12,9 @@ public static class ReportEndpoints
 
         reports.MapGet("/", async (ReportQueries r, CancellationToken ct) => new ReportsInfo(await r.AdvancedAsync(ct)));
 
+        // Resumen (decisión 92): básico; los indicadores avanzados solo salen si el plan los incluye.
+        reports.MapGet("/resumen", (ReportQueries r, CancellationToken ct, DateOnly? desde, DateOnly? hasta, int? sucursal, int? departamento) =>
+            Basic(Filter(desde, hasta, sucursal, departamento), f => r.SummaryAsync(f, ct)));
         reports.MapGet("/inventario", (ReportQueries r, CancellationToken ct, int? sucursal, int? departamento) =>
             Basic(Filter(null, null, sucursal, departamento), f => r.InventoryAsync(f, ct)));
         reports.MapGet("/disponibilidad", (ReportQueries r, CancellationToken ct, DateOnly? desde, DateOnly? hasta, int? sucursal, int? departamento) =>

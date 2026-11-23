@@ -92,6 +92,42 @@ public sealed class ReportTests(TestDatabase database) : IAsyncLifetime
     }
 
     [DatabaseFact]
+    public async Task The_summary_compares_with_the_previous_period_and_only_shows_advanced_kpis_with_the_module()
+    {
+        var basic = _api.ClientWith(await _api.TokenForAsync(Rafael, "Supervisor"));
+        var summary = await basic.GetFromJsonAsync<JsonElement>("/api/v1/reportes/resumen?desde=2026-11-01&hasta=2026-11-10");
+        summary.GetProperty("previousFrom").GetString().Should().Be("2026-10-22");
+        summary.GetProperty("previousTo").GetString().Should().Be("2026-10-31");
+        summary.GetProperty("advanced").GetBoolean().Should().BeFalse();
+        var keys = summary.GetProperty("kpis").EnumerateArray().Select(k => k.GetProperty("key").GetString()).ToList();
+        keys.Should().Contain(["disponibilidad", "alertas", "discos_riesgo"]).And.NotContain(["cpu", "tickets_creados"]);
+        summary.GetProperty("kpis").EnumerateArray().Single(k => k.GetProperty("key").GetString() == "alertas")
+            .GetProperty("series").GetArrayLength().Should().Be(10);
+
+        var enterprise = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));
+        var full = await enterprise.GetFromJsonAsync<JsonElement>("/api/v1/reportes/resumen");
+        full.GetProperty("kpis").EnumerateArray().Select(k => k.GetProperty("key").GetString())
+            .Should().Contain(["cpu", "ram", "tickets_creados", "sesiones_remotas"]);
+        (await enterprise.GetAsync("/api/v1/reportes/resumen?desde=2026-10-10&hasta=2026-10-01")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [DatabaseFact]
+    public async Task Availability_has_one_heatmap_cell_per_day_or_per_week_past_92_days()
+    {
+        var admin = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));
+        var month = await admin.GetFromJsonAsync<JsonElement>("/api/v1/reportes/disponibilidad");
+        month.GetProperty("machines").GetArrayLength().Should().BePositive();
+        month.GetProperty("bucketDays").GetInt32().Should().Be(1);
+        month.GetProperty("buckets").GetArrayLength().Should().Be(30);
+        month.GetProperty("fleetTrend").GetArrayLength().Should().Be(30);
+        month.GetProperty("machines").EnumerateArray().Should().OnlyContain(m => m.GetProperty("cells").GetArrayLength() == 30);
+
+        var year = await admin.GetFromJsonAsync<JsonElement>("/api/v1/reportes/disponibilidad?desde=2026-01-01&hasta=2026-12-31");
+        year.GetProperty("bucketDays").GetInt32().Should().Be(7);
+        year.GetProperty("buckets").GetArrayLength().Should().Be(53);
+    }
+
+    [DatabaseFact]
     public async Task The_period_must_be_valid()
     {
         var admin = _api.ClientWith(await _api.TokenForAsync(Caribe, "Administrador"));

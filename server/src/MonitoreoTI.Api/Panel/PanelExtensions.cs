@@ -68,6 +68,7 @@ public static class PanelExtensions
         services.AddSingleton<IValidator<ImportInput>, ImportInputValidator>();
         services.AddSingleton<IValidator<RoomInput>, RoomInputValidator>();
         services.AddSingleton<IValidator<RackInput>, RackInputValidator>();
+        services.AddSingleton<IValidator<RoomLayoutInput>, RoomLayoutInputValidator>();
         services.AddSingleton<IValidator<DeviceModelInput>, DeviceModelInputValidator>();
         services.AddSingleton<IValidator<DeviceInput>, DeviceInputValidator>();
         services.AddSingleton<IValidator<ApiTestInput>, ApiTestInputValidator>();

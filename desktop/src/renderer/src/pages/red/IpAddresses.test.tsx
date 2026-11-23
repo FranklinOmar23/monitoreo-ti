@@ -203,6 +203,38 @@ describe('Direcciones IP (decisión 72)', () => {
     await waitFor(() => expect(ipHistory).toHaveBeenCalledWith(3, '192.168.3.3', 90));
   });
 
+  it('el historial va de a 10', async () => {
+    const entries = Array.from({ length: 23 }, (_, i) => ({
+      mac: `00:0C:29:00:00:${String(i).padStart(2, '0')}`,
+      vendor: null,
+      machineId: null,
+      machineName: null,
+      source: 'arp' as const,
+      from: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
+      to: new Date(Date.now() - i * 3_600_000).toISOString(),
+      current: i === 0,
+    }));
+    renderWithPanel(
+      <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="ips" />,
+      fakePanelApi({
+        red: fakeNetworkApi({
+          subnets: () => Promise.resolve([subnet]),
+          subnet: () => Promise.resolve(detail),
+          ipHistory: () => Promise.resolve(entries),
+        }),
+      }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /192\.168\.3\.3: Sin identificar/ }));
+    const history = await screen.findByRole('region', { name: 'Historial de 192.168.3.3' });
+    await within(history).findByText('00:0C:29:00:00:00');
+    expect(within(history).getAllByRole('listitem')).toHaveLength(10);
+    expect(within(history).queryByText('00:0C:29:00:00:10')).toBeNull();
+
+    fireEvent.click(within(history).getByRole('button', { name: /Siguiente/ }));
+    expect(await within(history).findByText('00:0C:29:00:00:10')).toBeTruthy();
+    expect(within(history).getAllByRole('listitem')).toHaveLength(10);
+  });
+
   it('"Ver en el mapa" elige la sugerida y la hace destellar', async () => {
     renderWithPanel(
       <RedPage canEdit onOpenEquipo={vi.fn()} initialTab="ips" />,

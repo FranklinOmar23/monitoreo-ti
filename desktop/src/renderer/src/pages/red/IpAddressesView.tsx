@@ -1,3 +1,4 @@
+import { Pager } from '@components/Pager';
 import { useMemo, useState, type ReactNode } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { IpHistoryItem, IpItem, IpState, SubnetItem } from '@monitoreoti/shared';
@@ -180,6 +181,7 @@ function SubnetView({
   if (detail.isPending) return <Loading variant="dashboard" />;
   if (detail.isError) return <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />;
   const { subnet, addresses, reservations, suggested } = detail.data;
+  const macChanges = addresses.filter((a) => a.macChanged).length;
   const prefix = Number(subnet.cidr.split('/')[1]);
   const sweeping = subnet.sweepRequestedAt !== null || sweep.isPending;
 
@@ -340,6 +342,15 @@ function SubnetView({
                   {IP_STATE_LABEL[state]}
                 </button>
               ))}
+              {macChanges > 0 && (
+                <span
+                  className="ip-legend-item ip-legend-mac"
+                  title="La IP pasó a otra tarjeta de red en los últimos 7 días: un equipo reemplazado o dos equipos con la misma IP."
+                >
+                  <b aria-hidden="true">!</b>
+                  Cambió de MAC ({macChanges})
+                </span>
+              )}
             </div>
           }
         >
@@ -355,11 +366,16 @@ function SubnetView({
                 data-dim={hidden.has(a.state) || undefined}
                 data-warn={a.macChanged || undefined}
                 aria-pressed={selected?.ip === a.ip}
-                aria-label={`${a.ip}: ${IP_STATE_LABEL[a.state]}${(a.machineName ?? a.hostname) ? `, ${a.machineName ?? a.hostname}` : ''}`}
-                title={`${a.ip} · ${IP_STATE_LABEL[a.state]}${(a.machineName ?? a.hostname) ? ` · ${a.machineName ?? a.hostname}` : ''}${a.reservation ? ` · ${a.reservation}` : ''}`}
+                aria-label={`${a.ip}: ${IP_STATE_LABEL[a.state]}${(a.machineName ?? a.hostname) ? `, ${a.machineName ?? a.hostname}` : ''}${a.macChanged ? ', cambió de MAC' : ''}`}
+                title={`${a.ip} · ${IP_STATE_LABEL[a.state]}${(a.machineName ?? a.hostname) ? ` · ${a.machineName ?? a.hostname}` : ''}${a.reservation ? ` · ${a.reservation}` : ''}${a.macChanged ? ` · Cambió de MAC (antes ${a.previousMac ?? '—'}): equipo reemplazado o IP duplicada` : ''}`}
                 onClick={() => setSelectedIp(a.ip)}
               >
                 {cellLabel(a.ip, prefix)}
+                {a.macChanged && (
+                  <b className="ip-cell-flag" aria-hidden="true">
+                    !
+                  </b>
+                )}
               </button>
             ))}
           </div>
@@ -607,6 +623,8 @@ const SOURCE_LABEL: Record<IpHistoryItem['source'], string> = {
 };
 
 /** Quién tuvo la dirección en los últimos días: un período por equipo, lo más reciente arriba. */
+const HISTORY_PAGE = 10;
+
 function IpHistory({
   subnetId,
   ip,
@@ -622,6 +640,14 @@ function IpHistory({
     queryKey: ['red', 'subredes', subnetId, 'historial', ip, days],
     queryFn: () => api.red.ipHistory(subnetId, ip, days),
   });
+  // De a HISTORY_PAGE: una IP que cambia de equipo seguido (dos equipos con la misma IP) llena el historial. Al cambiar
+  // de IP o de período se vuelve a la primera página.
+  const [paging, setPaging] = useState({ key: '', page: 1 });
+  const pagingKey = `${ip}|${days}`;
+  const entries = history.data ?? [];
+  const totalPages = Math.max(1, Math.ceil(entries.length / HISTORY_PAGE));
+  const page = Math.min(paging.key === pagingKey ? paging.page : 1, totalPages);
+  const visible = entries.slice((page - 1) * HISTORY_PAGE, page * HISTORY_PAGE);
 
   return (
     <section className="ip-history" aria-label={`Historial de ${ip}`}>
@@ -642,28 +668,46 @@ function IpHistory({
       ) : history.data.length === 0 ? (
         <p className="ip-note">Nadie la usó en los últimos {days} días.</p>
       ) : (
-        <ol className="ip-history-list">
-          {history.data.map((h) => (
-            <li key={`${h.from}-${h.mac ?? h.machineId ?? ''}`} data-current={h.current || undefined}>
-              <span className="ip-history-who">
-                {h.machineId !== null && h.machineName ? (
-                  <button type="button" className="link-quiet mono" onClick={() => onOpenEquipo(h.machineId!)}>
-                    {h.machineName}
-                  </button>
-                ) : (
-                  <span className="mono">{h.machineName ?? h.mac ?? 'Equipo sin identificar'}</span>
-                )}
-                {h.current && <span className="ip-history-now">Ahora</span>}
-              </span>
-              <span className="ip-history-when mono">
-                {shortDateTime(h.from)} → {h.current ? 'ahora' : shortDateTime(h.to)}
-              </span>
-              <span className="ip-history-meta">
-                {[h.machineName && h.mac ? h.mac : null, h.vendor, SOURCE_LABEL[h.source]].filter(Boolean).join(' · ')}
-              </span>
-            </li>
-          ))}
-        </ol>
+        <>
+          <ol className="ip-history-list">
+            {visible.map((h) => (
+              <li key={`${h.from}-${h.mac ?? h.machineId ?? ''}`} data-current={h.current || undefined}>
+                <span className="ip-history-who">
+                  {h.machineId !== null && h.machineName ? (
+                    <button type="button" className="link-quiet mono" onClick={() => onOpenEquipo(h.machineId!)}>
+                      {h.machineName}
+                    </button>
+                  ) : (
+                    <span className="mono">{h.machineName ?? h.mac ?? 'Equipo sin identificar'}</span>
+                  )}
+                  {h.current && <span className="ip-history-now">Ahora</span>}
+                </span>
+                <span className="ip-history-when mono">
+                  {shortDateTime(h.from)} → {h.current ? 'ahora' : shortDateTime(h.to)}
+                </span>
+                <span className="ip-history-meta">
+                  {[h.machineName && h.mac ? h.mac : null, h.vendor, SOURCE_LABEL[h.source]]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ol>
+          {totalPages > 1 && (
+            <Pager
+              noun="cambios"
+              onPage={(next) => setPaging({ key: pagingKey, page: next })}
+              data={{
+                data: visible,
+                page,
+                limit: HISTORY_PAGE,
+                total: entries.length,
+                totalPages,
+                isThereNextPage: page < totalPages,
+              }}
+            />
+          )}
+        </>
       )}
     </section>
   );

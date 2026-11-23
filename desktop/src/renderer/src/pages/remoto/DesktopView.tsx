@@ -30,6 +30,10 @@ export type DesktopEvent =
 export const STALL_FULL_MS = 4_000;
 /** Cuadros de video que no salen del decodificador (en más de 1 s cada uno) antes de crear otro. */
 export const DECODER_STUCK_FRAMES = 3;
+/** Cada cuánto se vuelve a pedir el cuadro clave mientras no llega. */
+export const KEY_RETRY_MS = 1_000;
+/** Con el técnico usando el mouse o el teclado, sin imagen en este tiempo se pide la pantalla entera. */
+export const NUDGE_MS = 3_000;
 export const STALL_RECONNECT_MS = 8_000;
 
 /** Latencia (ida y vuelta, ms), cuadros por segundo y consumo (Mb/s) del último segundo. */
@@ -291,7 +295,49 @@ export function DesktopView({
         callbacks.current.onEvent?.({ kind: 'sin_respuesta' });
       }
     }, 1000);
+    // Diagnóstico (decisión 93): si la imagen no se mueve mientras el técnico usa el mouse o el teclado, o mientras
+    // siguen llegando datos, se anota el estado del video en la consola (como mucho cada 5 s) para saber de qué lado se
+    // cortó: si el equipo dejó de mandar, si llega y no se decodifica o si el dibujo quedó esperando.
+    let received = 0;
+    let lastBinaryAt = 0;
+    let lastPongAt = 0;
+    let inputs = 0;
+    let queuedDraws = 0;
+    let lastReport = 0;
+    const report = () => {
+      const now = performance.now();
+      if (first || frames > 0 || (inputs === 0 && received === 0) || now - lastReport < 5000) return;
+      lastReport = now;
+      const ago = (t: number) => (t ? Math.round(now - t) : null);
+      console.warn('[escritorio] imagen quieta', {
+        codec,
+        recibidosUltimoSegundo: received,
+        entradasUltimoSegundo: inputs,
+        msDesdeUltimoBinario: ago(lastBinaryAt),
+        msDesdeUltimoPong: ago(lastPongAt),
+        sinConfirmar: pending.length,
+        esperaCuadroClave: needKey,
+        decodificador: decoder?.state ?? null,
+        colaDecodificador: decoder && decoder.state !== 'closed' ? decoder.decodeQueueSize : null,
+        dibujosEnCola: queuedDraws,
+      });
+    };
+    // El técnico usa el mouse o el teclado y en NUDGE_MS no llega imagen aunque el canal responde: se pide la pantalla
+    // entera (el equipo vuelve a crear el codificador si no le da un cuadro clave, decisión 93).
+    let lastInputAt = 0;
+    let lastNudge = 0;
+    const nudge = () => {
+      const now = performance.now();
+      if (first || now - lastInputAt > 1500 || now - Math.max(lastBinaryAt, lastNudge) < NUDGE_MS) return;
+      lastNudge = now;
+      send({ tipo: 'completo' });
+    };
     const stats = setInterval(() => {
+      if (inputs > 0) lastInputAt = performance.now();
+      nudge();
+      report();
+      received = 0;
+      inputs = 0;
       callbacks.current.onStats?.({
         latency,
         fps: frames,
@@ -343,6 +389,7 @@ export function DesktopView({
       if (stuckFrames >= DECODER_STUCK_FRAMES && decoder) {
         stuckFrames = 0;
         preferSoftware = true;
+        console.warn('[escritorio] el decodificador dejó de entregar cuadros; se crea otro por software');
         resetDecoder();
         requestKey();
         callbacks.current.onEvent?.({
@@ -357,11 +404,18 @@ export function DesktopView({
       needKey = true;
       while (pending.length) ackVideo();
     };
+    // Mientras falte el cuadro clave se vuelve a pedir cada KEY_RETRY_MS: si el pedido se perdió o el equipo no lo
+    // pudo dar a la primera, pedirlo una sola vez dejaba la imagen quieta para siempre (0 fps).
+    let askedKeyAt = 0;
     const requestKey = () => {
-      if (askedKey) return;
+      if (askedKey && performance.now() - askedKeyAt < KEY_RETRY_MS) return;
       askedKey = true;
+      askedKeyAt = performance.now();
       send({ tipo: 'completo' });
     };
+    const keyRetry = setInterval(() => {
+      if (askedKey && needKey) requestKey();
+    }, KEY_RETRY_MS);
     const decodeVideo = (video: VideoUpdate) => {
       if (video.key) {
         // Cuadro clave con otro perfil o nivel: un decodificador nuevo.
@@ -380,8 +434,9 @@ export function DesktopView({
               stuckFrames = 0;
               ackVideo();
             },
-            error: () => {
+            error: (error) => {
               // Un cuadro dañado: se pide uno clave y se vuelve a empezar.
+              console.warn('[escritorio] error del decodificador', String(error));
               resetDecoder();
               requestKey();
             },
@@ -428,6 +483,8 @@ export function DesktopView({
       alive();
       if (event.data instanceof ArrayBuffer) {
         bytes += event.data.byteLength;
+        received++;
+        lastBinaryAt = performance.now();
         const video = typeof VideoDecoder === 'undefined' ? null : parseVideoUpdate(event.data);
         if (video) {
           codec = 'h264';
@@ -442,10 +499,14 @@ export function DesktopView({
           return;
         }
         // En orden, y se confirma cuando ya está dibujada: así la pantalla nunca se atrasa más de dos actualizaciones.
+        queuedDraws++;
         drawing = drawing
           .then(() => draw(update))
           .catch(() => undefined)
-          .then(() => send({ tipo: 'ack' }));
+          .then(() => {
+            queuedDraws--;
+            send({ tipo: 'ack' });
+          });
         return;
       }
       if (typeof event.data !== 'string') return;
@@ -457,8 +518,11 @@ export function DesktopView({
       }
       if (message['tipo'] === 'pong') {
         latency = Math.round(performance.now() - Number(message['t'] ?? 0));
+        lastPongAt = performance.now();
         return;
       }
+      if (['recuperada', 'aviso', 'error', 'diagnostico', 'escritorio'].includes(String(message['tipo'])))
+        console.warn('[escritorio] del equipo', message);
       const parsed = desktopEvent(message);
       if (parsed) callbacks.current.onEvent?.(parsed);
     };
@@ -487,6 +551,7 @@ export function DesktopView({
       frame ||= requestAnimationFrame(() => {
         frame = 0;
         if (pendingMove) send({ tipo: 'raton', accion: 'mover', ...pendingMove });
+        inputs++;
         pendingMove = null;
       });
     };
@@ -494,6 +559,7 @@ export function DesktopView({
       event.preventDefault();
       element.focus();
       if (!control()) return;
+      inputs++;
       send({
         tipo: 'raton',
         accion: event.type === 'mousedown' ? 'abajo' : 'arriba',
@@ -517,6 +583,7 @@ export function DesktopView({
       const down = event.type === 'keydown';
       if (down) pressed.add(event.code);
       else pressed.delete(event.code);
+      inputs++;
       send({ tipo: 'tecla', codigo: event.code, abajo: down });
     };
     // Al salir de la ventana se sueltan las teclas apretadas (si no, un Ctrl o un Shift quedaría pegado en el equipo).
@@ -542,6 +609,7 @@ export function DesktopView({
       clearInterval(liveness);
       clearInterval(stats);
       clearInterval(watchdog);
+      clearInterval(keyRetry);
       if (decoder && decoder.state !== 'closed') decoder.close();
       resizing.disconnect();
       cancelAnimationFrame(frame);

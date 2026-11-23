@@ -24,11 +24,22 @@ public sealed record InventoryReport(int Total, IReadOnlyList<CountItem> ByType,
 
 // ------------------------------------------------------------------ disponibilidad
 
-/// <summary>Horas con datos frente a horas del periodo (desde el alta del equipo si fue después).</summary>
-public sealed record AvailabilityRow(int Id, string Name, string BranchName, int HoursOnline, int HoursInPeriod, decimal Percent, DateTime? LastReportAt);
+/// <summary>
+/// Horas con datos frente a horas del periodo (desde el alta del equipo si fue después). Cells: el porcentaje en línea
+/// de cada tramo de <see cref="AvailabilityReport.Buckets"/> (null si el equipo aún no existía o el tramo no ha empezado).
+/// </summary>
+public sealed record AvailabilityRow(
+    int Id, string Name, string BranchName, int HoursOnline, int HoursInPeriod, decimal Percent, DateTime? LastReportAt,
+    IReadOnlyList<decimal?> Cells);
 
-/// <summary>Days viene de la foto diaria de toda la empresa: vacío si el usuario o el filtro limitan las sucursales.</summary>
-public sealed record AvailabilityReport(decimal AveragePercent, IReadOnlyList<DailyHealth> Days, IReadOnlyList<AvailabilityRow> Machines);
+/// <summary>
+/// Days viene de la foto diaria de toda la empresa: vacío si el usuario o el filtro limitan las sucursales.
+/// Buckets: el inicio de cada tramo del mapa de calor (de un día, o de una semana si el periodo pasa de 92 días);
+/// FleetTrend: el promedio de la flota en cada tramo (decisión 92).
+/// </summary>
+public sealed record AvailabilityReport(
+    decimal AveragePercent, IReadOnlyList<DailyHealth> Days, IReadOnlyList<AvailabilityRow> Machines,
+    IReadOnlyList<DateOnly> Buckets, int BucketDays, IReadOnlyList<decimal?> FleetTrend);
 
 // ------------------------------------------------------------------ alertas
 
@@ -91,3 +102,28 @@ public sealed record RemoteSessionRow(
 
 /// <summary>Rows: las 500 más recientes del periodo.</summary>
 public sealed record RemoteReport(int Sessions, int Minutes, IReadOnlyList<RemoteTechnician> Technicians, IReadOnlyList<RemoteSessionRow> Rows);
+
+// ------------------------------------------------------------------ resumen (decisión 92)
+
+/// <summary>
+/// Un indicador del resumen: el valor del periodo, el del periodo anterior de igual duración (null si es la foto de hoy)
+/// y la serie diaria para la línea de tendencia (vacía si no aplica). Key: disponibilidad, equipos, alertas,
+/// alertas_criticas, resolucion_alertas, discos_riesgo, seguridad y, con reportes avanzados, cpu, ram,
+/// tickets_creados, tickets_abiertos, resolucion_tickets, sesiones_remotas, horas_remotas.
+/// </summary>
+public sealed record SummaryKpi(string Key, decimal? Value, decimal? Previous, IReadOnlyList<decimal?> Series);
+
+public sealed record MachineRef(int Id, string Name);
+
+/// <summary>
+/// Algo que requiere atención. Code: disco_falla, sin_proteccion, disco_lleno, baja_disponibilidad, alertas_abiertas,
+/// antivirus_desactualizado y, con reportes avanzados, ampliar_ram, revisar_cpu, mantenimientos_vencidos.
+/// Level: critico o advertencia. Report: el reporte que lo explica. Machines: hasta 5 equipos de ejemplo.
+/// </summary>
+public sealed record AttentionItem(string Code, string Level, string Report, int Count, IReadOnlyList<MachineRef> Machines);
+
+public sealed record BranchSummary(string Name, int Machines, decimal? Availability, int Alerts);
+
+public sealed record ReportSummary(
+    DateOnly PreviousFrom, DateOnly PreviousTo, bool Advanced, IReadOnlyList<SummaryKpi> Kpis,
+    IReadOnlyList<AttentionItem> Attention, IReadOnlyList<BranchSummary> Branches);
